@@ -13,13 +13,15 @@ import { X, Save, RotateCcw } from 'lucide-react';
 interface QAPModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (qaps: QAPSpecification[]) => void;
+  onSave: (qaps: QAPSpecification[], customerName: string) => void;
   nextSno: number;
+  editingQAP?: { qaps: QAPSpecification[]; customerName: string } | null;
 }
 
-const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno }) => {
+const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, editingQAP }) => {
+  const [customerName, setCustomerName] = useState(editingQAP?.customerName || '');
   const [formData, setFormData] = useState<QAPSpecification[]>(
-    qapSpecifications.map((spec, index) => ({
+    editingQAP?.qaps || qapSpecifications.map((spec, index) => ({
       ...spec,
       sno: nextSno + index,
       match: undefined,
@@ -50,14 +52,29 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno })
   };
 
   const handleSave = () => {
-    console.log('Saving QAPs:', formData);
-    onSave(formData);
+    if (!customerName.trim()) {
+      alert('Please enter customer name');
+      return;
+    }
+    console.log('Saving QAPs:', formData, 'Customer:', customerName);
+    onSave(formData, customerName);
     onClose();
+    // Reset form
+    setCustomerName('');
+    setFormData(
+      qapSpecifications.map((spec, index) => ({
+        ...spec,
+        sno: nextSno + index,
+        match: undefined,
+        customerSpecification: undefined
+      }))
+    );
   };
 
   const handleReset = () => {
+    setCustomerName(editingQAP?.customerName || '');
     setFormData(
-      qapSpecifications.map((spec, index) => ({
+      editingQAP?.qaps || qapSpecifications.map((spec, index) => ({
         ...spec,
         sno: nextSno + index,
         match: undefined,
@@ -81,7 +98,7 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno })
               <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center">
                 📋
               </div>
-              New Customer QAP Processing
+              {editingQAP ? 'Edit Customer QAP' : 'New Customer QAP Processing'}
             </DialogTitle>
             <div className="flex gap-2">
               <Button onClick={handleReset} variant="outline" size="sm" className="bg-white/10 border-white/20 text-white hover:bg-white/20">
@@ -96,6 +113,21 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno })
         </DialogHeader>
         
         <div className="flex-1 overflow-auto p-6">
+          {/* Customer Name Input */}
+          <div className="mb-6 bg-blue-50 p-4 rounded-lg border border-blue-200">
+            <Label htmlFor="customerName" className="text-sm font-medium text-gray-700 mb-2 block">
+              Customer Name *
+            </Label>
+            <Input
+              id="customerName"
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+              placeholder="Enter customer name..."
+              className="max-w-md"
+              required
+            />
+          </div>
+
           <div className="mb-4 text-sm text-gray-600 bg-blue-50 p-3 rounded-lg border border-blue-200">
             💡 <strong>Instructions:</strong> Select "Yes" if your customer specification matches the Premier Specification (it will auto-fill and highlight green). 
             Select "No" to enter a custom specification manually (will highlight red).
@@ -189,7 +221,7 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno })
               </Button>
               <Button onClick={handleSave} className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700">
                 <Save className="w-4 h-4 mr-2" />
-                Save QAP Processing
+                {editingQAP ? 'Update QAP' : 'Save QAP Processing'}
               </Button>
             </div>
           </div>
