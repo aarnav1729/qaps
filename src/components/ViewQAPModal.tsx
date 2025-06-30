@@ -4,7 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { QAPSpecification } from '@/data/qapSpecifications';
-import { X, User } from 'lucide-react';
+import { User } from 'lucide-react';
 
 interface ViewQAPModalProps {
   isOpen: boolean;
@@ -23,37 +23,32 @@ const ViewQAPModal: React.FC<ViewQAPModalProps> = ({ isOpen, onClose, customerNa
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-7xl max-h-[90vh] flex flex-col p-0">
-        <DialogHeader className="p-6 pb-4 border-b bg-gradient-to-r from-green-600 to-emerald-600 text-white">
-          <div className="flex items-center justify-between">
-            <DialogTitle className="text-2xl font-bold flex items-center gap-3">
-              <div className="w-10 h-10 bg-white/20 rounded-lg flex items-center justify-center">
-                <User className="w-6 h-6" />
+        <DialogHeader className="p-4 sm:p-6 pb-4 border-b bg-gradient-to-r from-green-600 to-emerald-600 text-white">
+          <DialogTitle className="text-xl sm:text-2xl font-bold flex items-center gap-2 sm:gap-3">
+            <div className="w-8 sm:w-10 h-8 sm:h-10 bg-white/20 rounded-lg flex items-center justify-center">
+              <User className="w-4 sm:w-6 h-4 sm:h-6" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="truncate">{customerName} - QAP Details</div>
+              <div className="text-xs sm:text-sm font-normal text-green-100 mt-1">
+                {stats.total} specs • {stats.matched} matched • {stats.custom} custom
               </div>
-              <div>
-                <div>{customerName} - QAP Details</div>
-                <div className="text-sm font-normal text-green-100 mt-1">
-                  {stats.total} specifications • {stats.matched} matched • {stats.custom} custom
-                </div>
-              </div>
-            </DialogTitle>
-            <Button onClick={onClose} variant="ghost" size="sm" className="text-white hover:bg-white/20">
-              <X className="w-4 h-4" />
-            </Button>
-          </div>
+            </div>
+          </DialogTitle>
         </DialogHeader>
         
-        <div className="flex-1 overflow-auto p-6">
+        <div className="flex-1 overflow-auto p-4 sm:p-6">
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse border border-gray-300">
+            <table className="w-full border-collapse border border-gray-300 text-xs sm:text-sm">
               <thead>
                 <tr className="bg-gradient-to-r from-gray-100 to-gray-200">
-                  <th className="border border-gray-300 p-3 text-left text-sm font-semibold text-gray-700">S.No</th>
-                  <th className="border border-gray-300 p-3 text-left text-sm font-semibold text-gray-700">Category</th>
-                  <th className="border border-gray-300 p-3 text-left text-sm font-semibold text-gray-700">Subcategory</th>
-                  <th className="border border-gray-300 p-3 text-left text-sm font-semibold text-gray-700">Characteristic</th>
-                  <th className="border border-gray-300 p-3 text-left text-sm font-semibold text-gray-700">Premier Specification</th>
-                  <th className="border border-gray-300 p-3 text-left text-sm font-semibold text-gray-700">Match</th>
-                  <th className="border border-gray-300 p-3 text-left text-sm font-semibold text-gray-700">Customer Specification</th>
+                  <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">S.No</th>
+                  <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Category</th>
+                  <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Subcategory</th>
+                  <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Characteristic</th>
+                  <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Premier Specification</th>
+                  <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Match</th>
+                  <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Customer Specification</th>
                 </tr>
               </thead>
               <tbody>
@@ -64,36 +59,36 @@ const ViewQAPModal: React.FC<ViewQAPModalProps> = ({ isOpen, onClose, customerNa
                       qap.match === 'yes' ? 'bg-green-50' : qap.match === 'no' ? 'bg-red-50' : 'bg-white'
                     }`}
                   >
-                    <td className="border border-gray-300 p-3 text-sm font-medium">{qap.sno}</td>
-                    <td className="border border-gray-300 p-3 text-sm">
-                      <Badge variant="outline" className="bg-blue-100 text-blue-800">
+                    <td className="border border-gray-300 p-2 sm:p-3 font-medium">{qap.sno}</td>
+                    <td className="border border-gray-300 p-2 sm:p-3">
+                      <Badge variant="outline" className="bg-blue-100 text-blue-800 text-xs">
                         {qap.category}
                       </Badge>
                     </td>
-                    <td className="border border-gray-300 p-3 text-xs max-w-48">
+                    <td className="border border-gray-300 p-2 sm:p-3 max-w-32 sm:max-w-48">
                       <div className="break-words">{qap.subCategory}</div>
                     </td>
-                    <td className="border border-gray-300 p-3 text-xs max-w-48">
+                    <td className="border border-gray-300 p-2 sm:p-3 max-w-32 sm:max-w-48">
                       <div className="break-words">{qap.characteristic}</div>
                     </td>
-                    <td className="border border-gray-300 p-3 text-xs max-w-64">
+                    <td className="border border-gray-300 p-2 sm:p-3 max-w-48 sm:max-w-64">
                       <div className="break-words font-medium text-gray-700">
                         {qap.premierSpecification}
                       </div>
                     </td>
-                    <td className="border border-gray-300 p-3 text-sm">
+                    <td className="border border-gray-300 p-2 sm:p-3">
                       {qap.match && (
                         <Badge 
                           variant={qap.match === 'yes' ? 'default' : 'destructive'}
-                          className={qap.match === 'yes' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}
+                          className={`text-xs ${qap.match === 'yes' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}
                         >
                           {qap.match.toUpperCase()}
                         </Badge>
                       )}
                     </td>
-                    <td className="border border-gray-300 p-3 text-xs max-w-sm">
+                    <td className="border border-gray-300 p-2 sm:p-3 max-w-48 sm:max-w-sm">
                       <div 
-                        className={`p-2 rounded break-words ${
+                        className={`p-2 rounded break-words text-xs ${
                           qap.match === 'yes' 
                             ? 'bg-green-50 text-green-800 border border-green-200' 
                             : qap.match === 'no' 
@@ -111,8 +106,8 @@ const ViewQAPModal: React.FC<ViewQAPModalProps> = ({ isOpen, onClose, customerNa
           </div>
         </div>
         
-        <div className="p-6 pt-0 border-t bg-gray-50">
-          <div className="flex justify-between items-center">
+        <div className="p-4 sm:p-6 pt-0 border-t bg-gray-50">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div className="text-sm text-gray-600">
               <strong>{customerName}</strong> | 
               Total: <strong>{stats.total}</strong> | 
