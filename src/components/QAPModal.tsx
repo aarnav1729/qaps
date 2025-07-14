@@ -5,9 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { QAPSpecification, qapSpecifications } from '@/data/qapSpecifications';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { QAPSpecification, mqpSpecifications, visualElSpecifications } from '@/data/qapSpecifications';
 import { Save, RotateCcw } from 'lucide-react';
 
 interface QAPModalProps {
@@ -20,35 +20,51 @@ interface QAPModalProps {
 
 const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, editingQAP }) => {
   const [customerName, setCustomerName] = useState(editingQAP?.customerName || '');
-  const [formData, setFormData] = useState<QAPSpecification[]>(
-    editingQAP?.qaps || qapSpecifications.map((spec, index) => ({
+  const [mqpData, setMqpData] = useState<QAPSpecification[]>(
+    editingQAP?.qaps.filter(q => q.criteria === 'MQP') || 
+    mqpSpecifications.map((spec, index) => ({
       ...spec,
       sno: nextSno + index,
       match: undefined,
       customerSpecification: undefined
     }))
   );
+  const [visualElData, setVisualElData] = useState<QAPSpecification[]>(
+    editingQAP?.qaps.filter(q => q.criteria === 'Visual' || q.criteria === 'EL') || 
+    visualElSpecifications.map((spec, index) => ({
+      ...spec,
+      sno: nextSno + mqpSpecifications.length + index,
+      match: undefined,
+      customerSpecification: undefined
+    }))
+  );
 
-  console.log('Modal form data:', formData);
-
-  const handleMatchChange = (index: number, match: 'yes' | 'no') => {
-    const newFormData = [...formData];
-    newFormData[index] = {
-      ...newFormData[index],
+  const handleMatchChange = (section: 'mqp' | 'visual', index: number, match: 'yes' | 'no') => {
+    const updateSection = section === 'mqp' ? setMqpData : setVisualElData;
+    const currentData = section === 'mqp' ? mqpData : visualElData;
+    
+    const newData = [...currentData];
+    const spec = newData[index];
+    const premierSpec = spec.specification || spec.criteriaLimits || '';
+    
+    newData[index] = {
+      ...spec,
       match,
-      customerSpecification: match === 'yes' ? newFormData[index].premierSpecification : ''
+      customerSpecification: match === 'yes' ? premierSpec : ''
     };
-    setFormData(newFormData);
-    console.log('Updated item at index', index, ':', newFormData[index]);
+    updateSection(newData);
   };
 
-  const handleCustomerSpecChange = (index: number, value: string) => {
-    const newFormData = [...formData];
-    newFormData[index] = {
-      ...newFormData[index],
+  const handleCustomerSpecChange = (section: 'mqp' | 'visual', index: number, value: string) => {
+    const updateSection = section === 'mqp' ? setMqpData : setVisualElData;
+    const currentData = section === 'mqp' ? mqpData : visualElData;
+    
+    const newData = [...currentData];
+    newData[index] = {
+      ...newData[index],
       customerSpecification: value
     };
-    setFormData(newFormData);
+    updateSection(newData);
   };
 
   const handleSave = () => {
@@ -56,27 +72,43 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, e
       alert('Please enter customer name');
       return;
     }
-    console.log('Saving QAPs:', formData, 'Customer:', customerName);
-    onSave(formData, customerName);
+    
+    const allData = [...mqpData, ...visualElData];
+    onSave(allData, customerName);
     onClose();
+    
     // Reset form
     setCustomerName('');
-    setFormData(
-      qapSpecifications.map((spec, index) => ({
+    setMqpData(mqpSpecifications.map((spec, index) => ({
+      ...spec,
+      sno: nextSno + index,
+      match: undefined,
+      customerSpecification: undefined
+    })));
+    setVisualElData(visualElSpecifications.map((spec, index) => ({
+      ...spec,
+      sno: nextSno + mqpSpecifications.length + index,
+      match: undefined,
+      customerSpecification: undefined
+    })));
+  };
+
+  const handleReset = () => {
+    setCustomerName(editingQAP?.customerName || '');
+    setMqpData(
+      editingQAP?.qaps.filter(q => q.criteria === 'MQP') || 
+      mqpSpecifications.map((spec, index) => ({
         ...spec,
         sno: nextSno + index,
         match: undefined,
         customerSpecification: undefined
       }))
     );
-  };
-
-  const handleReset = () => {
-    setCustomerName(editingQAP?.customerName || '');
-    setFormData(
-      editingQAP?.qaps || qapSpecifications.map((spec, index) => ({
+    setVisualElData(
+      editingQAP?.qaps.filter(q => q.criteria === 'Visual' || q.criteria === 'EL') || 
+      visualElSpecifications.map((spec, index) => ({
         ...spec,
-        sno: nextSno + index,
+        sno: nextSno + mqpSpecifications.length + index,
         match: undefined,
         customerSpecification: undefined
       }))
@@ -89,9 +121,161 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, e
     return 'bg-white border-gray-200';
   };
 
+  const renderMQPTable = () => {
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse border border-gray-300 text-xs sm:text-sm">
+          <thead>
+            <tr className="bg-gradient-to-r from-gray-100 to-gray-200">
+              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-12">S.No</th>
+              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-20">Criteria</th>
+              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-24">Sub Criteria</th>
+              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-32">Component & Operation</th>
+              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-32">Characteristics</th>
+              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-20">Class</th>
+              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-24">Type of Check</th>
+              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-24">Sampling</th>
+              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-48">Specification</th>
+              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-20">Match?</th>
+              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-48">Customer Specification</th>
+            </tr>
+          </thead>
+          <tbody>
+            {mqpData.map((item, index) => (
+              <tr key={index} className={`border-b hover:bg-opacity-70 transition-colors ${getRowClassName(item)}`}>
+                <td className="border border-gray-300 p-2 sm:p-3 font-medium text-gray-600">{item.sno}</td>
+                <td className="border border-gray-300 p-2 sm:p-3">
+                  <Badge variant="outline" className="bg-blue-100 text-blue-800 border-blue-300 text-xs">
+                    {item.criteria}
+                  </Badge>
+                </td>
+                <td className="border border-gray-300 p-2 sm:p-3 max-w-24 break-words">{item.subCriteria}</td>
+                <td className="border border-gray-300 p-2 sm:p-3 max-w-32 break-words">{item.componentOperation}</td>
+                <td className="border border-gray-300 p-2 sm:p-3 max-w-32 break-words">{item.characteristics}</td>
+                <td className="border border-gray-300 p-2 sm:p-3">
+                  <Badge variant={item.class === 'Critical' ? 'destructive' : item.class === 'Major' ? 'default' : 'secondary'} className="text-xs">
+                    {item.class}
+                  </Badge>
+                </td>
+                <td className="border border-gray-300 p-2 sm:p-3 max-w-24 break-words text-xs">{item.typeOfCheck}</td>
+                <td className="border border-gray-300 p-2 sm:p-3 max-w-24 break-words text-xs">{item.sampling}</td>
+                <td className="border border-gray-300 p-2 sm:p-3 max-w-48 break-words font-medium text-gray-700 text-xs">{item.specification}</td>
+                <td className="border border-gray-300 p-2 sm:p-3">
+                  <Select
+                    value={item.match || ''}
+                    onValueChange={(value: 'yes' | 'no') => handleMatchChange('mqp', index, value)}
+                  >
+                    <SelectTrigger className="w-16 sm:w-20 h-8">
+                      <SelectValue placeholder="?" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="yes">Yes</SelectItem>
+                      <SelectItem value="no">No</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </td>
+                <td className="border border-gray-300 p-2 sm:p-3">
+                  <Input
+                    value={item.customerSpecification || ''}
+                    onChange={(e) => handleCustomerSpecChange('mqp', index, e.target.value)}
+                    placeholder={item.match === 'no' ? 'Enter custom specification...' : 'Auto-filled from Premier Spec'}
+                    disabled={item.match === 'yes'}
+                    className={`text-xs ${
+                      item.match === 'yes' 
+                        ? 'bg-green-100 text-green-800 border-green-300' 
+                        : item.match === 'no' 
+                        ? 'bg-red-50 border-red-300' 
+                        : 'bg-white'
+                    }`}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
+  const renderVisualElTable = () => {
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse border border-gray-300 text-xs sm:text-sm">
+          <thead>
+            <tr className="bg-gradient-to-r from-gray-100 to-gray-200">
+              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-12">S.No</th>
+              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-20">Criteria</th>
+              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-24">Sub-Criteria</th>
+              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-32">Defect</th>
+              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-20">Defect Class</th>
+              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-48">Description</th>
+              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-48">Criteria Limits</th>
+              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-20">Match?</th>
+              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-48">Customer Specification</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visualElData.map((item, index) => (
+              <tr key={index} className={`border-b hover:bg-opacity-70 transition-colors ${getRowClassName(item)}`}>
+                <td className="border border-gray-300 p-2 sm:p-3 font-medium text-gray-600">{item.sno}</td>
+                <td className="border border-gray-300 p-2 sm:p-3">
+                  <Badge variant="outline" className={`text-xs ${item.criteria === 'Visual' ? 'bg-purple-100 text-purple-800 border-purple-300' : 'bg-orange-100 text-orange-800 border-orange-300'}`}>
+                    {item.criteria}
+                  </Badge>
+                </td>
+                <td className="border border-gray-300 p-2 sm:p-3 max-w-24 break-words">{item.subCriteria}</td>
+                <td className="border border-gray-300 p-2 sm:p-3 max-w-32 break-words">{item.defect}</td>
+                <td className="border border-gray-300 p-2 sm:p-3">
+                  <Badge variant={item.defectClass === 'Critical' ? 'destructive' : item.defectClass === 'Major' ? 'default' : 'secondary'} className="text-xs">
+                    {item.defectClass}
+                  </Badge>
+                </td>
+                <td className="border border-gray-300 p-2 sm:p-3 max-w-48 break-words text-xs">{item.description}</td>
+                <td className="border border-gray-300 p-2 sm:p-3 max-w-48 break-words font-medium text-gray-700 text-xs">{item.criteriaLimits}</td>
+                <td className="border border-gray-300 p-2 sm:p-3">
+                  <Select
+                    value={item.match || ''}
+                    onValueChange={(value: 'yes' | 'no') => handleMatchChange('visual', index, value)}
+                  >
+                    <SelectTrigger className="w-16 sm:w-20 h-8">
+                      <SelectValue placeholder="?" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="yes">Yes</SelectItem>
+                      <SelectItem value="no">No</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </td>
+                <td className="border border-gray-300 p-2 sm:p-3">
+                  <Input
+                    value={item.customerSpecification || ''}
+                    onChange={(e) => handleCustomerSpecChange('visual', index, e.target.value)}
+                    placeholder={item.match === 'no' ? 'Enter custom specification...' : 'Auto-filled from Criteria Limits'}
+                    disabled={item.match === 'yes'}
+                    className={`text-xs ${
+                      item.match === 'yes' 
+                        ? 'bg-green-100 text-green-800 border-green-300' 
+                        : item.match === 'no' 
+                        ? 'bg-red-50 border-red-300' 
+                        : 'bg-white'
+                    }`}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
+  const totalItems = mqpData.length + visualElData.length;
+  const processedItems = [...mqpData, ...visualElData].filter(item => item.match).length;
+  const remainingItems = totalItems - processedItems;
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-7xl max-h-[90vh] flex flex-col p-0">
+      <DialogContent className="max-w-[95vw] max-h-[90vh] flex flex-col p-0">
         <DialogHeader className="p-4 sm:p-6 pb-4 border-b bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
           <div className="flex items-center justify-between">
             <DialogTitle className="text-xl sm:text-2xl font-bold flex items-center gap-2 sm:gap-3">
@@ -134,91 +318,38 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, e
           </div>
 
           <div className="mb-4 text-sm text-gray-600 bg-blue-50 p-3 rounded-lg border border-blue-200">
-            💡 <strong>Instructions:</strong> Select "Yes" if your customer specification matches the Premier Specification (it will auto-fill and highlight green). 
+            💡 <strong>Instructions:</strong> Select "Yes" if your customer specification matches the Premier Specification/Criteria Limits (it will auto-fill and highlight green). 
             Select "No" to enter a custom specification manually (will highlight red).
           </div>
-          
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse border border-gray-300 text-xs sm:text-sm">
-              <thead>
-                <tr className="bg-gradient-to-r from-gray-100 to-gray-200">
-                  <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-12 sm:min-w-16">S.No</th>
-                  <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-24 sm:min-w-32">Category</th>
-                  <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-32 sm:min-w-48">Subcategory</th>
-                  <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-32 sm:min-w-48">Characteristic</th>
-                  <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-48 sm:min-w-64">Premier Specification</th>
-                  <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-20 sm:min-w-24">Match?</th>
-                  <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700 min-w-48 sm:min-w-64">Customer Specification</th>
-                </tr>
-              </thead>
-              <tbody>
-                {formData.map((item, index) => (
-                  <tr key={index} className={`border-b hover:bg-opacity-70 transition-colors ${getRowClassName(item)}`}>
-                    <td className="border border-gray-300 p-2 sm:p-3 font-medium text-gray-600">
-                      {item.sno}
-                    </td>
-                    <td className="border border-gray-300 p-2 sm:p-3">
-                      <Badge variant="outline" className="bg-blue-100 text-blue-800 border-blue-300 text-xs">
-                        {item.category}
-                      </Badge>
-                    </td>
-                    <td className="border border-gray-300 p-2 sm:p-3 max-w-32 sm:max-w-48">
-                      <div className="break-words">
-                        {item.subCategory}
-                      </div>
-                    </td>
-                    <td className="border border-gray-300 p-2 sm:p-3 max-w-32 sm:max-w-48">
-                      <div className="break-words">
-                        {item.characteristic}
-                      </div>
-                    </td>
-                    <td className="border border-gray-300 p-2 sm:p-3 max-w-48 sm:max-w-64">
-                      <div className="break-words font-medium text-gray-700">
-                        {item.premierSpecification}
-                      </div>
-                    </td>
-                    <td className="border border-gray-300 p-2 sm:p-3">
-                      <Select
-                        value={item.match || ''}
-                        onValueChange={(value: 'yes' | 'no') => handleMatchChange(index, value)}
-                      >
-                        <SelectTrigger className="w-16 sm:w-20 h-8">
-                          <SelectValue placeholder="?" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="yes">Yes</SelectItem>
-                          <SelectItem value="no">No</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </td>
-                    <td className="border border-gray-300 p-2 sm:p-3">
-                      <Input
-                        value={item.customerSpecification || ''}
-                        onChange={(e) => handleCustomerSpecChange(index, e.target.value)}
-                        placeholder={item.match === 'no' ? 'Enter custom specification...' : 'Auto-filled from Premier Spec'}
-                        disabled={item.match === 'yes'}
-                        className={`${
-                          item.match === 'yes' 
-                            ? 'bg-green-100 text-green-800 border-green-300' 
-                            : item.match === 'no' 
-                            ? 'bg-red-50 border-red-300' 
-                            : 'bg-white'
-                        }`}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+
+          <Tabs defaultValue="mqp" className="w-full">
+            <TabsList className="grid w-full grid-cols-2 mb-4">
+              <TabsTrigger value="mqp" className="flex items-center gap-2">
+                <Badge variant="outline" className="bg-blue-100 text-blue-800 text-xs">MQP</Badge>
+                ({mqpData.length} items)
+              </TabsTrigger>
+              <TabsTrigger value="visual-el" className="flex items-center gap-2">
+                <Badge variant="outline" className="bg-purple-100 text-purple-800 text-xs">Visual & EL</Badge>
+                ({visualElData.length} items)
+              </TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="mqp" className="mt-0">
+              {renderMQPTable()}
+            </TabsContent>
+            
+            <TabsContent value="visual-el" className="mt-0">
+              {renderVisualElTable()}
+            </TabsContent>
+          </Tabs>
         </div>
         
         <div className="p-4 sm:p-6 pt-0 border-t bg-gray-50">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div className="text-sm text-gray-600">
-              Total Items: <strong>{formData.length}</strong> | 
-              Processed: <strong>{formData.filter(item => item.match).length}</strong> | 
-              Remaining: <strong>{formData.filter(item => !item.match).length}</strong>
+              Total Items: <strong>{totalItems}</strong> | 
+              Processed: <strong>{processedItems}</strong> | 
+              Remaining: <strong>{remainingItems}</strong>
             </div>
             <div className="flex gap-3 w-full sm:w-auto">
               <Button onClick={onClose} variant="outline" className="flex-1 sm:flex-none">
