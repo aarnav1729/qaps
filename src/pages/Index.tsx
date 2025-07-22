@@ -3,200 +3,277 @@ import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import QAPTable from '@/components/QAPTable';
 import QAPModal from '@/components/QAPModal';
 import ViewQAPModal from '@/components/ViewQAPModal';
-import { QAPSpecification } from '@/data/qapSpecifications';
-import { Plus, BarChart3, CheckCircle, XCircle, FileText, Users } from 'lucide-react';
-
-interface QAPGroup {
-  customerName: string;
-  qaps: QAPSpecification[];
-  id: string;
-}
+import { QAPFormData } from '@/types/qap';
+import { useAuth } from '@/contexts/AuthContext';
+import { Plus, BarChart3, CheckCircle, XCircle, FileText, Users, Search, Filter } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const Index = () => {
-  const [qapGroups, setQapGroups] = useState<QAPGroup[]>([]);
+  const { user } = useAuth();
+  const [qapData, setQapData] = useState<QAPFormData[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [editingGroup, setEditingGroup] = useState<QAPGroup | null>(null);
-  const [viewingGroup, setViewingGroup] = useState<QAPGroup | null>(null);
+  const [editingQAP, setEditingQAP] = useState<QAPFormData | null>(null);
+  const [viewingQAP, setViewingQAP] = useState<QAPFormData | null>(null);
+  
+  // Filtering and search
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [customerFilter, setCustomerFilter] = useState('all');
+  
+  console.log('Current QAP Data state:', qapData);
 
-  console.log('Current QAP Groups state:', qapGroups);
-
-  const handleSaveQAPs = (newQaps: QAPSpecification[], customerName: string) => {
-    console.log('Saving new QAPs:', newQaps, 'Customer:', customerName);
+  const handleSaveQAP = (newQAPData: QAPFormData) => {
+    console.log('Saving new QAP:', newQAPData);
     
-    if (editingGroup) {
-      // Update existing group
-      setQapGroups(prev => prev.map(group => 
-        group.id === editingGroup.id 
-          ? { ...group, customerName, qaps: newQaps }
-          : group
+    if (editingQAP) {
+      setQapData(prev => prev.map(qap => 
+        qap.id === editingQAP.id ? newQAPData : qap
       ));
-      setEditingGroup(null);
+      setEditingQAP(null);
     } else {
-      // Add new group
-      const newGroup: QAPGroup = {
-        id: Date.now().toString(),
-        customerName,
-        qaps: newQaps
-      };
-      setQapGroups(prevGroups => [...prevGroups, newGroup]);
+      setQapData(prevData => [...prevData, newQAPData]);
     }
   };
 
-  const handleView = (group: QAPGroup) => {
-    setViewingGroup(group);
+  const handleView = (qap: QAPFormData) => {
+    setViewingQAP(qap);
     setIsViewModalOpen(true);
   };
 
-  const handleEdit = (group: QAPGroup) => {
-    setEditingGroup(group);
+  const handleEdit = (qap: QAPFormData) => {
+    if (qap.status === 'submitted' || qap.status === 'approved') {
+      const reason = prompt('This QAP has been submitted/approved. Please provide a reason for editing:');
+      if (!reason) return;
+      
+      const updatedQAP = { ...qap, status: 'edit-requested' as const, editReason: reason };
+      setQapData(prev => prev.map(q => q.id === qap.id ? updatedQAP : q));
+    }
+    setEditingQAP(qap);
     setIsModalOpen(true);
   };
 
-  const handleDelete = (group: QAPGroup) => {
-    if (confirm(`Are you sure you want to delete QAPs for ${group.customerName}?`)) {
-      setQapGroups(prev => prev.filter(g => g.id !== group.id));
+  const handleDelete = (qap: QAPFormData) => {
+    if (qap.status !== 'draft') {
+      alert('Only draft QAPs can be deleted');
+      return;
+    }
+    
+    if (confirm(`Are you sure you want to delete QAP for ${qap.customerName} - ${qap.projectName}?`)) {
+      setQapData(prev => prev.filter(q => q.id !== qap.id));
     }
   };
 
-  const nextSno = qapGroups.length > 0 
-    ? Math.max(...qapGroups.flatMap(g => g.qaps.map(q => q.sno))) + 1 
+  const handleShare = (qap: QAPFormData) => {
+    if (qap.status !== 'submitted') {
+      alert('Only submitted QAPs can be shared');
+      return;
+    }
+    
+    // Implementation for sharing QAP to approvers
+    console.log('Sharing QAP to approvers:', qap);
+    alert(`QAP shared with ${qap.plant.toUpperCase()} plant approvers`);
+  };
+
+  const nextSno = qapData.length > 0 
+    ? Math.max(...qapData.flatMap(q => q.qaps.map(spec => spec.sno))) + 1 
     : 1;
 
+  // Filter QAPs based on search and filters
+  const filteredQAPs = qapData.filter(qap => {
+    const matchesSearch = !searchTerm || 
+      qap.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      qap.projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      qap.productType.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const matchesStatus = statusFilter === 'all' || qap.status === statusFilter;
+    const matchesCustomer = customerFilter === 'all' || qap.customerName === customerFilter;
+    
+    return matchesSearch && matchesStatus && matchesCustomer;
+  });
+
+  // Get unique customer names for filter
+  const uniqueCustomers = Array.from(new Set(qapData.map(qap => qap.customerName)));
+
   // Calculate overall stats
-  const allQaps = qapGroups.flatMap(g => g.qaps);
   const stats = {
-    customers: qapGroups.length,
-    total: allQaps.length,
-    matched: allQaps.filter(q => q.match === 'yes').length,
-    custom: allQaps.filter(q => q.match === 'no').length
+    total: qapData.length,
+    draft: qapData.filter(q => q.status === 'draft').length,
+    submitted: qapData.filter(q => q.status === 'submitted').length,
+    approved: qapData.filter(q => q.status === 'approved').length,
+    rejected: qapData.filter(q => q.status === 'rejected').length
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
+    <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
       {/* Header Section */}
-      <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg">
-        <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="flex-1 min-w-0">
-              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold mb-2 flex items-center gap-2 sm:gap-3">
-                <div className="w-10 sm:w-12 h-10 sm:h-12 bg-white/20 rounded-xl flex items-center justify-center text-lg sm:text-xl">
-                  📊
-                </div>
-                <span className="truncate">QAP Management System</span>
-              </h1>
-              <p className="text-blue-100 text-sm sm:text-base lg:text-lg">
-                Streamline your Quality Assurance Process with intelligent specification matching
-              </p>
-            </div>
-            <Button 
-              onClick={() => setIsModalOpen(true)}
-              size="lg"
-              className="bg-white text-blue-600 hover:bg-blue-50 font-semibold px-4 sm:px-6 py-2 sm:py-3 shadow-lg hover:shadow-xl transition-all duration-200 w-full sm:w-auto"
-            >
-              <Plus className="w-4 sm:w-5 h-4 sm:h-5 mr-2" />
-              New QAP
-            </Button>
-          </div>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">
+            My QAPs
+          </h1>
+          <p className="text-gray-600">
+            Manage your Quality Assurance Process specifications
+          </p>
         </div>
-      </div>
-
-      <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
-        {/* Statistics Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6 sm:mb-8">
-          <Card className="border-l-4 border-l-purple-500 shadow-md hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs sm:text-sm font-medium text-gray-600 flex items-center gap-2">
-                <Users className="w-3 sm:w-4 h-3 sm:h-4" />
-                <span className="hidden sm:inline">Total Customers</span>
-                <span className="sm:hidden">Customers</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl sm:text-3xl font-bold text-purple-600">{stats.customers}</div>
-              <p className="text-xs text-gray-500 mt-1">Active customers</p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-l-4 border-l-blue-500 shadow-md hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs sm:text-sm font-medium text-gray-600 flex items-center gap-2">
-                <FileText className="w-3 sm:w-4 h-3 sm:h-4" />
-                <span className="hidden sm:inline">Total QAPs</span>
-                <span className="sm:hidden">QAPs</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl sm:text-3xl font-bold text-blue-600">{stats.total}</div>
-              <p className="text-xs text-gray-500 mt-1">Processed specs</p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-l-4 border-l-green-500 shadow-md hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs sm:text-sm font-medium text-gray-600 flex items-center gap-2">
-                <CheckCircle className="w-3 sm:w-4 h-3 sm:h-4" />
-                <span className="hidden sm:inline">Matched Specs</span>
-                <span className="sm:hidden">Matched</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl sm:text-3xl font-bold text-green-600">{stats.matched}</div>
-              <p className="text-xs text-gray-500 mt-1">Auto-matched</p>
-            </CardContent>
-          </Card>
-
-          <Card className="border-l-4 border-l-red-500 shadow-md hover:shadow-lg transition-shadow">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs sm:text-sm font-medium text-gray-600 flex items-center gap-2">
-                <XCircle className="w-3 sm:w-4 h-3 sm:h-4" />
-                <span className="hidden sm:inline">Custom Specs</span>
-                <span className="sm:hidden">Custom</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl sm:text-3xl font-bold text-red-600">{stats.custom}</div>
-              <p className="text-xs text-gray-500 mt-1">Custom specs</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* QAP Table */}
-        <QAPTable 
-          qapGroups={qapGroups} 
-          onView={handleView}
-          onEdit={handleEdit}
-          onDelete={handleDelete}
-        />
-
-        {/* QAP Modal */}
-        <QAPModal
-          isOpen={isModalOpen}
-          onClose={() => {
-            setIsModalOpen(false);
-            setEditingGroup(null);
-          }}
-          onSave={handleSaveQAPs}
-          nextSno={nextSno}
-          editingQAP={editingGroup ? { qaps: editingGroup.qaps, customerName: editingGroup.customerName } : null}
-        />
-
-        {/* View QAP Modal */}
-        {viewingGroup && (
-          <ViewQAPModal
-            isOpen={isViewModalOpen}
-            onClose={() => {
-              setIsViewModalOpen(false);
-              setViewingGroup(null);
-            }}
-            customerName={viewingGroup.customerName}
-            qaps={viewingGroup.qaps}
-          />
+        
+        {(user?.role === 'requestor' || user?.role === 'admin') && (
+          <Button 
+            onClick={() => setIsModalOpen(true)}
+            size="lg"
+            className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700"
+          >
+            <Plus className="w-4 sm:w-5 h-4 sm:h-5 mr-2" />
+            New QAP
+          </Button>
         )}
       </div>
+
+      {/* Statistics Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 sm:gap-6 mb-6">
+        <Card className="border-l-4 border-l-blue-500 shadow-md hover:shadow-lg transition-shadow">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs sm:text-sm font-medium text-gray-600 flex items-center gap-2">
+              <FileText className="w-3 sm:w-4 h-3 sm:h-4" />
+              <span className="hidden sm:inline">Total QAPs</span>
+              <span className="sm:hidden">Total</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl sm:text-3xl font-bold text-blue-600">{stats.total}</div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-l-4 border-l-gray-500 shadow-md hover:shadow-lg transition-shadow">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs sm:text-sm font-medium text-gray-600">Draft</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl sm:text-3xl font-bold text-gray-600">{stats.draft}</div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-l-4 border-l-yellow-500 shadow-md hover:shadow-lg transition-shadow">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs sm:text-sm font-medium text-gray-600">Submitted</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl sm:text-3xl font-bold text-yellow-600">{stats.submitted}</div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-l-4 border-l-green-500 shadow-md hover:shadow-lg transition-shadow">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs sm:text-sm font-medium text-gray-600">Approved</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl sm:text-3xl font-bold text-green-600">{stats.approved}</div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-l-4 border-l-red-500 shadow-md hover:shadow-lg transition-shadow">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xs sm:text-sm font-medium text-gray-600">Rejected</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl sm:text-3xl font-bold text-red-600">{stats.rejected}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filters and Search */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Filter className="w-5 h-5" />
+            Filters & Search
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Search</label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <Input
+                  placeholder="Search by customer, project, or product..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Status</label>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  <SelectItem value="draft">Draft</SelectItem>
+                  <SelectItem value="submitted">Submitted</SelectItem>
+                  <SelectItem value="approved">Approved</SelectItem>
+                  <SelectItem value="rejected">Rejected</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Customer</label>
+              <Select value={customerFilter} onValueChange={setCustomerFilter}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Customers</SelectItem>
+                  {uniqueCustomers.map(customer => (
+                    <SelectItem key={customer} value={customer}>{customer}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* QAP Table */}
+      <QAPTable 
+        qapData={filteredQAPs}
+        onView={handleView}
+        onEdit={handleEdit}
+        onDelete={handleDelete}
+        onShare={handleShare}
+      />
+
+      {/* QAP Modal */}
+      <QAPModal
+        isOpen={isModalOpen}
+        onClose={() => {
+          setIsModalOpen(false);
+          setEditingQAP(null);
+        }}
+        onSave={handleSaveQAP}
+        nextSno={nextSno}
+        editingQAP={editingQAP}
+      />
+
+      {/* View QAP Modal */}
+      {viewingQAP && (
+        <ViewQAPModal
+          isOpen={isViewModalOpen}
+          onClose={() => {
+            setIsViewModalOpen(false);
+            setViewingQAP(null);
+          }}
+          qap={viewingQAP}
+        />
+      )}
     </div>
   );
 };
