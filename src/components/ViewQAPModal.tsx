@@ -3,226 +3,188 @@ import React from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { QAPSpecification } from '@/data/qapSpecifications';
-import { User } from 'lucide-react';
+import { QAPFormData } from '@/types/qap';
+import { X, Printer, Download } from 'lucide-react';
 
 interface ViewQAPModalProps {
   isOpen: boolean;
   onClose: () => void;
-  customerName: string;
-  qaps: QAPSpecification[];
+  qap: QAPFormData;
 }
 
-const ViewQAPModal: React.FC<ViewQAPModalProps> = ({ isOpen, onClose, customerName, qaps }) => {
-  const mqpData = qaps.filter(q => q.criteria === 'MQP');
-  const visualElData = qaps.filter(q => q.criteria === 'Visual' || q.criteria === 'EL');
-  
-  const stats = {
-    total: qaps.length,
-    matched: qaps.filter(q => q.match === 'yes').length,
-    custom: qaps.filter(q => q.match === 'no').length,
+const ViewQAPModal: React.FC<ViewQAPModalProps> = ({ isOpen, onClose, qap }) => {
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'draft': return 'bg-gray-100 text-gray-800';
+      case 'submitted': return 'bg-yellow-100 text-yellow-800';
+      case 'approved': return 'bg-green-100 text-green-800';
+      case 'rejected': return 'bg-red-100 text-red-800';
+      case 'edit-requested': return 'bg-orange-100 text-orange-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
   };
 
-  const renderMQPTable = () => {
+  const getRowClassName = (item: any) => {
+    if (item.match === 'yes') return 'bg-green-50 border-green-200';
+    if (item.match === 'no') return 'bg-red-50 border-red-200';
+    return 'bg-white border-gray-200';
+  };
+
+  const renderQAPTable = (data: any[], title: string) => {
+    if (data.length === 0) return null;
+
     return (
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse border border-gray-300 text-xs sm:text-sm">
-          <thead>
-            <tr className="bg-gradient-to-r from-gray-100 to-gray-200">
-              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">S.No</th>
-              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Criteria</th>
-              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Sub Criteria</th>
-              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Component & Operation</th>
-              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Characteristics</th>
-              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Class</th>
-              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Type of Check</th>
-              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Sampling</th>
-              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Specification</th>
-              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Match</th>
-              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Customer Specification</th>
-            </tr>
-          </thead>
-          <tbody>
-            {mqpData.map((qap, index) => (
-              <tr 
-                key={`${qap.sno}-${index}`} 
-                className={`border-b transition-colors ${
-                  qap.match === 'yes' ? 'bg-green-50' : qap.match === 'no' ? 'bg-red-50' : 'bg-white'
-                }`}
-              >
-                <td className="border border-gray-300 p-2 sm:p-3 font-medium">{qap.sno}</td>
-                <td className="border border-gray-300 p-2 sm:p-3">
-                  <Badge variant="outline" className="bg-blue-100 text-blue-800 text-xs">
-                    {qap.criteria}
-                  </Badge>
-                </td>
-                <td className="border border-gray-300 p-2 sm:p-3 max-w-24 break-words">{qap.subCriteria}</td>
-                <td className="border border-gray-300 p-2 sm:p-3 max-w-32 break-words">{qap.componentOperation}</td>
-                <td className="border border-gray-300 p-2 sm:p-3 max-w-32 break-words">{qap.characteristics}</td>
-                <td className="border border-gray-300 p-2 sm:p-3">
-                  <Badge variant={qap.class === 'Critical' ? 'destructive' : qap.class === 'Major' ? 'default' : 'secondary'} className="text-xs">
-                    {qap.class}
-                  </Badge>
-                </td>
-                <td className="border border-gray-300 p-2 sm:p-3 max-w-24 break-words text-xs">{qap.typeOfCheck}</td>
-                <td className="border border-gray-300 p-2 sm:p-3 max-w-24 break-words text-xs">{qap.sampling}</td>
-                <td className="border border-gray-300 p-2 sm:p-3 max-w-48 break-words font-medium text-gray-700 text-xs">{qap.specification}</td>
-                <td className="border border-gray-300 p-2 sm:p-3">
-                  {qap.match && (
-                    <Badge 
-                      variant={qap.match === 'yes' ? 'default' : 'destructive'}
-                      className={`text-xs ${qap.match === 'yes' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}
-                    >
-                      {qap.match.toUpperCase()}
-                    </Badge>
-                  )}
-                </td>
-                <td className="border border-gray-300 p-2 sm:p-3 max-w-48">
-                  <div 
-                    className={`p-2 rounded break-words text-xs ${
-                      qap.match === 'yes' 
-                        ? 'bg-green-50 text-green-800 border border-green-200' 
-                        : qap.match === 'no' 
-                        ? 'bg-red-50 text-red-800 border border-red-200' 
-                        : 'bg-gray-50'
-                    }`}
-                  >
-                    {qap.customerSpecification || '-'}
-                  </div>
-                </td>
+      <div className="mb-6">
+        <h3 className="text-lg font-semibold mb-3 text-gray-800">{title}</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse border border-gray-300 text-xs">
+            <thead>
+              <tr className="bg-gradient-to-r from-gray-100 to-gray-200">
+                <th className="border border-gray-300 p-2 text-left font-semibold">S.No</th>
+                <th className="border border-gray-300 p-2 text-left font-semibold">Criteria</th>
+                <th className="border border-gray-300 p-2 text-left font-semibold">Sub Criteria</th>
+                {title === 'MQP Specifications' ? (
+                  <>
+                    <th className="border border-gray-300 p-2 text-left font-semibold">Component & Operation</th>
+                    <th className="border border-gray-300 p-2 text-left font-semibold">Characteristics</th>
+                    <th className="border border-gray-300 p-2 text-left font-semibold">Class</th>
+                    <th className="border border-gray-300 p-2 text-left font-semibold">Type of Check</th>
+                    <th className="border border-gray-300 p-2 text-left font-semibold">Sampling</th>
+                    <th className="border border-gray-300 p-2 text-left font-semibold">Specification</th>
+                  </>
+                ) : (
+                  <>
+                    <th className="border border-gray-300 p-2 text-left font-semibold">Defect</th>
+                    <th className="border border-gray-300 p-2 text-left font-semibold">Defect Class</th>
+                    <th className="border border-gray-300 p-2 text-left font-semibold">Description</th>
+                    <th className="border border-gray-300 p-2 text-left font-semibold">Criteria Limits</th>
+                  </>
+                )}
+                <th className="border border-gray-300 p-2 text-left font-semibold">Match</th>
+                <th className="border border-gray-300 p-2 text-left font-semibold">Customer Specification</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data.map((item, index) => (
+                <tr key={index} className={`border-b ${getRowClassName(item)}`}>
+                  <td className="border border-gray-300 p-2">{item.sno}</td>
+                  <td className="border border-gray-300 p-2">
+                    <Badge variant="outline" className="text-xs">
+                      {item.criteria}
+                    </Badge>
+                  </td>
+                  <td className="border border-gray-300 p-2">{item.subCriteria}</td>
+                  {title === 'MQP Specifications' ? (
+                    <>
+                      <td className="border border-gray-300 p-2">{item.componentOperation}</td>
+                      <td className="border border-gray-300 p-2">{item.characteristics}</td>
+                      <td className="border border-gray-300 p-2">
+                        <Badge variant={item.class === 'Critical' ? 'destructive' : 'default'} className="text-xs">
+                          {item.class}
+                        </Badge>
+                      </td>
+                      <td className="border border-gray-300 p-2">{item.typeOfCheck}</td>
+                      <td className="border border-gray-300 p-2">{item.sampling}</td>
+                      <td className="border border-gray-300 p-2">{item.specification}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="border border-gray-300 p-2">{item.defect}</td>
+                      <td className="border border-gray-300 p-2">
+                        <Badge variant={item.defectClass === 'Critical' ? 'destructive' : 'default'} className="text-xs">
+                          {item.defectClass}
+                        </Badge>
+                      </td>
+                      <td className="border border-gray-300 p-2">{item.description}</td>
+                      <td className="border border-gray-300 p-2">{item.criteriaLimits}</td>
+                    </>
+                  )}
+                  <td className="border border-gray-300 p-2">
+                    <Badge variant={item.match === 'yes' ? 'default' : item.match === 'no' ? 'destructive' : 'secondary'} className="text-xs">
+                      {item.match || 'N/A'}
+                    </Badge>
+                  </td>
+                  <td className="border border-gray-300 p-2">{item.customerSpecification || '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     );
   };
 
-  const renderVisualElTable = () => {
-    return (
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse border border-gray-300 text-xs sm:text-sm">
-          <thead>
-            <tr className="bg-gradient-to-r from-gray-100 to-gray-200">
-              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">S.No</th>
-              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Criteria</th>
-              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Sub-Criteria</th>
-              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Defect</th>
-              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Defect Class</th>
-              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Description</th>
-              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Criteria Limits</th>
-              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Match</th>
-              <th className="border border-gray-300 p-2 sm:p-3 text-left font-semibold text-gray-700">Customer Specification</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visualElData.map((qap, index) => (
-              <tr 
-                key={`${qap.sno}-${index}`} 
-                className={`border-b transition-colors ${
-                  qap.match === 'yes' ? 'bg-green-50' : qap.match === 'no' ? 'bg-red-50' : 'bg-white'
-                }`}
-              >
-                <td className="border border-gray-300 p-2 sm:p-3 font-medium">{qap.sno}</td>
-                <td className="border border-gray-300 p-2 sm:p-3">
-                  <Badge variant="outline" className={`text-xs ${qap.criteria === 'Visual' ? 'bg-purple-100 text-purple-800 border-purple-300' : 'bg-orange-100 text-orange-800 border-orange-300'}`}>
-                    {qap.criteria}
-                  </Badge>
-                </td>
-                <td className="border border-gray-300 p-2 sm:p-3 max-w-24 break-words">{qap.subCriteria}</td>
-                <td className="border border-gray-300 p-2 sm:p-3 max-w-32 break-words">{qap.defect}</td>
-                <td className="border border-gray-300 p-2 sm:p-3">
-                  <Badge variant={qap.defectClass === 'Critical' ? 'destructive' : qap.defectClass === 'Major' ? 'default' : 'secondary'} className="text-xs">
-                    {qap.defectClass}
-                  </Badge>
-                </td>
-                <td className="border border-gray-300 p-2 sm:p-3 max-w-48 break-words text-xs">{qap.description}</td>
-                <td className="border border-gray-300 p-2 sm:p-3 max-w-48 break-words font-medium text-gray-700 text-xs">{qap.criteriaLimits}</td>
-                <td className="border border-gray-300 p-2 sm:p-3">
-                  {qap.match && (
-                    <Badge 
-                      variant={qap.match === 'yes' ? 'default' : 'destructive'}
-                      className={`text-xs ${qap.match === 'yes' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}
-                    >
-                      {qap.match.toUpperCase()}
-                    </Badge>
-                  )}
-                </td>
-                <td className="border border-gray-300 p-2 sm:p-3 max-w-48">
-                  <div 
-                    className={`p-2 rounded break-words text-xs ${
-                      qap.match === 'yes' 
-                        ? 'bg-green-50 text-green-800 border border-green-200' 
-                        : qap.match === 'no' 
-                        ? 'bg-red-50 text-red-800 border border-red-200' 
-                        : 'bg-gray-50'
-                    }`}
-                  >
-                    {qap.customerSpecification || '-'}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  };
+  const mqpData = qap.qaps.filter(q => q.criteria === 'MQP');
+  const visualElData = qap.qaps.filter(q => q.criteria === 'Visual' || q.criteria === 'EL');
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-[95vw] max-h-[90vh] flex flex-col p-0">
-        <DialogHeader className="p-4 sm:p-6 pb-4 border-b bg-gradient-to-r from-green-600 to-emerald-600 text-white">
-          <DialogTitle className="text-xl sm:text-2xl font-bold flex items-center gap-2 sm:gap-3">
-            <div className="w-8 sm:w-10 h-8 sm:h-10 bg-white/20 rounded-lg flex items-center justify-center">
-              <User className="w-4 sm:w-6 h-4 sm:h-6" />
+        <DialogHeader className="p-6 pb-4 border-b bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
+          <div className="flex items-center justify-between">
+            <DialogTitle className="text-2xl font-bold">
+              View QAP - {qap.customerName}
+            </DialogTitle>
+            <div className="flex gap-2">
+              <Button variant="ghost" size="sm" className="text-white hover:bg-white/20">
+                <Printer className="w-4 h-4 mr-2" />
+                Print
+              </Button>
+              <Button variant="ghost" size="sm" className="text-white hover:bg-white/20">
+                <Download className="w-4 h-4 mr-2" />
+                Export
+              </Button>
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="truncate">{customerName} - QAP Details</div>
-              <div className="text-xs sm:text-sm font-normal text-green-100 mt-1">
-                {stats.total} specs • {stats.matched} matched • {stats.custom} custom
-              </div>
-            </div>
-          </DialogTitle>
+          </div>
         </DialogHeader>
         
-        <div className="flex-1 overflow-auto p-4 sm:p-6">
-          <Tabs defaultValue="mqp" className="w-full">
-            <TabsList className="grid w-full grid-cols-2 mb-4">
-              <TabsTrigger value="mqp" className="flex items-center gap-2">
-                <Badge variant="outline" className="bg-blue-100 text-blue-800 text-xs">MQP</Badge>
-                ({mqpData.length} items)
-              </TabsTrigger>
-              <TabsTrigger value="visual-el" className="flex items-center gap-2">
-                <Badge variant="outline" className="bg-purple-100 text-purple-800 text-xs">Visual & EL</Badge>
-                ({visualElData.length} items)
-              </TabsTrigger>
-            </TabsList>
-            
-            <TabsContent value="mqp" className="mt-0">
-              {renderMQPTable()}
-            </TabsContent>
-            
-            <TabsContent value="visual-el" className="mt-0">
-              {renderVisualElTable()}
-            </TabsContent>
-          </Tabs>
+        <div className="flex-1 overflow-auto p-6">
+          {/* QAP Information */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6 bg-blue-50 p-4 rounded-lg">
+            <div>
+              <label className="text-sm font-medium text-gray-600">Customer Name</label>
+              <p className="text-lg font-semibold">{qap.customerName}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600">Project Name</label>
+              <p className="text-lg font-semibold">{qap.projectName}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600">Order Quantity</label>
+              <p className="text-lg font-semibold">{qap.orderQuantity}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600">Product Type</label>
+              <p className="text-lg font-semibold">{qap.productType}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600">Plant</label>
+              <p className="text-lg font-semibold">{qap.plant.toUpperCase()}</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-600">Status</label>
+              <Badge className={`${getStatusColor(qap.status)} capitalize`}>
+                {qap.status}
+              </Badge>
+            </div>
+          </div>
+
+          {qap.feedback && (
+            <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <h3 className="text-lg font-semibold mb-2 text-yellow-800">Feedback</h3>
+              <p className="text-yellow-700">{qap.feedback}</p>
+            </div>
+          )}
+
+          {/* QAP Tables */}
+          {renderQAPTable(mqpData, 'MQP Specifications')}
+          {renderQAPTable(visualElData, 'Visual & EL Specifications')}
         </div>
         
-        <div className="p-4 sm:p-6 pt-0 border-t bg-gray-50">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div className="text-sm text-gray-600">
-              <strong>{customerName}</strong> | 
-              Total: <strong>{stats.total}</strong> | 
-              Matched: <strong className="text-green-600">{stats.matched}</strong> | 
-              Custom: <strong className="text-red-600">{stats.custom}</strong> |
-              Match Rate: <strong>{stats.total > 0 ? Math.round((stats.matched / stats.total) * 100) : 0}%</strong>
-            </div>
-            <Button onClick={onClose} variant="outline">
-              Close
-            </Button>
-          </div>
+        <div className="p-6 pt-0 border-t">
+          <Button onClick={onClose} className="w-full">
+            Close
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

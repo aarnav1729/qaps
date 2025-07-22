@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,20 +15,21 @@ import { Save, RotateCcw, Send } from 'lucide-react';
 interface QAPModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (qapData: QAPFormData) => void;
+  onSave: (qapData: QAPFormData, status?: 'draft' | 'submitted') => void;
   nextSno: number;
   editingQAP?: QAPFormData | null;
+  draftData?: Partial<QAPFormData>;
 }
 
-const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, editingQAP }) => {
+const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, editingQAP, draftData }) => {
   const { user } = useAuth();
   
-  // Form fields
-  const [customerName, setCustomerName] = useState(editingQAP?.customerName || '');
-  const [projectName, setProjectName] = useState(editingQAP?.projectName || '');
-  const [orderQuantity, setOrderQuantity] = useState(editingQAP?.orderQuantity || 0);
-  const [productType, setProductType] = useState(editingQAP?.productType || '');
-  const [plant, setPlant] = useState(editingQAP?.plant || '');
+  // Form fields with draft data pre-population
+  const [customerName, setCustomerName] = useState('');
+  const [projectName, setProjectName] = useState('');
+  const [orderQuantity, setOrderQuantity] = useState(0);
+  const [productType, setProductType] = useState('');
+  const [plant, setPlant] = useState('');
   
   // Custom dropdown options
   const [customerOptions, setCustomerOptions] = useState(['akanksha', 'praful', 'yamini', 'jmr', 'cmk']);
@@ -35,25 +37,57 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, e
   const [plantOptions, setPlantOptions] = useState(['p2', 'p4']);
   
   // QAP data
-  const [mqpData, setMqpData] = useState<QAPSpecification[]>(
-    editingQAP?.qaps.filter(q => q.criteria === 'MQP') || 
-    mqpSpecifications.map((spec, index) => ({
+  const [mqpData, setMqpData] = useState<QAPSpecification[]>([]);
+  const [visualElData, setVisualElData] = useState<QAPSpecification[]>([]);
+
+  // Initialize form data when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      if (editingQAP) {
+        // Editing existing QAP
+        setCustomerName(editingQAP.customerName);
+        setProjectName(editingQAP.projectName);
+        setOrderQuantity(editingQAP.orderQuantity);
+        setProductType(editingQAP.productType);
+        setPlant(editingQAP.plant);
+        setMqpData(editingQAP.qaps.filter(q => q.criteria === 'MQP'));
+        setVisualElData(editingQAP.qaps.filter(q => q.criteria === 'Visual' || q.criteria === 'EL'));
+      } else if (draftData && Object.keys(draftData).length > 0) {
+        // Loading from draft
+        setCustomerName(draftData.customerName || '');
+        setProjectName(draftData.projectName || '');
+        setOrderQuantity(draftData.orderQuantity || 0);
+        setProductType(draftData.productType || '');
+        setPlant(draftData.plant || '');
+        if (draftData.qaps) {
+          setMqpData(draftData.qaps.filter(q => q.criteria === 'MQP'));
+          setVisualElData(draftData.qaps.filter(q => q.criteria === 'Visual' || q.criteria === 'EL'));
+        } else {
+          initializeQAPData();
+        }
+      } else {
+        // New QAP
+        resetForm();
+        initializeQAPData();
+      }
+    }
+  }, [isOpen, editingQAP, draftData, nextSno]);
+
+  const initializeQAPData = () => {
+    setMqpData(mqpSpecifications.map((spec, index) => ({
       ...spec,
       sno: nextSno + index,
       match: undefined,
       customerSpecification: undefined
-    }))
-  );
-  
-  const [visualElData, setVisualElData] = useState<QAPSpecification[]>(
-    editingQAP?.qaps.filter(q => q.criteria === 'Visual' || q.criteria === 'EL') || 
-    visualElSpecifications.map((spec, index) => ({
+    })));
+    
+    setVisualElData(visualElSpecifications.map((spec, index) => ({
       ...spec,
       sno: nextSno + mqpSpecifications.length + index,
       match: undefined,
       customerSpecification: undefined
-    }))
-  );
+    })));
+  };
 
   const addCustomOption = (type: 'customer' | 'product' | 'plant', value: string) => {
     if (type === 'customer' && !customerOptions.includes(value)) {
@@ -94,11 +128,6 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, e
   };
 
   const handleSave = (status: 'draft' | 'submitted' = 'draft') => {
-    if (!customerName.trim() || !projectName.trim() || !orderQuantity || !productType || !plant) {
-      alert('Please fill all required fields');
-      return;
-    }
-    
     const allData = [...mqpData, ...visualElData];
     const qapData: QAPFormData = {
       id: editingQAP?.id || Date.now().toString(),
@@ -113,7 +142,7 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, e
       qaps: allData
     };
     
-    onSave(qapData);
+    onSave(qapData, status);
     onClose();
     resetForm();
   };

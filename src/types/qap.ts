@@ -1,4 +1,12 @@
 
+export interface User {
+  id: string;
+  username: string;
+  password: string;
+  role: 'requestor' | 'approver-p2' | 'approver-p4' | 'admin';
+  plant?: string;
+}
+
 export interface QAPFormData {
   id: string;
   customerName: string;

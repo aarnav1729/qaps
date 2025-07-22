@@ -1,9 +1,10 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import QAPTable from '@/components/QAPTable';
 import QAPModal from '@/components/QAPModal';
 import ViewQAPModal from '@/components/ViewQAPModal';
@@ -19,24 +20,85 @@ const Index = () => {
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [editingQAP, setEditingQAP] = useState<QAPFormData | null>(null);
   const [viewingQAP, setViewingQAP] = useState<QAPFormData | null>(null);
+  const [confirmationDialog, setConfirmationDialog] = useState<{
+    isOpen: boolean;
+    missingItems: number;
+    onConfirm: () => void;
+    onCancel: () => void;
+  }>({ isOpen: false, missingItems: 0, onConfirm: () => {}, onCancel: () => {} });
   
   // Filtering and search
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [customerFilter, setCustomerFilter] = useState('all');
   
+  // Draft data persistence
+  const [draftData, setDraftData] = useState<Partial<QAPFormData>>({});
+
+  useEffect(() => {
+    // Load draft data from localStorage
+    const savedDraft = localStorage.getItem(`qap_draft_${user?.username}`);
+    if (savedDraft) {
+      setDraftData(JSON.parse(savedDraft));
+    }
+  }, [user?.username]);
+
   console.log('Current QAP Data state:', qapData);
 
-  const handleSaveQAP = (newQAPData: QAPFormData) => {
+  const handleSaveQAP = (newQAPData: QAPFormData, status: 'draft' | 'submitted' = 'draft') => {
     console.log('Saving new QAP:', newQAPData);
     
+    // Check for missing fields if submitting
+    if (status === 'submitted') {
+      const missingFields = [];
+      if (!newQAPData.customerName) missingFields.push('Customer Name');
+      if (!newQAPData.projectName) missingFields.push('Project Name');
+      if (!newQAPData.orderQuantity) missingFields.push('Order Quantity');
+      if (!newQAPData.productType) missingFields.push('Product Type');
+      if (!newQAPData.plant) missingFields.push('Plant');
+      
+      // Check for unfilled QAP items
+      const unfilledItems = newQAPData.qaps.filter(qap => !qap.match || !qap.customerSpecification);
+      
+      if (missingFields.length > 0 || unfilledItems.length > 0) {
+        const totalMissing = missingFields.length + unfilledItems.length;
+        
+        setConfirmationDialog({
+          isOpen: true,
+          missingItems: totalMissing,
+          onConfirm: () => {
+            proceedWithSave(newQAPData, status);
+            setConfirmationDialog({ isOpen: false, missingItems: 0, onConfirm: () => {}, onCancel: () => {} });
+          },
+          onCancel: () => {
+            setConfirmationDialog({ isOpen: false, missingItems: 0, onConfirm: () => {}, onCancel: () => {} });
+          }
+        });
+        return;
+      }
+    }
+    
+    proceedWithSave(newQAPData, status);
+  };
+
+  const proceedWithSave = (newQAPData: QAPFormData, status: 'draft' | 'submitted' = 'draft') => {
+    if (status === 'draft') {
+      // Save draft data to localStorage
+      localStorage.setItem(`qap_draft_${user?.username}`, JSON.stringify(newQAPData));
+      setDraftData(newQAPData);
+    } else {
+      // Clear draft when submitting
+      localStorage.removeItem(`qap_draft_${user?.username}`);
+      setDraftData({});
+    }
+
     if (editingQAP) {
       setQapData(prev => prev.map(qap => 
-        qap.id === editingQAP.id ? newQAPData : qap
+        qap.id === editingQAP.id ? { ...newQAPData, status } : qap
       ));
       setEditingQAP(null);
     } else {
-      setQapData(prevData => [...prevData, newQAPData]);
+      setQapData(prevData => [...prevData, { ...newQAPData, status }]);
     }
   };
 
@@ -261,6 +323,7 @@ const Index = () => {
         onSave={handleSaveQAP}
         nextSno={nextSno}
         editingQAP={editingQAP}
+        draftData={draftData}
       />
 
       {/* View QAP Modal */}
@@ -274,6 +337,35 @@ const Index = () => {
           qap={viewingQAP}
         />
       )}
+
+      {/* Confirmation Dialog */}
+      <Dialog open={confirmationDialog.isOpen} onOpenChange={() => setConfirmationDialog({ ...confirmationDialog, isOpen: false })}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Incomplete QAP Submission</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p>
+              You have not filled <strong>{confirmationDialog.missingItems}</strong> items. Are you sure you want to proceed?
+            </p>
+            <div className="flex gap-3">
+              <Button 
+                variant="outline" 
+                onClick={confirmationDialog.onCancel}
+                className="flex-1"
+              >
+                No (Take me to missing fields)
+              </Button>
+              <Button 
+                onClick={confirmationDialog.onConfirm}
+                className="flex-1"
+              >
+                Yes, Proceed
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
