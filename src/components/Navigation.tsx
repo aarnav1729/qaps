@@ -2,10 +2,13 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { LogOut, User, FileText, UserCheck, Settings, BarChart3 } from 'lucide-react';
 
 const Navigation: React.FC = () => {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const getNavItems = () => {
     const items = [];
@@ -19,13 +22,18 @@ const Navigation: React.FC = () => {
     }
     
     if (user?.role === 'admin') {
-      items.push(
-        { name: 'Users', icon: Settings, path: '/users' },
-        { name: 'Analytics', icon: BarChart3, path: '/analytics' }
-      );
+      items.push({ name: 'Admin', icon: Settings, path: '/admin' });
     }
     
     return items;
+  };
+
+  const handleNavigation = (path: string) => {
+    navigate(path);
+  };
+
+  const isActivePath = (path: string) => {
+    return location.pathname === path;
   };
 
   return (
@@ -42,7 +50,12 @@ const Navigation: React.FC = () => {
             
             <div className="hidden md:flex items-center gap-4">
               {getNavItems().map(item => (
-                <Button key={item.name} variant="ghost" className="flex items-center gap-2">
+                <Button 
+                  key={item.name} 
+                  variant={isActivePath(item.path) ? "default" : "ghost"}
+                  className="flex items-center gap-2"
+                  onClick={() => handleNavigation(item.path)}
+                >
                   <item.icon className="w-4 h-4" />
                   {item.name}
                 </Button>

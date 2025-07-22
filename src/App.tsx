@@ -22,11 +22,15 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles?: strin
 }) => {
   const { isAuthenticated, user } = useAuth();
   
+  console.log('ProtectedRoute check:', { isAuthenticated, user, allowedRoles });
+  
   if (!isAuthenticated) {
+    console.log('User not authenticated, redirecting to login');
     return <Navigate to="/login" />;
   }
   
   if (allowedRoles && user && !allowedRoles.includes(user.role)) {
+    console.log('User role not allowed:', user.role, 'Required:', allowedRoles);
     return <Navigate to="/" />;
   }
   
@@ -44,6 +48,8 @@ const AppContent: React.FC = () => {
     { id: '5', username: 'aarnav', password: 'aarnav', role: 'admin' }
   ]);
   
+  console.log('AppContent render:', { isAuthenticated, user, qapDataLength: qapData.length });
+  
   const handleSaveQAP = (qapFormData: QAPFormData) => {
     console.log('Saving QAP:', qapFormData);
     setQapData(prev => {
@@ -51,8 +57,10 @@ const AppContent: React.FC = () => {
       if (existingIndex >= 0) {
         const updated = [...prev];
         updated[existingIndex] = qapFormData;
+        console.log('Updated existing QAP at index:', existingIndex);
         return updated;
       } else {
+        console.log('Adding new QAP to list');
         return [...prev, qapFormData];
       }
     });
@@ -72,14 +80,17 @@ const AppContent: React.FC = () => {
       if (existingIndex >= 0) {
         const updated = [...prev];
         updated[existingIndex] = submittedQAP;
+        console.log('Submitted existing QAP at index:', existingIndex);
         return updated;
       } else {
+        console.log('Adding new submitted QAP to list');
         return [...prev, submittedQAP];
       }
     });
   };
   
   const handleApprove = (id: string, feedback?: string) => {
+    console.log('Approving QAP:', id, 'with feedback:', feedback);
     setQapData(prev => prev.map(qap => 
       qap.id === id 
         ? { ...qap, status: 'approved' as const, feedback, approver: user?.username, approvedAt: new Date() }
@@ -88,6 +99,7 @@ const AppContent: React.FC = () => {
   };
 
   const handleReject = (id: string, feedback: string) => {
+    console.log('Rejecting QAP:', id, 'with feedback:', feedback);
     setQapData(prev => prev.map(qap => 
       qap.id === id 
         ? { ...qap, status: 'rejected' as const, feedback, approver: user?.username, approvedAt: new Date() }
@@ -100,15 +112,18 @@ const AppContent: React.FC = () => {
   };
 
   const handleAddUser = (newUser: User) => {
+    console.log('Adding new user:', newUser);
     setUsers(prev => [...prev, newUser]);
   };
 
   const handleEditUser = (updatedUser: User) => {
+    console.log('Editing user:', updatedUser);
     setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
   };
 
   const handleDeleteUser = (userId: string) => {
     if (confirm('Are you sure you want to delete this user?')) {
+      console.log('Deleting user:', userId);
       setUsers(prev => prev.filter(u => u.id !== userId));
     }
   };
