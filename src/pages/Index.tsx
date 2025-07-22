@@ -46,20 +46,17 @@ const Index: React.FC<IndexProps> = ({ qapData, onSaveQAP, onSubmitQAP }) => {
     onSubmitQAP(qap);
   };
 
-  const handleSave = (qapData: QAPFormData) => {
-    console.log('Handling save in Index:', qapData);
-    onSaveQAP(qapData);
+  const handleSave = (qapData: QAPFormData, status?: 'draft' | 'submitted') => {
+    console.log('Handling save in Index:', qapData, 'with status:', status);
+    
+    if (status === 'submitted') {
+      onSubmitQAP(qapData);
+    } else {
+      onSaveQAP(qapData);
+    }
+    
     setIsQAPModalOpen(false);
-    // Clear draft data after successful save
-    localStorage.removeItem('qapDraft');
-    setDraftData({});
-  };
-
-  const handleSubmit = (qapData: QAPFormData) => {
-    console.log('Handling submit in Index:', qapData);
-    onSubmitQAP(qapData);
-    setIsQAPModalOpen(false);
-    // Clear draft data after successful submit
+    // Clear draft data after successful save/submit
     localStorage.removeItem('qapDraft');
     setDraftData({});
   };
@@ -175,7 +172,6 @@ const Index: React.FC<IndexProps> = ({ qapData, onSaveQAP, onSubmitQAP }) => {
         onClose={() => setIsQAPModalOpen(false)}
         editingQAP={selectedQAP}
         onSave={handleSave}
-        onSubmit={handleSubmit}
         nextSno={nextSno}
         draftData={draftData}
       />
