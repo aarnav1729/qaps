@@ -44,6 +44,41 @@ const AppContent: React.FC = () => {
     { id: '5', username: 'aarnav', password: 'aarnav', role: 'admin' }
   ]);
   
+  const handleSaveQAP = (qapFormData: QAPFormData) => {
+    console.log('Saving QAP:', qapFormData);
+    setQapData(prev => {
+      const existingIndex = prev.findIndex(qap => qap.id === qapFormData.id);
+      if (existingIndex >= 0) {
+        const updated = [...prev];
+        updated[existingIndex] = qapFormData;
+        return updated;
+      } else {
+        return [...prev, qapFormData];
+      }
+    });
+  };
+
+  const handleSubmitQAP = (qapFormData: QAPFormData) => {
+    console.log('Submitting QAP for approval:', qapFormData);
+    const submittedQAP = {
+      ...qapFormData,
+      status: 'submitted' as const,
+      submittedBy: user?.username,
+      submittedAt: new Date()
+    };
+    
+    setQapData(prev => {
+      const existingIndex = prev.findIndex(qap => qap.id === qapFormData.id);
+      if (existingIndex >= 0) {
+        const updated = [...prev];
+        updated[existingIndex] = submittedQAP;
+        return updated;
+      } else {
+        return [...prev, submittedQAP];
+      }
+    });
+  };
+  
   const handleApprove = (id: string, feedback?: string) => {
     setQapData(prev => prev.map(qap => 
       qap.id === id 
@@ -95,7 +130,11 @@ const AppContent: React.FC = () => {
           path="/" 
           element={
             <ProtectedRoute allowedRoles={['requestor', 'admin']}>
-              <Index />
+              <Index 
+                qapData={qapData} 
+                onSaveQAP={handleSaveQAP} 
+                onSubmitQAP={handleSubmitQAP} 
+              />
             </ProtectedRoute>
           } 
         />

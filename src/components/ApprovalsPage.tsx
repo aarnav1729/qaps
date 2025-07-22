@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -26,11 +26,21 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({ qapData, onApprove, onRej
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [reviewAction, setReviewAction] = useState<'approve' | 'reject'>('approve');
 
+  useEffect(() => {
+    console.log('Current QAP Data state:', qapData);
+    console.log('User:', user);
+    console.log('QAPs for approval:', getQAPsForApproval());
+  }, [qapData, user]);
+
   const getQAPsForApproval = () => {
-    let filteredQAPs = qapData.filter(qap => 
-      qap.status === 'submitted' && 
-      (user?.role === 'admin' || qap.plant === user?.plant?.toLowerCase())
-    );
+    console.log('All QAP Data:', qapData);
+    let filteredQAPs = qapData.filter(qap => {
+      console.log(`QAP ${qap.id}: status=${qap.status}, plant=${qap.plant}, userRole=${user?.role}, userPlant=${user?.plant}`);
+      return qap.status === 'submitted' && 
+        (user?.role === 'admin' || qap.plant === user?.plant?.toLowerCase());
+    });
+
+    console.log('Filtered QAPs:', filteredQAPs);
 
     if (searchTerm) {
       filteredQAPs = filteredQAPs.filter(qap =>
@@ -40,6 +50,7 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({ qapData, onApprove, onRej
       );
     }
 
+    console.log('QAP Data in table:', filteredQAPs);
     return filteredQAPs;
   };
 
@@ -88,6 +99,10 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({ qapData, onApprove, onRej
   };
 
   const renderQAPTable = (qaps: QAPFormData[], showActions: boolean = true) => {
+    if (qaps.length === 0) {
+      return <p className="text-center text-gray-500 py-8">No QAPs found</p>;
+    }
+
     return (
       <div className="overflow-x-auto">
         <table className="w-full border-collapse border border-gray-300 text-sm">
@@ -218,11 +233,7 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({ qapData, onApprove, onRej
               <CardTitle>Pending Approvals</CardTitle>
             </CardHeader>
             <CardContent>
-              {getQAPsForApproval().length > 0 ? (
-                renderQAPTable(getQAPsForApproval())
-              ) : (
-                <p className="text-center text-gray-500 py-8">No QAPs pending approval</p>
-              )}
+              {renderQAPTable(getQAPsForApproval())}
             </CardContent>
           </Card>
         </TabsContent>
@@ -233,11 +244,7 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({ qapData, onApprove, onRej
               <CardTitle>Approved QAPs</CardTitle>
             </CardHeader>
             <CardContent>
-              {getApprovedQAPs().length > 0 ? (
-                renderQAPTable(getApprovedQAPs(), false)
-              ) : (
-                <p className="text-center text-gray-500 py-8">No approved QAPs</p>
-              )}
+              {renderQAPTable(getApprovedQAPs(), false)}
             </CardContent>
           </Card>
         </TabsContent>
@@ -248,11 +255,7 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({ qapData, onApprove, onRej
               <CardTitle>Rejected QAPs</CardTitle>
             </CardHeader>
             <CardContent>
-              {getRejectedQAPs().length > 0 ? (
-                renderQAPTable(getRejectedQAPs(), false)
-              ) : (
-                <p className="text-center text-gray-500 py-8">No rejected QAPs</p>
-              )}
+              {renderQAPTable(getRejectedQAPs(), false)}
             </CardContent>
           </Card>
         </TabsContent>
