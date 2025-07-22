@@ -10,6 +10,7 @@ import LoginPage from './components/LoginPage';
 import Navigation from './components/Navigation';
 import Index from "./pages/Index";
 import ApprovalsPage from './components/ApprovalsPage';
+import AnalyticsPage from './components/AnalyticsPage';
 import AdminPage from './components/AdminPage';
 import NotFound from "./pages/NotFound";
 import { QAPFormData, User } from '@/types/qap';
@@ -163,6 +164,14 @@ const AppContent: React.FC = () => {
                 onReject={handleReject} 
                 onView={handleView}
               />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/analytics" 
+          element={
+            <ProtectedRoute>
+              <AnalyticsPage qapData={qapData} />
             </ProtectedRoute>
           } 
         />

@@ -1,10 +1,11 @@
+
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Plus, FileText, CheckCircle, Clock, AlertCircle } from 'lucide-react';
 import QAPModal from '../components/QAPModal';
 import QAPTable from '../components/QAPTable';
-import ViewQAPModal from '../components/ViewQAPModal';
+import EnhancedViewQAPModal from '../components/EnhancedViewQAPModal';
 import { QAPFormData } from '@/types/qap';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -176,7 +177,7 @@ const Index: React.FC<IndexProps> = ({ qapData, onSaveQAP, onSubmitQAP }) => {
         draftData={draftData}
       />
 
-      <ViewQAPModal
+      <EnhancedViewQAPModal
         qap={selectedQAP}
         isOpen={isViewModalOpen}
         onClose={() => setIsViewModalOpen(false)}

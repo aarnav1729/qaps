@@ -10,6 +10,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Eye, Printer, MessageSquare, CheckCircle, XCircle, Search } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import EnhancedViewQAPModal from './EnhancedViewQAPModal';
 
 interface ApprovalsPageProps {
   qapData: QAPFormData[];
@@ -24,6 +25,7 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({ qapData, onApprove, onRej
   const [selectedQAP, setSelectedQAP] = useState<QAPFormData | null>(null);
   const [feedback, setFeedback] = useState('');
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [reviewAction, setReviewAction] = useState<'approve' | 'reject'>('approve');
 
   useEffect(() => {
@@ -73,6 +75,12 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({ qapData, onApprove, onRej
     setReviewAction(action);
     setFeedback('');
     setIsReviewModalOpen(true);
+  };
+
+  const handleViewQAP = (qap: QAPFormData) => {
+    setSelectedQAP(qap);
+    setIsViewModalOpen(true);
+    onView(qap);
   };
 
   const submitReview = () => {
@@ -145,7 +153,7 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({ qapData, onApprove, onRej
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => onView(qap)}
+                        onClick={() => handleViewQAP(qap)}
                         className="h-8 w-8 p-0 hover:bg-blue-100"
                         title="View QAP"
                       >
@@ -260,6 +268,13 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({ qapData, onApprove, onRej
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Enhanced View Modal */}
+      <EnhancedViewQAPModal
+        qap={selectedQAP}
+        isOpen={isViewModalOpen}
+        onClose={() => setIsViewModalOpen(false)}
+      />
 
       {/* Review Modal */}
       <Dialog open={isReviewModalOpen} onOpenChange={setIsReviewModalOpen}>
