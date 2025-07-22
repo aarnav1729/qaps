@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,6 +19,8 @@ const Index: React.FC<IndexProps> = ({ qapData, onSaveQAP, onSubmitQAP }) => {
   const [isQAPModalOpen, setIsQAPModalOpen] = useState(false);
   const [selectedQAP, setSelectedQAP] = useState<QAPFormData | null>(null);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [nextSno, setNextSno] = useState(1);
+  const [draftData, setDraftData] = useState<Partial<QAPFormData>>({});
   
   // Filter QAPs for current user
   const userQAPs = qapData.filter(qap => qap.submittedBy === user?.username || qap.status === 'draft');
@@ -46,13 +47,21 @@ const Index: React.FC<IndexProps> = ({ qapData, onSaveQAP, onSubmitQAP }) => {
   };
 
   const handleSave = (qapData: QAPFormData) => {
+    console.log('Handling save in Index:', qapData);
     onSaveQAP(qapData);
     setIsQAPModalOpen(false);
+    // Clear draft data after successful save
+    localStorage.removeItem('qapDraft');
+    setDraftData({});
   };
 
   const handleSubmit = (qapData: QAPFormData) => {
+    console.log('Handling submit in Index:', qapData);
     onSubmitQAP(qapData);
     setIsQAPModalOpen(false);
+    // Clear draft data after successful submit
+    localStorage.removeItem('qapDraft');
+    setDraftData({});
   };
 
   // Stats for dashboard
@@ -151,10 +160,11 @@ const Index: React.FC<IndexProps> = ({ qapData, onSaveQAP, onSubmitQAP }) => {
         </CardHeader>
         <CardContent>
           <QAPTable 
-            data={userQAPs} 
+            qapData={userQAPs} 
             onEdit={handleEdit}
             onView={handleView}
             onShare={handleShare}
+            onDelete={() => {}} // Add empty function for now
           />
         </CardContent>
       </Card>
@@ -163,9 +173,11 @@ const Index: React.FC<IndexProps> = ({ qapData, onSaveQAP, onSubmitQAP }) => {
       <QAPModal
         isOpen={isQAPModalOpen}
         onClose={() => setIsQAPModalOpen(false)}
-        qap={selectedQAP}
+        editingQAP={selectedQAP}
         onSave={handleSave}
         onSubmit={handleSubmit}
+        nextSno={nextSno}
+        draftData={draftData}
       />
 
       <ViewQAPModal
