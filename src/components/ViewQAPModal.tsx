@@ -9,10 +9,15 @@ import { X, Printer, Download } from 'lucide-react';
 interface ViewQAPModalProps {
   isOpen: boolean;
   onClose: () => void;
-  qap: QAPFormData;
+  qap: QAPFormData | null;
 }
 
 const ViewQAPModal: React.FC<ViewQAPModalProps> = ({ isOpen, onClose, qap }) => {
+  // Don't render if qap is null
+  if (!qap) {
+    return null;
+  }
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'draft': return 'bg-gray-100 text-gray-800';
