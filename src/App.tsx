@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -15,6 +16,7 @@ import SpecificationBuilder from './components/SpecificationBuilder';
 import ApprovalsPage from './components/ApprovalsPage';
 import AnalyticsPage from './components/AnalyticsPage';
 import AdminPage from './components/AdminPage';
+import AdminAnalytics from './components/AdminAnalytics';
 import { QAPFormData } from './types/qap';
 import { processWorkflowTransition } from './utils/workflowUtils';
 
@@ -25,6 +27,33 @@ const AppContent: React.FC = () => {
   const { user, isAuthenticated } = useAuth();
   const [qapData, setQapData] = useState<QAPFormData[]>([]);
   const [users, setUsers] = useState<any[]>([]);
+
+  // Track action timestamps
+  const addTimestampToQAP = (qap: QAPFormData, action: string, level?: number): QAPFormData => {
+    const now = new Date();
+    const updatedQAP = { 
+      ...qap, 
+      lastModifiedAt: now,
+      timeline: [
+        ...qap.timeline,
+        {
+          level: level || qap.currentLevel,
+          action,
+          user: user?.username,
+          timestamp: now
+        }
+      ]
+    };
+
+    // Track level start/end times
+    if (action.includes('Sent to') && level) {
+      updatedQAP.levelStartTimes = { ...qap.levelStartTimes, [level]: now };
+    } else if (action.includes('Reviewed') || action.includes('Approved')) {
+      updatedQAP.levelEndTimes = { ...qap.levelEndTimes, [qap.currentLevel]: now };
+    }
+
+    return updatedQAP;
+  };
 
   // Load data from localStorage on component mount
   useEffect(() => {
@@ -37,6 +66,14 @@ const AppContent: React.FC = () => {
           submittedAt: qap.submittedAt ? new Date(qap.submittedAt) : undefined,
           approvedAt: qap.approvedAt ? new Date(qap.approvedAt) : undefined,
           finalCommentsAt: qap.finalCommentsAt ? new Date(qap.finalCommentsAt) : undefined,
+          createdAt: qap.createdAt ? new Date(qap.createdAt) : new Date(),
+          lastModifiedAt: qap.lastModifiedAt ? new Date(qap.lastModifiedAt) : new Date(),
+          levelStartTimes: qap.levelStartTimes ? Object.fromEntries(
+            Object.entries(qap.levelStartTimes).map(([k, v]) => [k, new Date(v as string)])
+          ) : {},
+          levelEndTimes: qap.levelEndTimes ? Object.fromEntries(
+            Object.entries(qap.levelEndTimes).map(([k, v]) => [k, new Date(v as string)])
+          ) : {},
           timeline: qap.timeline?.map((entry: any) => ({
             ...entry,
             timestamp: new Date(entry.timestamp)
@@ -54,14 +91,27 @@ const AppContent: React.FC = () => {
   }, [qapData]);
 
   const handleSaveQAP = (qapFormData: QAPFormData, status?: string) => {
+    const now = new Date();
     setQapData(prev => {
       const existingIndex = prev.findIndex(q => q.id === qapFormData.id);
+      let updatedQAP = {
+        ...qapFormData,
+        lastModifiedAt: now,
+        createdAt: qapFormData.createdAt || now
+      };
+
+      // Add submission timestamp if status changed to submitted
+      if (status === 'submitted' || (qapFormData.status !== 'draft' && !qapFormData.submittedAt)) {
+        updatedQAP.submittedAt = now;
+        updatedQAP = addTimestampToQAP(updatedQAP, 'Submitted for review', 2);
+      }
+
       if (existingIndex >= 0) {
         const updated = [...prev];
-        updated[existingIndex] = qapFormData;
+        updated[existingIndex] = updatedQAP;
         return updated;
       } else {
-        return [...prev, qapFormData];
+        return [...prev, updatedQAP];
       }
     });
   };
@@ -73,7 +123,7 @@ const AppContent: React.FC = () => {
   const handleLevel2Next = (qapId: string) => {
     setQapData(prev => prev.map(qap => {
       if (qap.id === qapId) {
-        const updatedQAP = { ...qap };
+        let updatedQAP = { ...qap };
         
         // Initialize level responses if not exists
         if (!updatedQAP.levelResponses[2]) {
@@ -88,6 +138,9 @@ const AppContent: React.FC = () => {
           respondedAt: new Date()
         };
         
+        // Add timestamp
+        updatedQAP = addTimestampToQAP(updatedQAP, `Level 2 reviewed by ${user?.role}`, 2);
+        
         // Check if all required roles have responded
         const requiredRoles = qap.qaps
           .filter(spec => spec.match === 'no')
@@ -100,6 +153,7 @@ const AppContent: React.FC = () => {
         const allResponded = uniqueRoles.every(role => respondedRoles.includes(role));
         
         if (allResponded) {
+          updatedQAP = addTimestampToQAP(updatedQAP, 'Level 2 completed, moving to next level', 2);
           return processWorkflowTransition(updatedQAP, 3);
         }
         
@@ -112,7 +166,7 @@ const AppContent: React.FC = () => {
   const handleLevel3Next = (id: string, responses: { [itemIndex: number]: string }) => {
     setQapData(prev => prev.map(qap => {
       if (qap.id === id) {
-        const updatedQAP = { ...qap };
+        let updatedQAP = { ...qap };
         
         if (!updatedQAP.levelResponses[3]) {
           updatedQAP.levelResponses[3] = {};
@@ -125,6 +179,7 @@ const AppContent: React.FC = () => {
           respondedAt: new Date()
         };
         
+        updatedQAP = addTimestampToQAP(updatedQAP, 'Level 3 reviewed by Head', 3);
         return processWorkflowTransition(updatedQAP, 4);
       }
       return qap;
@@ -134,7 +189,7 @@ const AppContent: React.FC = () => {
   const handleLevel4Next = (id: string, responses: { [itemIndex: number]: string }) => {
     setQapData(prev => prev.map(qap => {
       if (qap.id === id) {
-        const updatedQAP = { ...qap };
+        let updatedQAP = { ...qap };
         
         if (!updatedQAP.levelResponses[4]) {
           updatedQAP.levelResponses[4] = {};
@@ -149,12 +204,7 @@ const AppContent: React.FC = () => {
         
         // Move to final comments stage
         updatedQAP.status = 'final-comments';
-        updatedQAP.timeline.push({
-          level: 4,
-          action: 'Reviewed by Technical Head, sent for final comments',
-          user: user?.username,
-          timestamp: new Date()
-        });
+        updatedQAP = addTimestampToQAP(updatedQAP, 'Level 4 reviewed by Technical Head, sent for final comments', 4);
         
         return updatedQAP;
       }
@@ -162,14 +212,25 @@ const AppContent: React.FC = () => {
     }));
   };
 
-  const handleSubmitFinalComments = (id: string, finalComments: string) => {
+  const handleSubmitFinalComments = (id: string, finalComments: string, attachment?: File) => {
     setQapData(prev => prev.map(qap => {
       if (qap.id === id) {
-        const updatedQAP = { ...qap };
+        let updatedQAP = { ...qap };
         updatedQAP.finalComments = finalComments;
         updatedQAP.finalCommentsBy = user?.username;
         updatedQAP.finalCommentsAt = new Date();
         
+        // Handle attachment (in a real app, you'd upload to a server)
+        if (attachment) {
+          updatedQAP.finalCommentsAttachment = {
+            name: attachment.name,
+            url: URL.createObjectURL(attachment), // In production, this would be a server URL
+            type: attachment.type,
+            size: attachment.size
+          };
+        }
+        
+        updatedQAP = addTimestampToQAP(updatedQAP, 'Final comments added', 4);
         return processWorkflowTransition(updatedQAP, 5);
       }
       return qap;
@@ -179,23 +240,16 @@ const AppContent: React.FC = () => {
   const handleLevel5Approve = (id: string, feedback?: string) => {
     setQapData(prev => prev.map(qap => {
       if (qap.id === id) {
-        return {
+        let updatedQAP = {
           ...qap,
           status: 'approved' as const,
           approver: user?.username,
           approvedAt: new Date(),
-          feedback,
-          timeline: [
-            ...qap.timeline,
-            {
-              level: 5,
-              action: 'Approved by Plant Head',
-              user: user?.username,
-              timestamp: new Date(),
-              comments: feedback
-            }
-          ]
+          feedback
         };
+        
+        updatedQAP = addTimestampToQAP(updatedQAP, 'Approved by Plant Head', 5);
+        return updatedQAP;
       }
       return qap;
     }));
@@ -204,21 +258,14 @@ const AppContent: React.FC = () => {
   const handleLevel5Reject = (id: string, feedback: string) => {
     setQapData(prev => prev.map(qap => {
       if (qap.id === id) {
-        return {
+        let updatedQAP = {
           ...qap,
           status: 'rejected' as const,
-          feedback,
-          timeline: [
-            ...qap.timeline,
-            {
-              level: 5,
-              action: 'Rejected by Plant Head',
-              user: user?.username,
-              timestamp: new Date(),
-              comments: feedback
-            }
-          ]
+          feedback
         };
+        
+        updatedQAP = addTimestampToQAP(updatedQAP, 'Rejected by Plant Head', 5);
+        return updatedQAP;
       }
       return qap;
     }));
@@ -302,6 +349,11 @@ const AppContent: React.FC = () => {
           
           {/* Analytics */}
           <Route path="/analytics" element={<AnalyticsPage qapData={qapData} />} />
+          
+          {/* Admin Analytics */}
+          {user?.role === 'admin' && (
+            <Route path="/admin-analytics" element={<AdminAnalytics qapData={qapData} />} />
+          )}
           
           {/* Approvals */}
           {(user?.role === 'plant-head' || user?.role === 'admin') && (

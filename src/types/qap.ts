@@ -31,11 +31,22 @@ export interface QAPFormData {
   finalComments?: string;
   finalCommentsBy?: string;
   finalCommentsAt?: Date;
+  finalCommentsAttachment?: {
+    name: string;
+    url: string;
+    type: string;
+    size: number;
+  };
   approver?: string;
   approvedAt?: Date;
   feedback?: string;
   timeline: TimelineEntry[];
   qaps: QAPSpecification[];
+  // Timestamp tracking for analytics
+  createdAt?: Date;
+  lastModifiedAt?: Date;
+  levelStartTimes?: { [level: number]: Date };
+  levelEndTimes?: { [level: number]: Date };
 }
 
 export interface TimelineEntry {
@@ -44,6 +55,7 @@ export interface TimelineEntry {
   user?: string;
   timestamp: Date;
   comments?: string;
+  duration?: number; // milliseconds
 }
 
 export interface QAPSpecification {
@@ -69,4 +81,13 @@ export interface QAPSpecification {
 export interface DropdownOption {
   value: string;
   label: string;
+}
+
+export interface TurnaroundAnalytics {
+  plant: string;
+  level: number;
+  user: string;
+  averageTime: number;
+  count: number;
+  role: string;
 }

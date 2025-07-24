@@ -118,6 +118,39 @@ export const canUserAccessQAP = (user: User, qap: QAPFormData): boolean => {
   }
 };
 
+export const getUserAccessibleQAPs = (user: User, allQAPs: QAPFormData[]): QAPFormData[] => {
+  if (user.role === 'admin') return allQAPs;
+  
+  const userPlants = user.plant?.split(',').map(p => p.trim()) || [];
+  
+  return allQAPs.filter(qap => {
+    const qapPlant = qap.plant.toLowerCase();
+    
+    switch (user.role) {
+      case 'requestor':
+        return qap.submittedBy === user.username;
+      
+      case 'production':
+      case 'quality':
+      case 'technical':
+        return userPlants.includes(qapPlant);
+      
+      case 'head':
+        return userPlants.some(plant => ['p4', 'p5'].includes(plant)) && 
+               userPlants.includes(qapPlant);
+      
+      case 'technical-head':
+        return true; // Can see all QAPs
+      
+      case 'plant-head':
+        return true; // Can see all QAPs
+      
+      default:
+        return false;
+    }
+  });
+};
+
 export const isQAPExpired = (submittedAt: Date, level: number): boolean => {
   const fourDaysMs = 4 * 24 * 60 * 60 * 1000;
   const timeElapsed = Date.now() - submittedAt.getTime();
@@ -128,4 +161,51 @@ export const isQAPExpired = (submittedAt: Date, level: number): boolean => {
   }
   
   return false;
+};
+
+export const calculateTurnaroundTime = (qap: QAPFormData, level: number): number => {
+  if (!qap.timeline || qap.timeline.length === 0) return 0;
+  
+  const levelStart = qap.timeline.find(entry => 
+    entry.level === level && entry.action.includes('Sent to')
+  );
+  const levelEnd = qap.timeline.find(entry => 
+    entry.level === level && (entry.action.includes('Reviewed') || entry.action.includes('Approved'))
+  );
+  
+  if (!levelStart || !levelEnd) return 0;
+  
+  return levelEnd.timestamp.getTime() - levelStart.timestamp.getTime();
+};
+
+export const calculateAverageTurnaroundTime = (qaps: QAPFormData[], filters: {
+  plant?: string;
+  level?: number;
+  user?: string;
+}): { average: number; count: number } => {
+  let filteredQAPs = qaps.filter(qap => qap.status === 'approved');
+  
+  if (filters.plant) {
+    filteredQAPs = filteredQAPs.filter(qap => qap.plant.toLowerCase() === filters.plant.toLowerCase());
+  }
+  
+  const turnaroundTimes: number[] = [];
+  
+  filteredQAPs.forEach(qap => {
+    if (filters.level) {
+      const time = calculateTurnaroundTime(qap, filters.level);
+      if (time > 0) turnaroundTimes.push(time);
+    } else {
+      // Calculate total turnaround time
+      if (qap.submittedAt && qap.approvedAt) {
+        turnaroundTimes.push(qap.approvedAt.getTime() - qap.submittedAt.getTime());
+      }
+    }
+  });
+  
+  const average = turnaroundTimes.length > 0 
+    ? turnaroundTimes.reduce((sum, time) => sum + time, 0) / turnaroundTimes.length 
+    : 0;
+  
+  return { average, count: turnaroundTimes.length };
 };
