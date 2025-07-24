@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,7 +10,7 @@ import { useAuth } from '@/contexts/AuthContext';
 
 interface IndexProps {
   qapData: QAPFormData[];
-  onSave: (qap: QAPFormData, status?: string) => void;
+  onSave: (qapData: QAPFormData, status?: string) => void;
   onDelete: (id: string) => void;
 }
 
@@ -47,6 +46,10 @@ const Index: React.FC<IndexProps> = ({ qapData, onSave, onDelete }) => {
   const handleSave = (qapData: QAPFormData, status?: string) => {
     onSave(qapData, status);
     setIsQAPModalOpen(false);
+  };
+
+  const handleDelete = (qap: QAPFormData) => {
+    onDelete(qap.id);
   };
 
   // Stats for dashboard
@@ -149,7 +152,7 @@ const Index: React.FC<IndexProps> = ({ qapData, onSave, onDelete }) => {
             onEdit={handleEdit}
             onView={handleView}
             onShare={handleShare}
-            onDelete={onDelete}
+            onDelete={handleDelete}
           />
         </CardContent>
       </Card>

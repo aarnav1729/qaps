@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,7 +12,7 @@ import { Search, Filter, ChevronDown, ChevronUp, Clock, CheckCircle2, Send } fro
 
 interface Level2ReviewPageProps {
   qapData: QAPFormData[];
-  onNext: (qapId: string) => void;
+  onNext: (qapId: string, role: string, responses: { [itemIndex: number]: string }) => void;
 }
 
 const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({ qapData, onNext }) => {
@@ -99,8 +98,8 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({ qapData, onNext }) 
   };
 
   const handleNext = (qapId: string) => {
-    // Simple call matching the expected signature
-    onNext(qapId);
+    const qapResponses = responses[qapId] || {};
+    onNext(qapId, user?.role || '', qapResponses);
   };
 
   const getTimeRemaining = (submittedAt?: Date) => {
@@ -124,7 +123,7 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({ qapData, onNext }) 
     );
     const matchedItems = qap.qaps.filter(spec => spec.match === 'yes');
     
-    const hasUserResponded = qap.levelResponses[2]?.[user?.role || ''];
+    const hasUserResponded = qap.levelResponses[2]?.[user?.role || '']?.acknowledged || false;
     const qapResponses = responses[qap.id] || {};
     
     return (
