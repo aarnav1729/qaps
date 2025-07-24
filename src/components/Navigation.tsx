@@ -1,165 +1,183 @@
 
 import React from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
-import { Home, ClipboardCheck, BarChart3, Users, LogOut, FileText, Settings } from 'lucide-react';
+import { 
+  Home, 
+  FileText, 
+  Users, 
+  BarChart3, 
+  Settings, 
+  LogOut,
+  ClipboardCheck,
+  MessageSquare,
+  UserCheck,
+  CheckCircle,
+  Building2
+} from 'lucide-react';
 
 const Navigation: React.FC = () => {
   const { user, logout } = useAuth();
-  const navigate = useNavigate();
   const location = useLocation();
+  const navigate = useNavigate();
 
   const handleLogout = () => {
     logout();
-    navigate('/login');
+    navigate('/');
   };
 
   const isActive = (path: string) => {
     return location.pathname === path;
   };
 
-  const getDashboardPath = () => {
-    switch (user?.role) {
-      case 'requestor':
-        return '/dashboard';
-      case 'production':
-      case 'quality':
-      case 'technical':
-        return '/level2-review';
-      case 'head':
-        return '/level3-review';
-      case 'technical-head':
-        return '/level4-review';
-      case 'plant-head':
-        return '/level5-review';
-      case 'admin':
-        return '/admin';
-      default:
-        return '/dashboard';
-    }
-  };
-
   const navItems = [
     {
-      path: getDashboardPath(),
-      label: user?.role === 'admin' ? 'Admin Panel' : 
-             user?.role === 'requestor' ? 'Dashboard' : 
-             'Review Queue',
-      icon: user?.role === 'admin' ? Users : 
-            user?.role === 'requestor' ? Home : 
-            ClipboardCheck
+      path: '/',
+      label: 'Dashboard',
+      icon: Home,
+      roles: ['requestor', 'production', 'quality', 'technical', 'head', 'technical-head', 'plant-head', 'admin']
     },
-    { path: '/analytics', label: 'Analytics', icon: BarChart3 }
+    {
+      path: '/level2-review',
+      label: 'Level 2 Review',
+      icon: ClipboardCheck,
+      roles: ['production', 'quality', 'technical', 'admin']
+    },
+    {
+      path: '/level3-review',
+      label: 'Head Review',
+      icon: UserCheck,
+      roles: ['head', 'admin']
+    },
+    {
+      path: '/level4-review',
+      label: 'Technical Head',
+      icon: Users,
+      roles: ['technical-head', 'admin']
+    },
+    {
+      path: '/final-comments',
+      label: 'Final Comments',
+      icon: MessageSquare,
+      roles: ['requestor', 'admin']
+    },
+    {
+      path: '/level5-approval',
+      label: 'Plant Head Approval',
+      icon: CheckCircle,
+      roles: ['plant-head', 'admin']
+    },
+    {
+      path: '/spec-builder',
+      label: 'Spec Builder',
+      icon: Building2,
+      roles: ['requestor', 'admin']
+    },
+    {
+      path: '/analytics',
+      label: 'Analytics',
+      icon: BarChart3,
+      roles: ['requestor', 'production', 'quality', 'technical', 'head', 'technical-head', 'plant-head', 'admin']
+    },
+    {
+      path: '/approvals',
+      label: 'Approvals',
+      icon: FileText,
+      roles: ['plant-head', 'admin']
+    },
+    {
+      path: '/admin',
+      label: 'Admin',
+      icon: Settings,
+      roles: ['admin']
+    }
   ];
 
-  const getRoleDisplayName = (role: string) => {
-    switch (role) {
-      case 'requestor': return 'Requestor';
-      case 'production': return 'Production';
-      case 'quality': return 'Quality';
-      case 'technical': return 'Technical';
-      case 'head': return 'Head';
-      case 'technical-head': return 'Technical Head';
-      case 'plant-head': return 'Plant Head';
-      case 'admin': return 'Admin';
-      default: return role;
-    }
-  };
+  const visibleNavItems = navItems.filter(item => 
+    item.roles.includes(user?.role || '')
+  );
 
   return (
-    <nav className="bg-white shadow-md border-b">
-      <div className="container mx-auto px-4 sm:px-6">
-        <div className="flex justify-between items-center h-16">
-          {/* Logo */}
-          <div className="flex items-center space-x-3">
-            <div className="flex items-center justify-center w-10 h-10 bg-blue-600 rounded-lg">
-              <FileText className="w-6 h-6 text-white" />
-            </div>
-            <div>
+    <nav className="bg-white shadow-sm border-b">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex justify-between h-16">
+          <div className="flex items-center space-x-8">
+            {/* Logo */}
+            <div className="flex-shrink-0">
               <h1 className="text-xl font-bold text-gray-900">QAP System</h1>
-              <p className="text-xs text-gray-500">Quality Assurance Platform</p>
             </div>
-          </div>
 
-          {/* Navigation Links */}
-          <div className="hidden md:flex items-center space-x-1">
-            {navItems.map(({ path, label, icon: Icon }) => (
-              <Button
-                key={path}
-                variant={isActive(path) ? "default" : "ghost"}
-                onClick={() => navigate(path)}
-                className={`flex items-center space-x-2 px-4 py-2 ${
-                  isActive(path) 
-                    ? 'bg-blue-600 text-white hover:bg-blue-700' 
-                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span>{label}</span>
-              </Button>
-            ))}
-          </div>
-
-          {/* User Info & Logout */}
-          <div className="flex items-center space-x-4">
-            <div className="hidden sm:flex items-center space-x-2">
-              <div className="text-right">
-                <p className="text-sm font-medium text-gray-900">{user?.username}</p>
-                <div className="flex items-center space-x-1">
-                  <Badge 
-                    variant="outline" 
-                    className={`text-xs ${
-                      user?.role === 'admin' ? 'bg-red-50 text-red-700 border-red-200' :
-                      user?.role === 'plant-head' ? 'bg-purple-50 text-purple-700 border-purple-200' :
-                      user?.role === 'technical-head' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' :
-                      user?.role === 'head' ? 'bg-orange-50 text-orange-700 border-orange-200' :
-                      ['production', 'quality', 'technical'].includes(user?.role || '') ? 'bg-green-50 text-green-700 border-green-200' :
-                      'bg-blue-50 text-blue-700 border-blue-200'
+            {/* Navigation Links */}
+            <div className="hidden md:flex space-x-1">
+              {visibleNavItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    className={`inline-flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                      isActive(item.path)
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
                     }`}
                   >
-                    {getRoleDisplayName(user?.role || '')}
-                  </Badge>
-                  {user?.plant && (
-                    <Badge variant="outline" className="text-xs bg-gray-50 text-gray-700 border-gray-200">
-                      {user.plant.toUpperCase()}
-                    </Badge>
-                  )}
-                </div>
-              </div>
+                    <Icon className="w-4 h-4 mr-2" />
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* User Info and Logout */}
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <Badge variant="outline" className="capitalize">
+                {user?.role?.replace('-', ' ')}
+              </Badge>
+              <span className="text-sm text-gray-700">
+                {user?.username}
+              </span>
+              {user?.plant && (
+                <Badge variant="secondary">
+                  {user.plant.toUpperCase()}
+                </Badge>
+              )}
             </div>
             <Button
+              onClick={handleLogout}
               variant="ghost"
               size="sm"
-              onClick={handleLogout}
-              className="text-gray-600 hover:text-red-600 hover:bg-red-50"
+              className="text-gray-600 hover:text-gray-900"
             >
-              <LogOut className="w-4 h-4" />
-              <span className="hidden sm:ml-2 sm:inline">Logout</span>
+              <LogOut className="w-4 h-4 mr-2" />
+              Logout
             </Button>
           </div>
         </div>
 
         {/* Mobile Navigation */}
-        <div className="md:hidden flex items-center justify-between py-3 border-t">
-          <div className="flex space-x-1 overflow-x-auto">
-            {navItems.map(({ path, label, icon: Icon }) => (
-              <Button
-                key={path}
-                variant={isActive(path) ? "default" : "ghost"}
-                size="sm"
-                onClick={() => navigate(path)}
-                className={`flex items-center space-x-1 px-3 py-2 whitespace-nowrap ${
-                  isActive(path) 
-                    ? 'bg-blue-600 text-white' 
-                    : 'text-gray-600'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span className="text-xs">{label}</span>
-              </Button>
-            ))}
+        <div className="md:hidden">
+          <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3">
+            {visibleNavItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  className={`flex items-center px-3 py-2 rounded-md text-base font-medium transition-colors ${
+                    isActive(item.path)
+                      ? 'bg-blue-100 text-blue-700'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                  }`}
+                >
+                  <Icon className="w-4 h-4 mr-3" />
+                  {item.label}
+                </Link>
+              );
+            })}
           </div>
         </div>
       </div>

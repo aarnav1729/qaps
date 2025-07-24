@@ -1,80 +1,59 @@
-
-import React, { useState } from 'react';
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { AuthProvider, useAuth } from '@/contexts/AuthContext';
-import LoginPage from './components/LoginPage';
+import React, { useState, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Navigation from './components/Navigation';
-import Index from "./pages/Index";
+import LoginPage from './components/LoginPage';
+import Index from './pages/Index';
 import Level2ReviewPage from './components/Level2ReviewPage';
+import Level3ReviewPage from './components/Level3ReviewPage';
+import Level4ReviewPage from './components/Level4ReviewPage';
+import FinalCommentsPage from './components/FinalCommentsPage';
+import Level5ApprovalPage from './components/Level5ApprovalPage';
+import SpecificationBuilder from './components/SpecificationBuilder';
+import ApprovalsPage from './components/ApprovalsPage';
 import AnalyticsPage from './components/AnalyticsPage';
 import AdminPage from './components/AdminPage';
-import NotFound from "./pages/NotFound";
-import { QAPFormData, User, TimelineEntry } from '@/types/qap';
-import { getNextLevelUsers, isQAPExpired } from '@/utils/workflowUtils';
+import { QAPFormData } from './types/qap';
+import { processWorkflowTransition } from './utils/workflowUtils';
 
 const queryClient = new QueryClient();
 
-const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles?: string[] }> = ({ 
-  children, 
-  allowedRoles 
-}) => {
-  const { isAuthenticated, user } = useAuth();
-  
-  if (!isAuthenticated) {
-    return <Navigate to="/login" />;
-  }
-  
-  if (allowedRoles && user && !allowedRoles.includes(user.role)) {
-    return <Navigate to="/" />;
-  }
-  
-  return <>{children}</>;
-};
-
+// Main App Content Component
 const AppContent: React.FC = () => {
-  const { isAuthenticated, user } = useAuth();
-  const [qapData, setQapData] = useState<QAPFormData[]>(() => {
-    const saved = localStorage.getItem('qapData');
-    return saved ? JSON.parse(saved) : [];
-  });
-  
-  const [users, setUsers] = useState<User[]>([
-    { id: '1', username: 'praful', password: 'praful', role: 'requestor' },
-    { id: '2', username: 'yamini', password: 'yamini', role: 'requestor' },
-    { id: '3', username: 'manoj', password: 'manoj', role: 'production', plant: 'p2' },
-    { id: '4', username: 'malik', password: 'malik', role: 'production', plant: 'p4' },
-    { id: '5', username: 'siva', password: 'siva', role: 'production', plant: 'p5' },
-    { id: '6', username: 'abbas', password: 'abbas', role: 'quality', plant: 'p2' },
-    { id: '7', username: 'sriram', password: 'sriram', role: 'quality', plant: 'p4,p5' },
-    { id: '8', username: 'rahul', password: 'rahul', role: 'technical', plant: 'p2' },
-    { id: '9', username: 'ramu', password: 'ramu', role: 'technical', plant: 'p4,p5' },
-    { id: '10', username: 'nrao', password: 'nrao', role: 'head', plant: 'p4,p5' },
-    { id: '11', username: 'jmr', password: 'jmr', role: 'technical-head' },
-    { id: '12', username: 'baskara', password: 'baskara', role: 'technical-head' },
-    { id: '13', username: 'cmk', password: 'cmk', role: 'plant-head' },
-    { id: '14', username: 'aarnav', password: 'aarnav', role: 'admin' }
-  ]);
+  const { user, isAuthenticated } = useAuth();
+  const [qapData, setQapData] = useState<QAPFormData[]>([]);
 
-  // Save to localStorage whenever qapData changes
-  React.useEffect(() => {
+  // Load data from localStorage on component mount
+  useEffect(() => {
+    const savedData = localStorage.getItem('qapData');
+    if (savedData) {
+      try {
+        const parsedData = JSON.parse(savedData);
+        setQapData(parsedData.map((qap: any) => ({
+          ...qap,
+          submittedAt: qap.submittedAt ? new Date(qap.submittedAt) : undefined,
+          approvedAt: qap.approvedAt ? new Date(qap.approvedAt) : undefined,
+          finalCommentsAt: qap.finalCommentsAt ? new Date(qap.finalCommentsAt) : undefined,
+          timeline: qap.timeline?.map((entry: any) => ({
+            ...entry,
+            timestamp: new Date(entry.timestamp)
+          })) || []
+        })));
+      } catch (error) {
+        console.error('Error loading QAP data:', error);
+      }
+    }
+  }, []);
+
+  // Save data to localStorage whenever qapData changes
+  useEffect(() => {
     localStorage.setItem('qapData', JSON.stringify(qapData));
   }, [qapData]);
 
-  const updateQAPTimeline = (qapId: string, entry: TimelineEntry) => {
-    setQapData(prev => prev.map(qap => 
-      qap.id === qapId 
-        ? { ...qap, timeline: [...qap.timeline, entry] }
-        : qap
-    ));
-  };
-
-  const handleSaveQAP = (qapFormData: QAPFormData, status?: string) => {
+  const handleSaveQAP = (qapFormData: QAPFormData) => {
     setQapData(prev => {
-      const existingIndex = prev.findIndex(qap => qap.id === qapFormData.id);
+      const existingIndex = prev.findIndex(q => q.id === qapFormData.id);
       if (existingIndex >= 0) {
         const updated = [...prev];
         updated[existingIndex] = qapFormData;
@@ -85,172 +64,258 @@ const AppContent: React.FC = () => {
     });
   };
 
-  const handleLevel2Acknowledge = (qapId: string, itemIndex: number, comments: string) => {
-    if (!user) return;
-    
+  const handleDeleteQAP = (id: string) => {
+    setQapData(prev => prev.filter(q => q.id !== id));
+  };
+
+  const handleLevel2Next = (id: string, role: string, responses: { [itemIndex: number]: string }) => {
     setQapData(prev => prev.map(qap => {
-      if (qap.id !== qapId) return qap;
-      
-      const levelResponses = { ...qap.levelResponses };
-      if (!levelResponses[2]) levelResponses[2] = {};
-      if (!levelResponses[2][user.role]) {
-        levelResponses[2][user.role] = {
-          username: user.username,
-          acknowledged: false,
-          comments: {}
+      if (qap.id === id) {
+        const updatedQAP = { ...qap };
+        
+        // Initialize level responses if not exists
+        if (!updatedQAP.levelResponses[2]) {
+          updatedQAP.levelResponses[2] = {};
+        }
+        
+        // Add response for this role
+        updatedQAP.levelResponses[2][role] = {
+          username: user?.username || '',
+          acknowledged: true,
+          comments: responses,
+          respondedAt: new Date()
         };
+        
+        // Check if all required roles have responded
+        const requiredRoles = qap.qaps
+          .filter(spec => spec.match === 'no')
+          .flatMap(spec => spec.reviewBy || []);
+        
+        const uniqueRoles = [...new Set(requiredRoles)];
+        const respondedRoles = Object.keys(updatedQAP.levelResponses[2]);
+        
+        // If all roles responded or 4 days passed, move to next level
+        const allResponded = uniqueRoles.every(role => respondedRoles.includes(role));
+        
+        if (allResponded) {
+          return processWorkflowTransition(updatedQAP, 3);
+        }
+        
+        return updatedQAP;
       }
-      
-      levelResponses[2][user.role].comments[itemIndex] = comments;
-      levelResponses[2][user.role].acknowledged = true;
-      levelResponses[2][user.role].respondedAt = new Date();
-      
-      return { ...qap, levelResponses };
+      return qap;
     }));
   };
 
-  const handleLevel2Next = (qapId: string) => {
-    const qap = qapData.find(q => q.id === qapId);
-    if (!qap || !user) return;
-    
-    // Check if all required roles have responded or if 4 days have passed
-    const requiredRoles = ['production', 'quality', 'technical'];
-    const responses = qap.levelResponses[2] || {};
-    const allResponded = requiredRoles.every(role => responses[role]?.acknowledged);
-    const expired = isQAPExpired(qap.submittedAt || new Date(), 2);
-    
-    if (allResponded || expired) {
-      // Move to next level
-      const nextUsers = getNextLevelUsers(qap, 2);
-      
-      setQapData(prev => prev.map(q => 
-        q.id === qapId 
-          ? { 
-              ...q, 
-              currentLevel: qap.plant === 'p2' ? 4 : 3,
-              status: qap.plant === 'p2' ? 'level-4' : 'level-3'
-            }
-          : q
-      ));
-      
-      updateQAPTimeline(qapId, {
-        level: 2,
-        action: 'Level 2 review completed',
-        user: user.username,
-        timestamp: new Date(),
-        comments: 'Moved to next level'
-      });
-    }
+  const handleLevel3Next = (id: string, responses: { [itemIndex: number]: string }) => {
+    setQapData(prev => prev.map(qap => {
+      if (qap.id === id) {
+        const updatedQAP = { ...qap };
+        
+        if (!updatedQAP.levelResponses[3]) {
+          updatedQAP.levelResponses[3] = {};
+        }
+        
+        updatedQAP.levelResponses[3]['head'] = {
+          username: user?.username || '',
+          acknowledged: true,
+          comments: responses,
+          respondedAt: new Date()
+        };
+        
+        return processWorkflowTransition(updatedQAP, 4);
+      }
+      return qap;
+    }));
   };
 
-  const getDashboardRoute = () => {
-    switch (user?.role) {
-      case 'requestor':
-        return '/';
-      case 'production':
-      case 'quality':
-      case 'technical':
-        return '/level2-review';
-      case 'head':
-        return '/level3-review';
-      case 'technical-head':
-        return '/level4-review';
-      case 'plant-head':
-        return '/level5-review';
-      case 'admin':
-        return '/admin';
-      default:
-        return '/';
-    }
+  const handleLevel4Next = (id: string, responses: { [itemIndex: number]: string }) => {
+    setQapData(prev => prev.map(qap => {
+      if (qap.id === id) {
+        const updatedQAP = { ...qap };
+        
+        if (!updatedQAP.levelResponses[4]) {
+          updatedQAP.levelResponses[4] = {};
+        }
+        
+        updatedQAP.levelResponses[4]['technical-head'] = {
+          username: user?.username || '',
+          acknowledged: true,
+          comments: responses,
+          respondedAt: new Date()
+        };
+        
+        // Move to final comments stage
+        updatedQAP.status = 'final-comments';
+        updatedQAP.timeline.push({
+          level: 4,
+          action: 'Reviewed by Technical Head, sent for final comments',
+          user: user?.username,
+          timestamp: new Date()
+        });
+        
+        return updatedQAP;
+      }
+      return qap;
+    }));
+  };
+
+  const handleSubmitFinalComments = (id: string, finalComments: string) => {
+    setQapData(prev => prev.map(qap => {
+      if (qap.id === id) {
+        const updatedQAP = { ...qap };
+        updatedQAP.finalComments = finalComments;
+        updatedQAP.finalCommentsBy = user?.username;
+        updatedQAP.finalCommentsAt = new Date();
+        
+        return processWorkflowTransition(updatedQAP, 5);
+      }
+      return qap;
+    }));
+  };
+
+  const handleLevel5Approve = (id: string, feedback?: string) => {
+    setQapData(prev => prev.map(qap => {
+      if (qap.id === id) {
+        return {
+          ...qap,
+          status: 'approved' as const,
+          approver: user?.username,
+          approvedAt: new Date(),
+          feedback,
+          timeline: [
+            ...qap.timeline,
+            {
+              level: 5,
+              action: 'Approved by Plant Head',
+              user: user?.username,
+              timestamp: new Date(),
+              comments: feedback
+            }
+          ]
+        };
+      }
+      return qap;
+    }));
+  };
+
+  const handleLevel5Reject = (id: string, feedback: string) => {
+    setQapData(prev => prev.map(qap => {
+      if (qap.id === id) {
+        return {
+          ...qap,
+          status: 'rejected' as const,
+          feedback,
+          timeline: [
+            ...qap.timeline,
+            {
+              level: 5,
+              action: 'Rejected by Plant Head',
+              user: user?.username,
+              timestamp: new Date(),
+              comments: feedback
+            }
+          ]
+        };
+      }
+      return qap;
+    }));
+  };
+
+  const handleViewQAP = (qap: QAPFormData) => {
+    console.log('Viewing QAP:', qap);
   };
 
   if (!isAuthenticated) {
-    return (
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="*" element={<Navigate to="/login" />} />
-      </Routes>
-    );
+    return <LoginPage />;
   }
-  
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
+    <div className="min-h-screen bg-gray-50">
       <Navigation />
-      <Routes>
-        <Route 
-          path="/" 
-          element={<Navigate to={getDashboardRoute()} />} 
-        />
-        
-        <Route 
-          path="/dashboard" 
-          element={
-            <ProtectedRoute allowedRoles={['requestor']}>
-              <Index 
-                qapData={qapData} 
-                onSaveQAP={handleSaveQAP} 
-                onSubmitQAP={handleSaveQAP} 
-              />
-            </ProtectedRoute>
-          } 
-        />
-        
-        <Route 
-          path="/level2-review" 
-          element={
-            <ProtectedRoute allowedRoles={['production', 'quality', 'technical']}>
-              <Level2ReviewPage 
-                qapData={qapData}
-                onAcknowledge={handleLevel2Acknowledge}
-                onNext={handleLevel2Next}
-              />
-            </ProtectedRoute>
-          } 
-        />
-        
-        <Route 
-          path="/analytics" 
-          element={
-            <ProtectedRoute>
-              <AnalyticsPage qapData={qapData} />
-            </ProtectedRoute>
-          } 
-        />
-        
-        <Route 
-          path="/admin" 
-          element={
-            <ProtectedRoute allowedRoles={['admin']}>
-              <AdminPage 
-                qapData={qapData}
-                users={users}
-                onAddUser={(user) => setUsers(prev => [...prev, user])}
-                onEditUser={(user) => setUsers(prev => prev.map(u => u.id === user.id ? user : u))}
-                onDeleteUser={(id) => setUsers(prev => prev.filter(u => u.id !== id))}
-              />
-            </ProtectedRoute>
-          } 
-        />
-        
-        <Route path="/login" element={<Navigate to={getDashboardRoute()} />} />
-        <Route path="*" element={<NotFound />} />
-      </Routes>
+      <main className="pt-4">
+        <Routes>
+          <Route path="/" element={<Index qapData={qapData} onSave={handleSaveQAP} onDelete={handleDeleteQAP} />} />
+          
+          {/* Level 2 Routes */}
+          {(user?.role === 'production' || user?.role === 'quality' || user?.role === 'technical' || user?.role === 'admin') && (
+            <Route 
+              path="/level2-review" 
+              element={<Level2ReviewPage qapData={qapData} onNext={handleLevel2Next} />} 
+            />
+          )}
+          
+          {/* Level 3 Routes */}
+          {(user?.role === 'head' || user?.role === 'admin') && (
+            <Route 
+              path="/level3-review" 
+              element={<Level3ReviewPage qapData={qapData} onNext={handleLevel3Next} />} 
+            />
+          )}
+          
+          {/* Level 4 Routes */}
+          {(user?.role === 'technical-head' || user?.role === 'admin') && (
+            <Route 
+              path="/level4-review" 
+              element={<Level4ReviewPage qapData={qapData} onNext={handleLevel4Next} />} 
+            />
+          )}
+          
+          {/* Final Comments Routes */}
+          {(user?.role === 'requestor' || user?.role === 'admin') && (
+            <Route 
+              path="/final-comments" 
+              element={<FinalCommentsPage qapData={qapData} onSubmitFinalComments={handleSubmitFinalComments} />} 
+            />
+          )}
+          
+          {/* Level 5 Routes */}
+          {(user?.role === 'plant-head' || user?.role === 'admin') && (
+            <Route 
+              path="/level5-approval" 
+              element={<Level5ApprovalPage qapData={qapData} onApprove={handleLevel5Approve} onReject={handleLevel5Reject} />} 
+            />
+          )}
+          
+          {/* Specification Builder */}
+          {(user?.role === 'requestor' || user?.role === 'admin') && (
+            <Route path="/spec-builder" element={<SpecificationBuilder />} />
+          )}
+          
+          {/* Analytics */}
+          <Route path="/analytics" element={<AnalyticsPage qapData={qapData} />} />
+          
+          {/* Approvals (keeping for compatibility) */}
+          {(user?.role === 'plant-head' || user?.role === 'admin') && (
+            <Route 
+              path="/approvals" 
+              element={<ApprovalsPage qapData={qapData} onApprove={handleLevel5Approve} onReject={handleLevel5Reject} onView={handleViewQAP} />} 
+            />
+          )}
+          
+          {/* Admin */}
+          {user?.role === 'admin' && (
+            <Route path="/admin" element={<AdminPage />} />
+          )}
+          
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </main>
     </div>
   );
 };
 
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <AuthProvider>
+// Main App Component
+const App: React.FC = () => {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <Router>
           <AppContent />
-        </AuthProvider>
-      </BrowserRouter>
-    </TooltipProvider>
-  </QueryClientProvider>
-);
+        </Router>
+      </AuthProvider>
+    </QueryClientProvider>
+  );
+};
 
 export default App;

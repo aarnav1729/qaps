@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -10,41 +9,40 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { QAPSpecification, QAPFormData } from '@/types/qap';
 import { mqpSpecifications, visualElSpecifications } from '@/data/qapSpecifications';
 import { useAuth } from '@/contexts/AuthContext';
-import { Save, RotateCcw, Send } from 'lucide-react';
 
 interface QAPModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (qapData: QAPFormData, status?: 'draft' | 'submitted') => void;
+  onSave: (qapData: QAPFormData) => void;
   nextSno: number;
   editingQAP?: QAPFormData | null;
-  draftData?: Partial<QAPFormData>;
 }
 
-const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, editingQAP, draftData }) => {
+const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, editingQAP }) => {
   const { user } = useAuth();
   
-  // Form fields with draft data pre-population
   const [customerName, setCustomerName] = useState('');
   const [projectName, setProjectName] = useState('');
   const [orderQuantity, setOrderQuantity] = useState(0);
   const [productType, setProductType] = useState('');
   const [plant, setPlant] = useState('');
   
-  // Custom dropdown options
-  const [customerOptions, setCustomerOptions] = useState(['akanksha', 'praful', 'yamini', 'jmr', 'cmk']);
-  const [productOptions, setProductOptions] = useState(['perc', 'monoperc', 'g12r']);
-  const [plantOptions, setPlantOptions] = useState(['p2', 'p4']);
-  
-  // QAP data
   const [mqpData, setMqpData] = useState<QAPSpecification[]>([]);
   const [visualElData, setVisualElData] = useState<QAPSpecification[]>([]);
 
-  // Initialize form data when modal opens
+  const customerOptions = ['akanksha', 'praful', 'yamini', 'jmr', 'cmk'];
+  const productOptions = [
+    'Dual Glass M10 Perc',
+    'Dual Glass M10 Topcon',
+    'Dual Glass G12R Topcon',
+    'Dual Glass G12 Topcon',
+    'M10 Transparent Perc'
+  ];
+  const plantOptions = ['p2', 'p4', 'p5'];
+
   useEffect(() => {
     if (isOpen) {
       if (editingQAP) {
-        // Editing existing QAP
         setCustomerName(editingQAP.customerName);
         setProjectName(editingQAP.projectName);
         setOrderQuantity(editingQAP.orderQuantity);
@@ -52,26 +50,12 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, e
         setPlant(editingQAP.plant);
         setMqpData(editingQAP.qaps.filter(q => q.criteria === 'MQP'));
         setVisualElData(editingQAP.qaps.filter(q => q.criteria === 'Visual' || q.criteria === 'EL'));
-      } else if (draftData && Object.keys(draftData).length > 0) {
-        // Loading from draft
-        setCustomerName(draftData.customerName || '');
-        setProjectName(draftData.projectName || '');
-        setOrderQuantity(draftData.orderQuantity || 0);
-        setProductType(draftData.productType || '');
-        setPlant(draftData.plant || '');
-        if (draftData.qaps) {
-          setMqpData(draftData.qaps.filter(q => q.criteria === 'MQP'));
-          setVisualElData(draftData.qaps.filter(q => q.criteria === 'Visual' || q.criteria === 'EL'));
-        } else {
-          initializeQAPData();
-        }
       } else {
-        // New QAP
         resetForm();
         initializeQAPData();
       }
     }
-  }, [isOpen, editingQAP, draftData, nextSno]);
+  }, [isOpen, editingQAP, nextSno]);
 
   const initializeQAPData = () => {
     setMqpData(mqpSpecifications.map((spec, index) => ({
@@ -87,16 +71,6 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, e
       match: undefined,
       customerSpecification: undefined
     })));
-  };
-
-  const addCustomOption = (type: 'customer' | 'product' | 'plant', value: string) => {
-    if (type === 'customer' && !customerOptions.includes(value)) {
-      setCustomerOptions([...customerOptions, value]);
-    } else if (type === 'product' && !productOptions.includes(value)) {
-      setProductOptions([...productOptions, value]);
-    } else if (type === 'plant' && !plantOptions.includes(value)) {
-      setPlantOptions([...plantOptions, value]);
-    }
   };
 
   const handleMatchChange = (section: 'mqp' | 'visual', index: number, match: 'yes' | 'no') => {
@@ -127,7 +101,7 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, e
     updateSection(newData);
   };
 
-  const handleSave = (status: 'draft' | 'submitted' = 'draft') => {
+  const handleSave = (isDraft: boolean = true) => {
     const allData = [...mqpData, ...visualElData];
     const qapData: QAPFormData = {
       id: editingQAP?.id || Date.now().toString(),
@@ -136,13 +110,21 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, e
       orderQuantity,
       productType,
       plant,
-      status,
+      status: isDraft ? 'draft' : 'submitted',
       submittedBy: user?.username,
-      submittedAt: status === 'submitted' ? new Date() : editingQAP?.submittedAt,
+      submittedAt: isDraft ? undefined : new Date(),
+      currentLevel: 1,
+      levelResponses: {},
+      timeline: isDraft ? [] : [{
+        level: 1,
+        action: 'Submitted by requestor',
+        user: user?.username,
+        timestamp: new Date()
+      }],
       qaps: allData
     };
     
-    onSave(qapData, status);
+    onSave(qapData);
     onClose();
     resetForm();
   };
@@ -312,33 +294,18 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, e
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-[95vw] max-h-[90vh] flex flex-col p-0">
-        <DialogHeader className="p-4 sm:p-6 pb-4 border-b bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
-          <div className="flex items-center justify-between">
-            <DialogTitle className="text-xl sm:text-2xl font-bold flex items-center gap-2 sm:gap-3">
-              <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center text-lg">
-                📋
-              </div>
-              <span>{editingQAP ? 'Edit QAP' : 'New QAP'}</span>
-            </DialogTitle>
-          </div>
+        <DialogHeader className="p-6 pb-4 border-b bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
+          <DialogTitle className="text-2xl font-bold">
+            {editingQAP ? 'Edit QAP' : 'New QAP'}
+          </DialogTitle>
         </DialogHeader>
         
-        <div className="flex-1 overflow-auto p-4 sm:p-6">
+        <div className="flex-1 overflow-auto p-6">
           {/* Form Fields */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6 bg-blue-50 p-4 rounded-lg border border-blue-200">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6 bg-blue-50 p-4 rounded-lg">
             <div className="space-y-2">
-              <Label htmlFor="customerName" className="text-sm font-medium">Customer Name *</Label>
-              <Select value={customerName} onValueChange={(value) => {
-                if (value === 'other') {
-                  const custom = prompt('Enter custom customer name:');
-                  if (custom) {
-                    addCustomOption('customer', custom);
-                    setCustomerName(custom);
-                  }
-                } else {
-                  setCustomerName(value);
-                }
-              }}>
+              <Label>Customer Name *</Label>
+              <Select value={customerName} onValueChange={setCustomerName}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select customer" />
                 </SelectTrigger>
@@ -346,15 +313,13 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, e
                   {customerOptions.map(option => (
                     <SelectItem key={option} value={option}>{option}</SelectItem>
                   ))}
-                  <SelectItem value="other">Other (Custom)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="projectName" className="text-sm font-medium">Project Name *</Label>
+              <Label>Project Name *</Label>
               <Input
-                id="projectName"
                 value={projectName}
                 onChange={(e) => setProjectName(e.target.value)}
                 placeholder="Enter project name"
@@ -362,29 +327,18 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, e
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="orderQuantity" className="text-sm font-medium">Order Quantity *</Label>
+              <Label>Quantity in MW *</Label>
               <Input
-                id="orderQuantity"
                 type="number"
                 value={orderQuantity}
                 onChange={(e) => setOrderQuantity(Number(e.target.value))}
-                placeholder="Enter quantity"
+                placeholder="Enter quantity in MW"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="productType" className="text-sm font-medium">Product Type *</Label>
-              <Select value={productType} onValueChange={(value) => {
-                if (value === 'other') {
-                  const custom = prompt('Enter custom product type:');
-                  if (custom) {
-                    addCustomOption('product', custom);
-                    setProductType(custom);
-                  }
-                } else {
-                  setProductType(value);
-                }
-              }}>
+              <Label>Product Type *</Label>
+              <Select value={productType} onValueChange={setProductType}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select product type" />
                 </SelectTrigger>
@@ -392,24 +346,13 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, e
                   {productOptions.map(option => (
                     <SelectItem key={option} value={option}>{option}</SelectItem>
                   ))}
-                  <SelectItem value="other">Other (Custom)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="plant" className="text-sm font-medium">Plant *</Label>
-              <Select value={plant} onValueChange={(value) => {
-                if (value === 'other') {
-                  const custom = prompt('Enter custom plant:');
-                  if (custom) {
-                    addCustomOption('plant', custom);
-                    setPlant(custom);
-                  }
-                } else {
-                  setPlant(value);
-                }
-              }}>
+              <Label>Plant *</Label>
+              <Select value={plant} onValueChange={setPlant}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select plant" />
                 </SelectTrigger>
@@ -417,61 +360,33 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, e
                   {plantOptions.map(option => (
                     <SelectItem key={option} value={option}>{option.toUpperCase()}</SelectItem>
                   ))}
-                  <SelectItem value="other">Other (Custom)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
 
-          {/* Instructions */}
-          <div className="mb-4 text-sm text-gray-600 bg-blue-50 p-3 rounded-lg border border-blue-200">
-            💡 <strong>Instructions:</strong> Select "Yes" if your customer specification matches the Premier Specification/Criteria Limits (it will auto-fill and highlight green). 
-            Select "No" to enter a custom specification manually (will highlight red).
-          </div>
-
           {/* Tabs for MQP and Visual/EL */}
           <Tabs defaultValue="mqp" className="w-full">
             <TabsList className="grid w-full grid-cols-2 mb-4">
-              <TabsTrigger value="mqp" className="flex items-center gap-2">
-                <Badge variant="outline" className="bg-blue-100 text-blue-800 text-xs">MQP</Badge>
-                ({mqpData.length} items)
-              </TabsTrigger>
-              <TabsTrigger value="visual-el" className="flex items-center gap-2">
-                <Badge variant="outline" className="bg-purple-100 text-purple-800 text-xs">Visual & EL</Badge>
-                ({visualElData.length} items)
-              </TabsTrigger>
+              <TabsTrigger value="mqp">MQP ({mqpData.length})</TabsTrigger>
+              <TabsTrigger value="visual-el">Visual & EL ({visualElData.length})</TabsTrigger>
             </TabsList>
             
-            <TabsContent value="mqp" className="mt-0">
+            <TabsContent value="mqp">
               {renderMQPTable()}
             </TabsContent>
             
-            <TabsContent value="visual-el" className="mt-0">
+            <TabsContent value="visual-el">
               {renderVisualElTable()}
             </TabsContent>
           </Tabs>
         </div>
         
-        <div className="p-4 sm:p-6 pt-0 border-t bg-gray-50">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div className="text-sm text-gray-600">
-              Status: <strong className="capitalize">{editingQAP?.status || 'draft'}</strong>
-            </div>
-            <div className="flex gap-3 w-full sm:w-auto">
-              <Button onClick={onClose} variant="outline" className="flex-1 sm:flex-none">
-                Cancel
-              </Button>
-              <Button onClick={() => handleSave('draft')} variant="outline" className="flex-1 sm:flex-none">
-                <Save className="w-4 h-4 mr-2" />
-                Save Draft
-              </Button>
-              {(!editingQAP || editingQAP.status === 'draft') && (
-                <Button onClick={() => handleSave('submitted')} className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 flex-1 sm:flex-none">
-                  <Send className="w-4 h-4 mr-2" />
-                  Submit for Approval
-                </Button>
-              )}
-            </div>
+        <div className="p-6 pt-0 border-t bg-gray-50">
+          <div className="flex gap-3">
+            <Button onClick={onClose} variant="outline">Cancel</Button>
+            <Button onClick={() => handleSave(true)} variant="outline">Save Draft</Button>
+            <Button onClick={() => handleSave(false)} className="bg-blue-600 hover:bg-blue-700">Submit</Button>
           </div>
         </div>
       </DialogContent>
