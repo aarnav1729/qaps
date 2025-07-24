@@ -25,6 +25,68 @@ export const getNextLevelUsers = (qap: QAPFormData, currentLevel: number): strin
   }
 };
 
+export const processWorkflowTransition = (qap: QAPFormData, nextLevel: number): QAPFormData => {
+  const updatedQAP = { ...qap };
+  
+  switch (nextLevel) {
+    case 3:
+      if (qap.plant.toLowerCase() === 'p2') {
+        // Auto-bypass to Level 4 for P2
+        updatedQAP.status = 'level-4';
+        updatedQAP.currentLevel = 4;
+        updatedQAP.timeline.push({
+          level: 3,
+          action: 'Auto-bypassed (P2 plant)',
+          user: 'system',
+          timestamp: new Date()
+        });
+        updatedQAP.timeline.push({
+          level: 4,
+          action: 'Sent to Technical Head',
+          user: 'system',
+          timestamp: new Date()
+        });
+      } else {
+        updatedQAP.status = 'level-3';
+        updatedQAP.currentLevel = 3;
+        updatedQAP.timeline.push({
+          level: 3,
+          action: 'Sent to Head for review',
+          user: 'system',
+          timestamp: new Date()
+        });
+      }
+      break;
+    
+    case 4:
+      updatedQAP.status = 'level-4';
+      updatedQAP.currentLevel = 4;
+      updatedQAP.timeline.push({
+        level: 4,
+        action: 'Sent to Technical Head',
+        user: 'system',
+        timestamp: new Date()
+      });
+      break;
+    
+    case 5:
+      updatedQAP.status = 'level-5';
+      updatedQAP.currentLevel = 5;
+      updatedQAP.timeline.push({
+        level: 5,
+        action: 'Sent to Plant Head for approval',
+        user: 'system',
+        timestamp: new Date()
+      });
+      break;
+    
+    default:
+      break;
+  }
+  
+  return updatedQAP;
+};
+
 export const canUserAccessQAP = (user: User, qap: QAPFormData): boolean => {
   if (user.role === 'admin') return true;
   

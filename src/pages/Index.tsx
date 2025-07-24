@@ -11,11 +11,11 @@ import { useAuth } from '@/contexts/AuthContext';
 
 interface IndexProps {
   qapData: QAPFormData[];
-  onSaveQAP: (qap: QAPFormData, status?: string) => void;
-  onSubmitQAP: (qap: QAPFormData, status?: string) => void;
+  onSave: (qap: QAPFormData, status?: string) => void;
+  onDelete: (id: string) => void;
 }
 
-const Index: React.FC<IndexProps> = ({ qapData, onSaveQAP, onSubmitQAP }) => {
+const Index: React.FC<IndexProps> = ({ qapData, onSave, onDelete }) => {
   const { user } = useAuth();
   const [isQAPModalOpen, setIsQAPModalOpen] = useState(false);
   const [selectedQAP, setSelectedQAP] = useState<QAPFormData | null>(null);
@@ -41,12 +41,11 @@ const Index: React.FC<IndexProps> = ({ qapData, onSaveQAP, onSubmitQAP }) => {
   };
 
   const handleShare = (qap: QAPFormData) => {
-    // This is handled by the enhanced modal now
     console.log('Sharing QAP:', qap.id);
   };
 
   const handleSave = (qapData: QAPFormData, status?: string) => {
-    onSaveQAP(qapData, status);
+    onSave(qapData, status);
     setIsQAPModalOpen(false);
   };
 
@@ -150,7 +149,7 @@ const Index: React.FC<IndexProps> = ({ qapData, onSaveQAP, onSubmitQAP }) => {
             onEdit={handleEdit}
             onView={handleView}
             onShare={handleShare}
-            onDelete={() => {}} // Add empty function for now
+            onDelete={onDelete}
           />
         </CardContent>
       </Card>

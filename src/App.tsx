@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -23,6 +24,7 @@ const queryClient = new QueryClient();
 const AppContent: React.FC = () => {
   const { user, isAuthenticated } = useAuth();
   const [qapData, setQapData] = useState<QAPFormData[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
 
   // Load data from localStorage on component mount
   useEffect(() => {
@@ -51,7 +53,7 @@ const AppContent: React.FC = () => {
     localStorage.setItem('qapData', JSON.stringify(qapData));
   }, [qapData]);
 
-  const handleSaveQAP = (qapFormData: QAPFormData) => {
+  const handleSaveQAP = (qapFormData: QAPFormData, status?: string) => {
     setQapData(prev => {
       const existingIndex = prev.findIndex(q => q.id === qapFormData.id);
       if (existingIndex >= 0) {
@@ -68,9 +70,9 @@ const AppContent: React.FC = () => {
     setQapData(prev => prev.filter(q => q.id !== id));
   };
 
-  const handleLevel2Next = (id: string, role: string, responses: { [itemIndex: number]: string }) => {
+  const handleLevel2Next = (qapId: string) => {
     setQapData(prev => prev.map(qap => {
-      if (qap.id === id) {
+      if (qap.id === qapId) {
         const updatedQAP = { ...qap };
         
         // Initialize level responses if not exists
@@ -79,10 +81,10 @@ const AppContent: React.FC = () => {
         }
         
         // Add response for this role
-        updatedQAP.levelResponses[2][role] = {
+        updatedQAP.levelResponses[2][user?.role || ''] = {
           username: user?.username || '',
           acknowledged: true,
-          comments: responses,
+          comments: {},
           respondedAt: new Date()
         };
         
@@ -94,7 +96,7 @@ const AppContent: React.FC = () => {
         const uniqueRoles = [...new Set(requiredRoles)];
         const respondedRoles = Object.keys(updatedQAP.levelResponses[2]);
         
-        // If all roles responded or 4 days passed, move to next level
+        // If all roles responded, move to next level
         const allResponded = uniqueRoles.every(role => respondedRoles.includes(role));
         
         if (allResponded) {
@@ -226,6 +228,19 @@ const AppContent: React.FC = () => {
     console.log('Viewing QAP:', qap);
   };
 
+  // User management functions for AdminPage
+  const handleAddUser = (user: any) => {
+    setUsers(prev => [...prev, user]);
+  };
+
+  const handleEditUser = (user: any) => {
+    setUsers(prev => prev.map(u => u.id === user.id ? user : u));
+  };
+
+  const handleDeleteUser = (id: string) => {
+    setUsers(prev => prev.filter(u => u.id !== id));
+  };
+
   if (!isAuthenticated) {
     return <LoginPage />;
   }
@@ -295,7 +310,18 @@ const AppContent: React.FC = () => {
           
           {/* Admin */}
           {user?.role === 'admin' && (
-            <Route path="/admin" element={<AdminPage />} />
+            <Route 
+              path="/admin" 
+              element={
+                <AdminPage 
+                  qapData={qapData} 
+                  users={users} 
+                  onAddUser={handleAddUser} 
+                  onEditUser={handleEditUser} 
+                  onDeleteUser={handleDeleteUser} 
+                />
+              } 
+            />
           )}
           
           <Route path="*" element={<Navigate to="/" replace />} />
