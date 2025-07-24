@@ -1,16 +1,13 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { QAPFormData } from '@/types/qap';
 import { useAuth } from '@/contexts/AuthContext';
-import { Eye, Printer, MessageSquare, CheckCircle, XCircle, Search } from 'lucide-react';
-import { Textarea } from '@/components/ui/textarea';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import EnhancedViewQAPModal from './EnhancedViewQAPModal';
+import { Eye, CheckCircle, XCircle, Search, Filter } from 'lucide-react';
 
 interface ApprovalsPageProps {
   qapData: QAPFormData[];
@@ -22,299 +19,230 @@ interface ApprovalsPageProps {
 const ApprovalsPage: React.FC<ApprovalsPageProps> = ({ qapData, onApprove, onReject, onView }) => {
   const { user } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterStatus, setFilterStatus] = useState('all');
   const [selectedQAP, setSelectedQAP] = useState<QAPFormData | null>(null);
   const [feedback, setFeedback] = useState('');
-  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
-  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [reviewAction, setReviewAction] = useState<'approve' | 'reject'>('approve');
 
-  useEffect(() => {
-    console.log('Current QAP Data state:', qapData);
-    console.log('User:', user);
-    console.log('QAPs for approval:', getQAPsForApproval());
-  }, [qapData, user]);
-
-  const getQAPsForApproval = () => {
-    console.log('All QAP Data:', qapData);
-    let filteredQAPs = qapData.filter(qap => {
-      console.log(`QAP ${qap.id}: status=${qap.status}, plant=${qap.plant}, userRole=${user?.role}, userPlant=${user?.plant}`);
-      return qap.status === 'submitted' && 
-        (user?.role === 'admin' || qap.plant === user?.plant?.toLowerCase());
-    });
-
-    console.log('Filtered QAPs:', filteredQAPs);
-
-    if (searchTerm) {
-      filteredQAPs = filteredQAPs.filter(qap =>
-        qap.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        qap.projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        qap.submittedBy?.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-
-    console.log('QAP Data in table:', filteredQAPs);
-    return filteredQAPs;
-  };
-
-  const getApprovedQAPs = () => {
-    return qapData.filter(qap => 
-      qap.status === 'approved' && 
-      (user?.role === 'admin' || qap.plant === user?.plant?.toLowerCase())
-    );
-  };
-
-  const getRejectedQAPs = () => {
-    return qapData.filter(qap => 
-      qap.status === 'rejected' && 
-      (user?.role === 'admin' || qap.plant === user?.plant?.toLowerCase())
-    );
-  };
-
-  const handleReview = (qap: QAPFormData, action: 'approve' | 'reject') => {
-    setSelectedQAP(qap);
-    setReviewAction(action);
-    setFeedback('');
-    setIsReviewModalOpen(true);
-  };
-
-  const handleViewQAP = (qap: QAPFormData) => {
-    setSelectedQAP(qap);
-    setIsViewModalOpen(true);
-    onView(qap);
-  };
-
-  const submitReview = () => {
-    if (!selectedQAP) return;
-
-    if (reviewAction === 'approve') {
-      onApprove(selectedQAP.id, feedback);
-    } else {
-      if (!feedback.trim()) {
-        alert('Please provide feedback for rejection');
-        return;
+  const filteredQAPs = useMemo(() => {
+    return qapData.filter(qap => {
+      // Filter by search term
+      if (searchTerm) {
+        const searchLower = searchTerm.toLowerCase();
+        const matchesSearch = 
+          qap.customerName.toLowerCase().includes(searchLower) ||
+          qap.projectName.toLowerCase().includes(searchLower) ||
+          qap.productType.toLowerCase().includes(searchLower);
+        if (!matchesSearch) return false;
       }
-      onReject(selectedQAP.id, feedback);
-    }
 
-    setIsReviewModalOpen(false);
-    setSelectedQAP(null);
-    setFeedback('');
-  };
+      // Filter by status
+      if (filterStatus === 'approved') return qap.status === 'approved';
+      if (filterStatus === 'pending') return qap.status === 'level-5';
+      if (filterStatus === 'rejected') return qap.status === 'rejected';
 
-  const printQAP = (qap: QAPFormData, type: 'all' | 'green' | 'red') => {
-    console.log(`Printing QAP ${qap.id} with type: ${type}`);
-    // Implementation for printing logic
-  };
+      return ['approved', 'rejected', 'level-5'].includes(qap.status);
+    });
+  }, [qapData, searchTerm, filterStatus]);
 
-  const renderQAPTable = (qaps: QAPFormData[], showActions: boolean = true) => {
-    if (qaps.length === 0) {
-      return <p className="text-center text-gray-500 py-8">No QAPs found</p>;
-    }
+  const getStatusBadge = (status: string) => {
+    const colors = {
+      'approved': 'bg-green-100 text-green-800',
+      'rejected': 'bg-red-100 text-red-800',
+      'level-5': 'bg-yellow-100 text-yellow-800'
+    } as const;
 
     return (
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse border border-gray-300 text-sm">
-          <thead>
-            <tr className="bg-gradient-to-r from-gray-100 to-gray-200">
-              <th className="border border-gray-300 p-3 text-left font-semibold">Customer</th>
-              <th className="border border-gray-300 p-3 text-left font-semibold">Project</th>
-              <th className="border border-gray-300 p-3 text-left font-semibold">Plant</th>
-              <th className="border border-gray-300 p-3 text-left font-semibold">Quantity</th>
-              <th className="border border-gray-300 p-3 text-left font-semibold">Product Type</th>
-              <th className="border border-gray-300 p-3 text-left font-semibold">Submitted By</th>
-              <th className="border border-gray-300 p-3 text-left font-semibold">Status</th>
-              {showActions && <th className="border border-gray-300 p-3 text-center font-semibold">Actions</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {qaps.map((qap) => (
-              <tr key={qap.id} className="border-b hover:bg-gray-50">
-                <td className="border border-gray-300 p-3">{qap.customerName}</td>
-                <td className="border border-gray-300 p-3">{qap.projectName}</td>
-                <td className="border border-gray-300 p-3">
-                  <Badge variant="outline" className="bg-blue-100 text-blue-800">
-                    {qap.plant.toUpperCase()}
-                  </Badge>
-                </td>
-                <td className="border border-gray-300 p-3">{qap.orderQuantity}</td>
-                <td className="border border-gray-300 p-3">{qap.productType}</td>
-                <td className="border border-gray-300 p-3">{qap.submittedBy}</td>
-                <td className="border border-gray-300 p-3">
-                  <Badge 
-                    variant={qap.status === 'approved' ? 'default' : qap.status === 'rejected' ? 'destructive' : 'secondary'}
-                    className="capitalize"
-                  >
-                    {qap.status}
-                  </Badge>
-                </td>
-                {showActions && (
-                  <td className="border border-gray-300 p-3">
-                    <div className="flex items-center justify-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleViewQAP(qap)}
-                        className="h-8 w-8 p-0 hover:bg-blue-100"
-                        title="View QAP"
-                      >
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => printQAP(qap, 'all')}
-                        className="h-8 w-8 p-0 hover:bg-gray-100"
-                        title="Print All"
-                      >
-                        <Printer className="h-4 w-4" />
-                      </Button>
-                      {qap.status === 'submitted' && (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleReview(qap, 'approve')}
-                            className="h-8 w-8 p-0 hover:bg-green-100 text-green-600"
-                            title="Approve"
-                          >
-                            <CheckCircle className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleReview(qap, 'reject')}
-                            className="h-8 w-8 p-0 hover:bg-red-100 text-red-600"
-                            title="Reject"
-                          >
-                            <XCircle className="h-4 w-4" />
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <Badge className={`${colors[status as keyof typeof colors] || 'bg-gray-100 text-gray-800'} capitalize`}>
+        {status === 'level-5' ? 'Pending Approval' : status}
+      </Badge>
     );
+  };
+
+  const stats = {
+    total: filteredQAPs.length,
+    approved: filteredQAPs.filter(q => q.status === 'approved').length,
+    pending: filteredQAPs.filter(q => q.status === 'level-5').length,
+    rejected: filteredQAPs.filter(q => q.status === 'rejected').length,
   };
 
   return (
-    <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
+    <div className="container mx-auto px-4 py-6">
       <div className="mb-6">
-        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">QAP Approvals</h1>
-        <p className="text-gray-600">Review and approve QAP submissions</p>
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">Approvals Dashboard</h1>
+        <p className="text-gray-600">Review and manage QAP approvals</p>
       </div>
 
-      <div className="mb-4">
-        <div className="flex items-center gap-4">
-          <div className="relative flex-1 max-w-md">
+      {/* Stats Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center space-x-2">
+              <CheckCircle className="h-5 w-5 text-green-500" />
+              <div>
+                <p className="text-sm font-medium text-gray-600">Approved</p>
+                <p className="text-2xl font-bold">{stats.approved}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center space-x-2">
+              <XCircle className="h-5 w-5 text-red-500" />
+              <div>
+                <p className="text-sm font-medium text-gray-600">Rejected</p>
+                <p className="text-2xl font-bold">{stats.rejected}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center space-x-2">
+              <Eye className="h-5 w-5 text-yellow-500" />
+              <div>
+                <p className="text-sm font-medium text-gray-600">Pending</p>
+                <p className="text-2xl font-bold">{stats.pending}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center space-x-2">
+              <Filter className="h-5 w-5 text-blue-500" />
+              <div>
+                <p className="text-sm font-medium text-gray-600">Total</p>
+                <p className="text-2xl font-bold">{stats.total}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filters */}
+      <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
             <Input
-              placeholder="Search by customer, project, or submitter..."
+              placeholder="Search customer, project..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10"
             />
           </div>
+          <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <SelectTrigger>
+              <Filter className="w-4 h-4 mr-2" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="approved">Approved</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="rejected">Rejected</SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="text-sm text-gray-600 flex items-center">
+            Showing {filteredQAPs.length} QAPs
+          </div>
         </div>
       </div>
 
-      <Tabs defaultValue="pending" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="pending">
-            Pending Approval ({getQAPsForApproval().length})
-          </TabsTrigger>
-          <TabsTrigger value="approved">
-            Approved ({getApprovedQAPs().length})
-          </TabsTrigger>
-          <TabsTrigger value="rejected">
-            Rejected ({getRejectedQAPs().length})
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="pending" className="mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Pending Approvals</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {renderQAPTable(getQAPsForApproval())}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="approved" className="mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Approved QAPs</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {renderQAPTable(getApprovedQAPs(), false)}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="rejected" className="mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Rejected QAPs</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {renderQAPTable(getRejectedQAPs(), false)}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-
-      {/* Enhanced View Modal */}
-      <EnhancedViewQAPModal
-        qap={selectedQAP}
-        isOpen={isViewModalOpen}
-        onClose={() => setIsViewModalOpen(false)}
-      />
-
-      {/* Review Modal */}
-      <Dialog open={isReviewModalOpen} onOpenChange={setIsReviewModalOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              {reviewAction === 'approve' ? 'Approve QAP' : 'Reject QAP'}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <p className="text-sm text-gray-600 mb-2">
-                QAP for: <strong>{selectedQAP?.customerName}</strong> - <strong>{selectedQAP?.projectName}</strong>
-              </p>
+      {/* QAPs Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle>QAP Approvals</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {filteredQAPs.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              No QAPs found matching your criteria
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">
-                {reviewAction === 'approve' ? 'Feedback (Optional)' : 'Rejection Reason *'}
-              </label>
-              <Textarea
-                value={feedback}
-                onChange={(e) => setFeedback(e.target.value)}
-                placeholder={reviewAction === 'approve' ? 'Add any comments...' : 'Please provide reason for rejection...'}
-                className="min-h-[100px]"
-              />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-gray-50 border-b">
+                    <th className="p-3 text-left font-semibold">Customer</th>
+                    <th className="p-3 text-left font-semibold">Project</th>
+                    <th className="p-3 text-left font-semibold">Plant</th>
+                    <th className="p-3 text-left font-semibold">Product Type</th>
+                    <th className="p-3 text-left font-semibold">Quantity</th>
+                    <th className="p-3 text-left font-semibold">Items</th>
+                    <th className="p-3 text-left font-semibold">Status</th>
+                    <th className="p-3 text-left font-semibold">Submitted</th>
+                    <th className="p-3 text-center font-semibold">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredQAPs.map((qap) => (
+                    <tr key={qap.id} className="border-b hover:bg-gray-50">
+                      <td className="p-3 font-medium">{qap.customerName}</td>
+                      <td className="p-3">{qap.projectName}</td>
+                      <td className="p-3">
+                        <Badge variant="outline">{qap.plant.toUpperCase()}</Badge>
+                      </td>
+                      <td className="p-3">{qap.productType}</td>
+                      <td className="p-3">{qap.orderQuantity.toLocaleString()}</td>
+                      <td className="p-3">
+                        <div className="flex flex-col text-xs">
+                          <span className="text-green-600">✓ {qap.qaps.filter(q => q.match === 'yes').length} matched</span>
+                          <span className="text-red-600">✗ {qap.qaps.filter(q => q.match === 'no').length} unmatched</span>
+                          <span className="text-gray-500">Total: {qap.qaps.length}</span>
+                        </div>
+                      </td>
+                      <td className="p-3">{getStatusBadge(qap.status)}</td>
+                      <td className="p-3 text-sm text-gray-600">
+                        {qap.submittedAt ? new Date(qap.submittedAt).toLocaleDateString() : '-'}
+                      </td>
+                      <td className="p-3 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => onView(qap)}
+                            className="h-8 w-8 p-0"
+                            title="View Details"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          {qap.status === 'level-5' && user?.role === 'plant-head' && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => onApprove(qap.id)}
+                                className="h-8 w-8 p-0 text-green-600 hover:bg-green-100"
+                                title="Approve"
+                              >
+                                <CheckCircle className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => onReject(qap.id, 'Rejected by Plant Head')}
+                                className="h-8 w-8 p-0 text-red-600 hover:bg-red-100"
+                                title="Reject"
+                              >
+                                <XCircle className="h-4 w-4" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            <div className="flex gap-3">
-              <Button variant="outline" onClick={() => setIsReviewModalOpen(false)} className="flex-1">
-                Cancel
-              </Button>
-              <Button 
-                onClick={submitReview}
-                className={reviewAction === 'approve' ? 'bg-green-600 hover:bg-green-700 flex-1' : 'bg-red-600 hover:bg-red-700 flex-1'}
-              >
-                {reviewAction === 'approve' ? 'Approve' : 'Reject'}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 };

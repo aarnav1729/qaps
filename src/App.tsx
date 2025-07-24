@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -6,6 +5,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Navigation from './components/Navigation';
 import LoginPage from './components/LoginPage';
 import Index from './pages/Index';
+import QAPViewEditPage from './pages/QAPViewEditPage';
 import Level2ReviewPage from './components/Level2ReviewPage';
 import Level3ReviewPage from './components/Level3ReviewPage';
 import Level4ReviewPage from './components/Level4ReviewPage';
@@ -230,7 +230,7 @@ const AppContent: React.FC = () => {
 
   // User management functions for AdminPage
   const handleAddUser = (user: any) => {
-    setUsers(prev => [...prev, user]);
+    setUsers(prev => [...prev, { ...user, id: user.id || Date.now().toString() }]);
   };
 
   const handleEditUser = (user: any) => {
@@ -251,6 +251,9 @@ const AppContent: React.FC = () => {
       <main className="pt-4">
         <Routes>
           <Route path="/" element={<Index qapData={qapData} onSave={handleSaveQAP} onDelete={handleDeleteQAP} />} />
+          
+          {/* QAP View/Edit Page */}
+          <Route path="/qap/:id" element={<QAPViewEditPage qapData={qapData} onSave={handleSaveQAP} />} />
           
           {/* Level 2 Routes */}
           {(user?.role === 'production' || user?.role === 'quality' || user?.role === 'technical' || user?.role === 'admin') && (
@@ -300,7 +303,7 @@ const AppContent: React.FC = () => {
           {/* Analytics */}
           <Route path="/analytics" element={<AnalyticsPage qapData={qapData} />} />
           
-          {/* Approvals (keeping for compatibility) */}
+          {/* Approvals */}
           {(user?.role === 'plant-head' || user?.role === 'admin') && (
             <Route 
               path="/approvals" 

@@ -3,91 +3,195 @@ import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
-import { LogIn, AlertCircle } from 'lucide-react';
+import { LogIn, Users, Eye, EyeOff } from 'lucide-react';
 
 const LoginPage: React.FC = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showCredentials, setShowCredentials] = useState(false);
   const [error, setError] = useState('');
   const { login } = useAuth();
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-    
-    if (!username || !password) {
-      setError('Please enter both username and password');
-      return;
-    }
-
     const success = login(username, password);
     if (!success) {
       setError('Invalid username or password');
     }
   };
 
+  const demoUsers = [
+    { category: 'Level 1 - Requestors', users: [
+      { username: 'praful', password: 'praful', role: 'Requestor' },
+      { username: 'yamini', password: 'yamini', role: 'Requestor' }
+    ]},
+    { category: 'Level 2 - Production', users: [
+      { username: 'manoj', password: 'manoj', role: 'Production', plant: 'P2' },
+      { username: 'malik', password: 'malik', role: 'Production', plant: 'P4' },
+      { username: 'siva', password: 'siva', role: 'Production', plant: 'P5' }
+    ]},
+    { category: 'Level 2 - Quality', users: [
+      { username: 'abbas', password: 'abbas', role: 'Quality', plant: 'P2' },
+      { username: 'sriram', password: 'sriram', role: 'Quality', plant: 'P4,P5' }
+    ]},
+    { category: 'Level 2 - Technical', users: [
+      { username: 'rahul', password: 'rahul', role: 'Technical', plant: 'P2' },
+      { username: 'ramu', password: 'ramu', role: 'Technical', plant: 'P4,P5' }
+    ]},
+    { category: 'Level 3 - Head', users: [
+      { username: 'nrao', password: 'nrao', role: 'Head', plant: 'P4,P5' }
+    ]},
+    { category: 'Level 4 - Technical Head', users: [
+      { username: 'jmr', password: 'jmr', role: 'Technical Head' },
+      { username: 'baskara', password: 'baskara', role: 'Technical Head' }
+    ]},
+    { category: 'Level 5 - Plant Head', users: [
+      { username: 'cmk', password: 'cmk', role: 'Plant Head' }
+    ]},
+    { category: 'Admin', users: [
+      { username: 'aarnav', password: 'aarnav', role: 'Admin' }
+    ]}
+  ];
+
+  const quickLogin = (user: any) => {
+    setUsername(user.username);
+    setPassword(user.password);
+    const success = login(user.username, user.password);
+    if (!success) {
+      setError('Login failed');
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-md shadow-xl">
-        <CardHeader className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-t-lg">
-          <CardTitle className="text-2xl font-bold flex items-center gap-3 justify-center">
-            <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
-              📊
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+      <div className="w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Login Form */}
+        <Card className="w-full max-w-md mx-auto">
+          <CardHeader className="text-center">
+            <CardTitle className="text-2xl font-bold text-gray-900">
+              QAP Management System
+            </CardTitle>
+            <p className="text-gray-600">Sign in to your account</p>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-1">
+                  Username
+                </label>
+                <Input
+                  id="username"
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Enter your username"
+                  required
+                />
+              </div>
+              <div>
+                <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+                  Password
+                </label>
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter your password"
+                    required
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute right-2 top-1/2 transform -translate-y-1/2 h-6 w-6 p-0"
+                    onClick={() => setShowPassword(!showPassword)}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
+              </div>
+              {error && (
+                <div className="text-red-600 text-sm text-center bg-red-50 p-2 rounded">
+                  {error}
+                </div>
+              )}
+              <Button type="submit" className="w-full">
+                <LogIn className="mr-2 h-4 w-4" />
+                Sign In
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+
+        {/* Demo Credentials */}
+        <Card className="w-full">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <Users className="h-5 w-5" />
+                Demo User Credentials
+              </CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowCredentials(!showCredentials)}
+              >
+                {showCredentials ? 'Hide' : 'Show'} Credentials
+              </Button>
             </div>
-            QAP Management System
-          </CardTitle>
-          <p className="text-blue-100 text-center">Sign in to your account</p>
-        </CardHeader>
-        <CardContent className="p-6">
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="username">Username</Label>
-              <Input
-                id="username"
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter your username"
-                className="w-full"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter your password"
-                className="w-full"
-              />
-            </div>
-            
-            {error && (
-              <div className="flex items-center gap-2 text-red-600 text-sm bg-red-50 p-3 rounded-md">
-                <AlertCircle className="w-4 h-4" />
-                {error}
+          </CardHeader>
+          <CardContent className="max-h-96 overflow-y-auto">
+            {showCredentials && (
+              <div className="space-y-4">
+                {demoUsers.map((category, idx) => (
+                  <div key={idx}>
+                    <h3 className="font-semibold text-gray-800 mb-2">{category.category}</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
+                      {category.users.map((user, userIdx) => (
+                        <div
+                          key={userIdx}
+                          className="p-3 bg-gray-50 rounded border cursor-pointer hover:bg-gray-100 transition-colors"
+                          onClick={() => quickLogin(user)}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="font-medium text-sm">{user.username}</div>
+                              <div className="text-xs text-gray-600">Password: {user.password}</div>
+                              <div className="flex items-center gap-1 mt-1">
+                                <Badge variant="outline" className="text-xs">
+                                  {user.role}
+                                </Badge>
+                                {user.plant && (
+                                  <Badge variant="secondary" className="text-xs">
+                                    {user.plant}
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                            <Button size="sm" variant="ghost" className="text-xs">
+                              Quick Login
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
-
-            <Button type="submit" className="w-full bg-gradient-to-r from-blue-600 to-indigo-600">
-              <LogIn className="w-4 h-4 mr-2" />
-              Sign In
-            </Button>
-          </form>
-
-          <div className="mt-6 p-4 bg-gray-50 rounded-lg text-xs text-gray-600">
-            <p className="font-medium mb-2">Demo Credentials:</p>
-            <div className="space-y-1">
-              <p><strong>Requestors:</strong> praful/praful, yamini/yamini</p>
-              <p><strong>Approvers:</strong> baskara/baskara (P4), nrao/nrao (P2)</p>
-              <p><strong>Admin:</strong> aarnav/aarnav</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+            {!showCredentials && (
+              <p className="text-center text-gray-500 py-8">
+                Click "Show Credentials" to view demo user accounts
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 };
