@@ -3,7 +3,7 @@ export interface User {
   id: string;
   username: string;
   password: string;
-  role: 'requestor' | 'approver-p2' | 'approver-p4' | 'admin';
+  role: 'requestor' | 'production' | 'quality' | 'technical' | 'head' | 'technical-head' | 'plant-head' | 'admin';
   plant?: string;
 }
 
@@ -14,14 +14,36 @@ export interface QAPFormData {
   orderQuantity: number;
   productType: string;
   plant: string;
-  status: 'draft' | 'submitted' | 'approved' | 'rejected' | 'edit-requested';
+  status: 'draft' | 'submitted' | 'level-2' | 'level-3' | 'level-4' | 'final-comments' | 'level-5' | 'approved' | 'rejected';
   submittedBy?: string;
   submittedAt?: Date;
+  currentLevel: 1 | 2 | 3 | 4 | 5;
+  levelResponses: {
+    [level: number]: {
+      [role: string]: {
+        username: string;
+        acknowledged: boolean;
+        comments: { [itemIndex: number]: string };
+        respondedAt?: Date;
+      }
+    }
+  };
+  finalComments?: string;
+  finalCommentsBy?: string;
+  finalCommentsAt?: Date;
   approver?: string;
   approvedAt?: Date;
   feedback?: string;
-  editReason?: string;
+  timeline: TimelineEntry[];
   qaps: QAPSpecification[];
+}
+
+export interface TimelineEntry {
+  level: number;
+  action: string;
+  user?: string;
+  timestamp: Date;
+  comments?: string;
 }
 
 export interface QAPSpecification {
@@ -40,6 +62,8 @@ export interface QAPSpecification {
   criteriaLimits?: string;
   match?: 'yes' | 'no';
   customerSpecification?: string;
+  selectedForReview?: boolean;
+  reviewBy?: string[];
 }
 
 export interface DropdownOption {

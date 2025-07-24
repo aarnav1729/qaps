@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Plus, FileText, CheckCircle, Clock, AlertCircle } from 'lucide-react';
-import QAPModal from '../components/QAPModal';
+import EnhancedQAPModal from '../components/EnhancedQAPModal';
 import QAPTable from '../components/QAPTable';
 import EnhancedViewQAPModal from '../components/EnhancedViewQAPModal';
 import { QAPFormData } from '@/types/qap';
@@ -11,8 +11,8 @@ import { useAuth } from '@/contexts/AuthContext';
 
 interface IndexProps {
   qapData: QAPFormData[];
-  onSaveQAP: (qap: QAPFormData) => void;
-  onSubmitQAP: (qap: QAPFormData) => void;
+  onSaveQAP: (qap: QAPFormData, status?: string) => void;
+  onSubmitQAP: (qap: QAPFormData, status?: string) => void;
 }
 
 const Index: React.FC<IndexProps> = ({ qapData, onSaveQAP, onSubmitQAP }) => {
@@ -21,10 +21,9 @@ const Index: React.FC<IndexProps> = ({ qapData, onSaveQAP, onSubmitQAP }) => {
   const [selectedQAP, setSelectedQAP] = useState<QAPFormData | null>(null);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [nextSno, setNextSno] = useState(1);
-  const [draftData, setDraftData] = useState<Partial<QAPFormData>>({});
   
   // Filter QAPs for current user
-  const userQAPs = qapData.filter(qap => qap.submittedBy === user?.username || qap.status === 'draft');
+  const userQAPs = qapData.filter(qap => qap.submittedBy === user?.username);
   
   const handleCreateNew = () => {
     setSelectedQAP(null);
@@ -42,40 +41,29 @@ const Index: React.FC<IndexProps> = ({ qapData, onSaveQAP, onSubmitQAP }) => {
   };
 
   const handleShare = (qap: QAPFormData) => {
+    // This is handled by the enhanced modal now
     console.log('Sharing QAP:', qap.id);
-    // Submit QAP for approval
-    onSubmitQAP(qap);
   };
 
-  const handleSave = (qapData: QAPFormData, status?: 'draft' | 'submitted') => {
-    console.log('Handling save in Index:', qapData, 'with status:', status);
-    
-    if (status === 'submitted') {
-      onSubmitQAP(qapData);
-    } else {
-      onSaveQAP(qapData);
-    }
-    
+  const handleSave = (qapData: QAPFormData, status?: string) => {
+    onSaveQAP(qapData, status);
     setIsQAPModalOpen(false);
-    // Clear draft data after successful save/submit
-    localStorage.removeItem('qapDraft');
-    setDraftData({});
   };
 
   // Stats for dashboard
   const stats = {
     total: userQAPs.length,
     draft: userQAPs.filter(q => q.status === 'draft').length,
-    submitted: userQAPs.filter(q => q.status === 'submitted').length,
+    submitted: userQAPs.filter(q => !['draft', 'approved'].includes(q.status)).length,
     approved: userQAPs.filter(q => q.status === 'approved').length,
-    rejected: userQAPs.filter(q => q.status === 'rejected').length,
+    inReview: userQAPs.filter(q => ['level-2', 'level-3', 'level-4', 'level-5'].includes(q.status)).length,
   };
 
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
       <div className="mb-6">
         <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">
-          QAP Management System
+          QAP Management Dashboard
         </h1>
         <p className="text-gray-600">Create and manage Quality Assurance Plans</p>
       </div>
@@ -111,8 +99,8 @@ const Index: React.FC<IndexProps> = ({ qapData, onSaveQAP, onSubmitQAP }) => {
             <div className="flex items-center space-x-2">
               <AlertCircle className="h-5 w-5 text-orange-500" />
               <div>
-                <p className="text-sm font-medium text-gray-600">Submitted</p>
-                <p className="text-2xl font-bold">{stats.submitted}</p>
+                <p className="text-sm font-medium text-gray-600">In Review</p>
+                <p className="text-2xl font-bold">{stats.inReview}</p>
               </div>
             </div>
           </CardContent>
@@ -133,10 +121,10 @@ const Index: React.FC<IndexProps> = ({ qapData, onSaveQAP, onSubmitQAP }) => {
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center space-x-2">
-              <AlertCircle className="h-5 w-5 text-red-500" />
+              <AlertCircle className="h-5 w-5 text-blue-500" />
               <div>
-                <p className="text-sm font-medium text-gray-600">Rejected</p>
-                <p className="text-2xl font-bold">{stats.rejected}</p>
+                <p className="text-sm font-medium text-gray-600">Submitted</p>
+                <p className="text-2xl font-bold">{stats.submitted}</p>
               </div>
             </div>
           </CardContent>
@@ -168,13 +156,12 @@ const Index: React.FC<IndexProps> = ({ qapData, onSaveQAP, onSubmitQAP }) => {
       </Card>
 
       {/* Modals */}
-      <QAPModal
+      <EnhancedQAPModal
         isOpen={isQAPModalOpen}
         onClose={() => setIsQAPModalOpen(false)}
         editingQAP={selectedQAP}
         onSave={handleSave}
         nextSno={nextSno}
-        draftData={draftData}
       />
 
       <EnhancedViewQAPModal

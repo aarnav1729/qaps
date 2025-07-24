@@ -4,7 +4,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
-import { Home, ClipboardCheck, BarChart3, Users, LogOut, FileText } from 'lucide-react';
+import { Home, ClipboardCheck, BarChart3, Users, LogOut, FileText, Settings } from 'lucide-react';
 
 const Navigation: React.FC = () => {
   const { user, logout } = useAuth();
@@ -20,18 +20,53 @@ const Navigation: React.FC = () => {
     return location.pathname === path;
   };
 
+  const getDashboardPath = () => {
+    switch (user?.role) {
+      case 'requestor':
+        return '/dashboard';
+      case 'production':
+      case 'quality':
+      case 'technical':
+        return '/level2-review';
+      case 'head':
+        return '/level3-review';
+      case 'technical-head':
+        return '/level4-review';
+      case 'plant-head':
+        return '/level5-review';
+      case 'admin':
+        return '/admin';
+      default:
+        return '/dashboard';
+    }
+  };
+
   const navItems = [
-    ...(user?.role === 'requestor' || user?.role === 'admin' ? [
-      { path: '/', label: 'Dashboard', icon: Home }
-    ] : []),
-    ...(user?.role === 'approver-p2' || user?.role === 'approver-p4' || user?.role === 'admin' ? [
-      { path: '/approvals', label: 'Approvals', icon: ClipboardCheck }
-    ] : []),
-    { path: '/analytics', label: 'Analytics', icon: BarChart3 },
-    ...(user?.role === 'admin' ? [
-      { path: '/admin', label: 'Admin', icon: Users }
-    ] : [])
+    {
+      path: getDashboardPath(),
+      label: user?.role === 'admin' ? 'Admin Panel' : 
+             user?.role === 'requestor' ? 'Dashboard' : 
+             'Review Queue',
+      icon: user?.role === 'admin' ? Users : 
+            user?.role === 'requestor' ? Home : 
+            ClipboardCheck
+    },
+    { path: '/analytics', label: 'Analytics', icon: BarChart3 }
   ];
+
+  const getRoleDisplayName = (role: string) => {
+    switch (role) {
+      case 'requestor': return 'Requestor';
+      case 'production': return 'Production';
+      case 'quality': return 'Quality';
+      case 'technical': return 'Technical';
+      case 'head': return 'Head';
+      case 'technical-head': return 'Technical Head';
+      case 'plant-head': return 'Plant Head';
+      case 'admin': return 'Admin';
+      default: return role;
+    }
+  };
 
   return (
     <nav className="bg-white shadow-md border-b">
@@ -77,17 +112,17 @@ const Navigation: React.FC = () => {
                     variant="outline" 
                     className={`text-xs ${
                       user?.role === 'admin' ? 'bg-red-50 text-red-700 border-red-200' :
-                      user?.role === 'approver-p2' || user?.role === 'approver-p4' ? 'bg-green-50 text-green-700 border-green-200' :
+                      user?.role === 'plant-head' ? 'bg-purple-50 text-purple-700 border-purple-200' :
+                      user?.role === 'technical-head' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' :
+                      user?.role === 'head' ? 'bg-orange-50 text-orange-700 border-orange-200' :
+                      ['production', 'quality', 'technical'].includes(user?.role || '') ? 'bg-green-50 text-green-700 border-green-200' :
                       'bg-blue-50 text-blue-700 border-blue-200'
                     }`}
                   >
-                    {user?.role === 'admin' ? 'Admin' :
-                     user?.role === 'approver-p2' ? 'P2 Approver' :
-                     user?.role === 'approver-p4' ? 'P4 Approver' :
-                     'Requestor'}
+                    {getRoleDisplayName(user?.role || '')}
                   </Badge>
                   {user?.plant && (
-                    <Badge variant="outline" className="text-xs bg-purple-50 text-purple-700 border-purple-200">
+                    <Badge variant="outline" className="text-xs bg-gray-50 text-gray-700 border-gray-200">
                       {user.plant.toUpperCase()}
                     </Badge>
                   )}
