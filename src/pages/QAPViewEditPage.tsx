@@ -34,23 +34,10 @@ const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave }) =>
     }
   }, [qap]);
 
-  if (!qap || !editedQAP) {
-    return (
-      <div className="container mx-auto px-4 py-6">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900 mb-4">QAP Not Found</h1>
-          <Button onClick={() => navigate('/')}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Dashboard
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  const canEdit = user?.username === qap.submittedBy && ['draft', 'edit-requested'].includes(qap.status);
-
+  // Move useMemo hook before any conditional returns
   const filteredItems = useMemo(() => {
+    if (!editedQAP) return [];
+    
     let filtered = editedQAP.qaps.filter(item => {
       // Filter by type
       if (filterType === 'visual') {
@@ -87,7 +74,24 @@ const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave }) =>
     });
 
     return filtered.sort((a, b) => a.sno - b.sno);
-  }, [editedQAP.qaps, searchTerm, filterType, filterMatch]);
+  }, [editedQAP, searchTerm, filterType, filterMatch]);
+
+  // Now handle the conditional returns after all hooks
+  if (!qap || !editedQAP) {
+    return (
+      <div className="container mx-auto px-4 py-6">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-900 mb-4">QAP Not Found</h1>
+          <Button onClick={() => navigate('/')}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Dashboard
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const canEdit = user?.username === qap.submittedBy && ['draft', 'edit-requested'].includes(qap.status);
 
   const handleSave = () => {
     if (editedQAP) {
