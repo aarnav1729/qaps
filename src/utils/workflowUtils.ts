@@ -1,6 +1,6 @@
 import { QAPFormData, User } from '@/types/qap';
 
-export const getNextLevelUsers = (qap: QAPFormData, currentLevel: number | string): string[] => {
+export const getNextLevelUsers = (qap: QAPFormData, currentLevel: number): string[] => {
   const plant = qap.plant.toLowerCase();
   
   switch (currentLevel) {
@@ -40,12 +40,10 @@ export const processWorkflowTransition = (qap: QAPFormData, nextLevel: number | 
   const now = new Date();
   
   // End current level timing
-  if (typeof updatedQAP.currentLevel === 'number') {
-    if (updatedQAP.levelEndTimes) {
-      updatedQAP.levelEndTimes[updatedQAP.currentLevel] = now;
-    } else {
-      updatedQAP.levelEndTimes = { [updatedQAP.currentLevel]: now };
-    }
+  if (updatedQAP.levelEndTimes) {
+    updatedQAP.levelEndTimes[updatedQAP.currentLevel] = now;
+  } else {
+    updatedQAP.levelEndTimes = { [updatedQAP.currentLevel]: now };
   }
   
   switch (nextLevel) {
@@ -138,12 +136,10 @@ export const processWorkflowTransition = (qap: QAPFormData, nextLevel: number | 
   }
   
   // Start new level timing
-  if (typeof updatedQAP.currentLevel === 'number') {
-    if (updatedQAP.levelStartTimes) {
-      updatedQAP.levelStartTimes[updatedQAP.currentLevel] = now;
-    } else {
-      updatedQAP.levelStartTimes = { [updatedQAP.currentLevel]: now };
-    }
+  if (updatedQAP.levelStartTimes) {
+    updatedQAP.levelStartTimes[updatedQAP.currentLevel] = now;
+  } else {
+    updatedQAP.levelStartTimes = { [updatedQAP.currentLevel]: now };
   }
   
   updatedQAP.lastModifiedAt = now;
