@@ -9,14 +9,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { QAPFormData, QAPSpecification } from '@/types/qap';
 import { useAuth } from '@/contexts/AuthContext';
-import { ArrowLeft, Save, Search, Filter, Edit3, Eye } from 'lucide-react';
+import { ArrowLeft, Save, Search, Filter, Edit3, Eye, ArrowRight } from 'lucide-react';
 
 interface QAPViewEditPageProps {
   qapData: QAPFormData[];
   onSave: (qapData: QAPFormData) => void;
+  onSubmit?: (qapData: QAPFormData) => void;
 }
 
-const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave }) => {
+const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave, onSubmit }) => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -92,11 +93,19 @@ const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave }) =>
   }
 
   const canEdit = user?.username === qap.submittedBy && ['draft', 'edit-requested'].includes(qap.status);
+  const canSubmit = user?.username === qap.submittedBy && qap.status === 'draft' && onSubmit;
 
   const handleSave = () => {
     if (editedQAP) {
       onSave(editedQAP);
       setIsEditing(false);
+    }
+  };
+
+  const handleSubmit = () => {
+    if (editedQAP && onSubmit) {
+      onSubmit(editedQAP);
+      navigate('/');
     }
   };
 
@@ -159,6 +168,12 @@ const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave }) =>
                 </Button>
               )}
             </>
+          )}
+          {canSubmit && (
+            <Button onClick={handleSubmit} className="bg-green-600 hover:bg-green-700">
+              <ArrowRight className="mr-2 h-4 w-4" />
+              Submit for Review
+            </Button>
           )}
         </div>
       </div>
