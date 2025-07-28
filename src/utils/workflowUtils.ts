@@ -1,4 +1,5 @@
-import { QAPFormData, User } from '@/types/qap';
+import { QAPFormData } from '@/types/qap';
+import { User } from '@/contexts/AuthContext';
 
 export const getNextLevelUsers = (qap: QAPFormData, currentLevel: number | string): string[] => {
   const plant = qap.plant.toLowerCase();

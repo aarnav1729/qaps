@@ -15,34 +15,50 @@ import AdminAnalytics from './components/AdminAnalytics';
 import WorkflowPage from './pages/WorkflowPage';
 import FinalCommentsPage from './components/FinalCommentsPage';
 import SpecificationBuilder from './components/SpecificationBuilder';
-import { QAPFormData, User as QAPUser } from './types/qap';
+import { QAPFormData } from './types/qap';
+import { User } from './contexts/AuthContext';
 
 const AppContent: React.FC = () => {
   const { user: authUser, logout } = useAuth();
   const [qapData, setQapData] = useState<QAPFormData[]>([]);
-  const [users, setUsers] = useState<QAPUser[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
 
-  // Load all QAPs from backend
+  // Load data from localStorage
   useEffect(() => {
-    fetch('/api/qaps')
-      .then(res => {
-        if (!res.ok) throw new Error(`Failed to load QAPs: ${res.statusText}`);
-        return res.json();
-      })
-      .then((data: QAPFormData[]) => setQapData(data))
-      .catch(err => console.error(err));
+    const savedQAPs = localStorage.getItem('qapData');
+    if (savedQAPs) {
+      try {
+        const parsedQAPs = JSON.parse(savedQAPs).map((qap: any) => ({
+          ...qap,
+          submittedAt: qap.submittedAt ? new Date(qap.submittedAt) : undefined,
+          createdAt: new Date(qap.createdAt),
+          lastModifiedAt: new Date(qap.lastModifiedAt),
+          approvedAt: qap.approvedAt ? new Date(qap.approvedAt) : undefined,
+          finalCommentsAt: qap.finalCommentsAt ? new Date(qap.finalCommentsAt) : undefined,
+          timeline: qap.timeline?.map((entry: any) => ({
+            ...entry,
+            timestamp: new Date(entry.timestamp)
+          })) || [],
+          levelStartTimes: qap.levelStartTimes ? Object.keys(qap.levelStartTimes).reduce((acc: any, key) => {
+            acc[key] = new Date(qap.levelStartTimes[key]);
+            return acc;
+          }, {}) : {},
+          levelEndTimes: qap.levelEndTimes ? Object.keys(qap.levelEndTimes).reduce((acc: any, key) => {
+            acc[key] = new Date(qap.levelEndTimes[key]);
+            return acc;
+          }, {}) : {}
+        }));
+        setQapData(parsedQAPs);
+      } catch (error) {
+        console.error('Error parsing QAP data:', error);
+        setQapData([]);
+      }
+    }
   }, []);
 
-  // Load all users if needed
-  useEffect(() => {
-    fetch('/api/users')
-      .then(res => {
-        if (!res.ok) throw new Error(`Failed to load users: ${res.statusText}`);
-        return res.json();
-      })
-      .then((data: QAPUser[]) => setUsers(data))
-      .catch(err => console.error(err));
-  }, []);
+  const saveToLocalStorage = (data: QAPFormData[]) => {
+    localStorage.setItem('qapData', JSON.stringify(data));
+  };
 
   const handleSaveQAP = (qap: QAPFormData) => {
     const now = new Date();
@@ -51,34 +67,27 @@ const AppContent: React.FC = () => {
       lastModifiedAt: now,
       createdAt: qap.createdAt || now
     };
-    fetch(`/api/qaps/${qap.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-      .then(res => {
-        if (!res.ok) throw new Error(`Save failed: ${res.statusText}`);
-        return res.json();
-      })
-      .then((saved: QAPFormData) => {
-        setQapData(prev => {
-          const idx = prev.findIndex(x => x.id === saved.id);
-          if (idx >= 0) {
-            const arr = [...prev];
-            arr[idx] = saved;
-            return arr;
-          }
-          return [...prev, saved];
-        });
-      })
-      .catch(err => console.error(err));
+    
+    setQapData(prev => {
+      const idx = prev.findIndex(x => x.id === payload.id);
+      let newData;
+      if (idx >= 0) {
+        newData = [...prev];
+        newData[idx] = payload;
+      } else {
+        newData = [...prev, payload];
+      }
+      saveToLocalStorage(newData);
+      return newData;
+    });
   };
 
   const handleSubmitQAP = (qap: QAPFormData) => {
     const now = new Date();
-    const payload = {
+    const updatedQAP = {
+      ...qap,
       status: 'level-2' as const,
-      currentLevel: 2,
+      currentLevel: 2 as const,
       submittedAt: now,
       lastModifiedAt: now,
       levelStartTimes: { ...qap.levelStartTimes, 2: now },
@@ -87,21 +96,12 @@ const AppContent: React.FC = () => {
         { level: 2, action: 'Submitted for Level 2 review', user: qap.submittedBy, timestamp: now }
       ]
     };
-    fetch(`/api/qaps/${qap.id}/submit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-      .then(res => {
-        if (!res.ok) throw new Error(`Submit failed: ${res.statusText}`);
-        return res.json();
-      })
-      .then((updated: QAPFormData) => {
-        setQapData(prev =>
-          prev.map(x => (x.id === updated.id ? updated : x))
-        );
-      })
-      .catch(err => console.error(err));
+    
+    setQapData(prev => {
+      const newData = prev.map(x => (x.id === qap.id ? updatedQAP : x));
+      saveToLocalStorage(newData);
+      return newData;
+    });
   };
 
   const handleLevel2Next = (
@@ -110,33 +110,68 @@ const AppContent: React.FC = () => {
     responses: { [itemIndex: number]: string }
   ) => {
     const now = new Date();
-    fetch(`/api/qaps/${qapId}/level2`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role, responses, timestamp: now })
-    })
-      .then(res => {
-        if (!res.ok) throw new Error(`Level2 failed: ${res.statusText}`);
-        return res.json();
-      })
-      .then((updated: QAPFormData) => {
-        setQapData(prev => prev.map(x => (x.id === qapId ? updated : x)));
-      })
-      .catch(err => console.error(err));
+    setQapData(prev => {
+      const newData = prev.map(qap => {
+        if (qap.id === qapId) {
+          return {
+            ...qap,
+            levelResponses: {
+              ...qap.levelResponses,
+              2: {
+                ...qap.levelResponses[2],
+                [role]: {
+                  username: authUser?.username || '',
+                  acknowledged: true,
+                  comments: responses,
+                  respondedAt: now
+                }
+              }
+            },
+            lastModifiedAt: now
+          };
+        }
+        return qap;
+      });
+      saveToLocalStorage(newData);
+      return newData;
+    });
   };
 
   const handleTransitionToLevel3 = (qapId: string) => {
-    fetch(`/api/qaps/${qapId}/level3/transition`, {
-      method: 'POST'
-    })
-      .then(res => {
-        if (!res.ok) throw new Error(`Transition failed: ${res.statusText}`);
-        return res.json();
-      })
-      .then((updated: QAPFormData) => {
-        setQapData(prev => prev.map(x => (x.id === qapId ? updated : x)));
-      })
-      .catch(err => console.error(err));
+    const now = new Date();
+    setQapData(prev => {
+      const newData = prev.map(qap => {
+        if (qap.id === qapId) {
+          const plant = qap.plant.toLowerCase();
+          if (['p4', 'p5'].includes(plant)) {
+            return {
+              ...qap,
+              status: 'level-3' as const,
+              currentLevel: 3 as const,
+              lastModifiedAt: now,
+              timeline: [
+                ...qap.timeline,
+                { level: 3, action: 'Transitioned to Head review', user: 'system', timestamp: now }
+              ]
+            };
+          } else {
+            return {
+              ...qap,
+              status: 'level-4' as const,
+              currentLevel: 4 as const,
+              lastModifiedAt: now,
+              timeline: [
+                ...qap.timeline,
+                { level: 4, action: 'Transitioned to Technical Head (P2)', user: 'system', timestamp: now }
+              ]
+            };
+          }
+        }
+        return qap;
+      });
+      saveToLocalStorage(newData);
+      return newData;
+    });
   };
 
   const handleLevel3Next = (
@@ -144,19 +179,37 @@ const AppContent: React.FC = () => {
     responses: { [itemIndex: number]: string }
   ) => {
     const now = new Date();
-    fetch(`/api/qaps/${qapId}/level3`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ responses, timestamp: now })
-    })
-      .then(res => {
-        if (!res.ok) throw new Error(`Level3 failed: ${res.statusText}`);
-        return res.json();
-      })
-      .then((updated: QAPFormData) => {
-        setQapData(prev => prev.map(x => (x.id === qapId ? updated : x)));
-      })
-      .catch(err => console.error(err));
+    setQapData(prev => {
+      const newData = prev.map(qap => {
+        if (qap.id === qapId) {
+          return {
+            ...qap,
+            status: 'level-4' as const,
+            currentLevel: 4 as const,
+            levelResponses: {
+              ...qap.levelResponses,
+              3: {
+                ...qap.levelResponses[3],
+                head: {
+                  username: authUser?.username || '',
+                  acknowledged: true,
+                  comments: responses,
+                  respondedAt: now
+                }
+              }
+            },
+            lastModifiedAt: now,
+            timeline: [
+              ...qap.timeline,
+              { level: 4, action: 'Sent to Technical Head', user: authUser?.username, timestamp: now }
+            ]
+          };
+        }
+        return qap;
+      });
+      saveToLocalStorage(newData);
+      return newData;
+    });
   };
 
   const handleLevel4Next = (
@@ -164,53 +217,85 @@ const AppContent: React.FC = () => {
     responses: { [itemIndex: number]: string }
   ) => {
     const now = new Date();
-    fetch(`/api/qaps/${qapId}/level4`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ responses, timestamp: now })
-    })
-      .then(res => {
-        if (!res.ok) throw new Error(`Level4 failed: ${res.statusText}`);
-        return res.json();
-      })
-      .then((updated: QAPFormData) => {
-        setQapData(prev => prev.map(x => (x.id === qapId ? updated : x)));
-      })
-      .catch(err => console.error(err));
+    setQapData(prev => {
+      const newData = prev.map(qap => {
+        if (qap.id === qapId) {
+          return {
+            ...qap,
+            status: 'final-comments' as const,
+            currentLevel: 1 as const,
+            levelResponses: {
+              ...qap.levelResponses,
+              4: {
+                ...qap.levelResponses[4],
+                'technical-head': {
+                  username: authUser?.username || '',
+                  acknowledged: true,
+                  comments: responses,
+                  respondedAt: now
+                }
+              }
+            },
+            lastModifiedAt: now,
+            timeline: [
+              ...qap.timeline,
+              { level: 1, action: 'Sent to Requestor for final comments', user: authUser?.username, timestamp: now }
+            ]
+          };
+        }
+        return qap;
+      });
+      saveToLocalStorage(newData);
+      return newData;
+    });
   };
 
   const handleApproveQAP = (qapId: string, feedback: string) => {
     const now = new Date();
-    fetch(`/api/qaps/${qapId}/approve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ feedback, timestamp: now })
-    })
-      .then(res => {
-        if (!res.ok) throw new Error(`Approve failed: ${res.statusText}`);
-        return res.json();
-      })
-      .then((updated: QAPFormData) => {
-        setQapData(prev => prev.map(x => (x.id === qapId ? updated : x)));
-      })
-      .catch(err => console.error(err));
+    setQapData(prev => {
+      const newData = prev.map(qap => {
+        if (qap.id === qapId) {
+          return {
+            ...qap,
+            status: 'approved' as const,
+            approver: authUser?.username,
+            approvedAt: now,
+            feedback,
+            lastModifiedAt: now,
+            timeline: [
+              ...qap.timeline,
+              { level: 5, action: 'Approved', user: authUser?.username, timestamp: now }
+            ]
+          };
+        }
+        return qap;
+      });
+      saveToLocalStorage(newData);
+      return newData;
+    });
   };
 
   const handleRejectQAP = (qapId: string, feedback: string) => {
     const now = new Date();
-    fetch(`/api/qaps/${qapId}/reject`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ feedback, timestamp: now })
-    })
-      .then(res => {
-        if (!res.ok) throw new Error(`Reject failed: ${res.statusText}`);
-        return res.json();
-      })
-      .then((updated: QAPFormData) => {
-        setQapData(prev => prev.map(x => (x.id === qapId ? updated : x)));
-      })
-      .catch(err => console.error(err));
+    setQapData(prev => {
+      const newData = prev.map(qap => {
+        if (qap.id === qapId) {
+          return {
+            ...qap,
+            status: 'rejected' as const,
+            feedback,
+            lastModifiedAt: now,
+            timeline: [
+              ...qap.timeline,
+              { level: 5, action: 'Rejected', user: authUser?.username, timestamp: now }
+            ]
+          };
+        }
+        return qap;
+      });
+      saveToLocalStorage(newData);
+      return newData;
+    });
   };
 
   const handleSubmitFinalComments = (
@@ -219,41 +304,48 @@ const AppContent: React.FC = () => {
     attachment?: File
   ) => {
     const now = new Date();
-    const formData = new FormData();
-    formData.append('finalComments', finalComments);
-    formData.append('timestamp', now.toISOString());
-    if (attachment) formData.append('attachment', attachment);
-
-    fetch(`/api/qaps/${qapId}/final-comments`, {
-      method: 'POST',
-      body: formData
-    })
-      .then(res => {
-        if (!res.ok) throw new Error(`Final comments failed: ${res.statusText}`);
-        return res.json();
-      })
-      .then((updated: QAPFormData) => {
-        setQapData(prev => prev.map(x => (x.id === qapId ? updated : x)));
-      })
-      .catch(err => console.error(err));
+    setQapData(prev => {
+      const newData = prev.map(qap => {
+        if (qap.id === qapId) {
+          const plant = qap.plant.toLowerCase();
+          const nextStatus: QAPFormData['status'] = ['p4', 'p5'].includes(plant) ? 'level-3-final' : 'level-4-final';
+          
+          return {
+            ...qap,
+            status: nextStatus,
+            currentLevel: (['p4', 'p5'].includes(plant) ? 3 : 4) as QAPFormData['currentLevel'],
+            finalComments,
+            finalCommentsBy: authUser?.username,
+            finalCommentsAt: now,
+            finalCommentsAttachment: attachment ? {
+              name: attachment.name,
+              url: URL.createObjectURL(attachment),
+              type: attachment.type,
+              size: attachment.size
+            } : undefined,
+            lastModifiedAt: now,
+            timeline: [
+              ...qap.timeline,
+              { level: 1, action: 'Final comments submitted', user: authUser?.username, timestamp: now }
+            ]
+          };
+        }
+        return qap;
+      });
+      saveToLocalStorage(newData);
+      return newData;
+    });
   };
 
   const handleDeleteQAP = (qapId: string) => {
     if (!window.confirm('Are you sure you want to delete this QAP?')) return;
-    fetch(`/api/qaps/${qapId}`, { method: 'DELETE' })
-      .then(res => {
-        if (!res.ok) throw new Error(`Delete failed: ${res.statusText}`);
-        setQapData(prev => prev.filter(x => x.id !== qapId));
-      })
-      .catch(err => console.error(err));
+    setQapData(prev => {
+      const newData = prev.filter(x => x.id !== qapId);
+      saveToLocalStorage(newData);
+      return newData;
+    });
   };
 
-  const convertToQAPUser = (u: ReturnType<typeof useAuth>['user']): QAPUser => ({
-    id: u.username,
-    username: u.username,
-    role: u.role,
-    plant: u.plant || ''
-  });
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -290,7 +382,14 @@ const AppContent: React.FC = () => {
         <Route
           path="/spec-builder"
           element={
-            authUser ? <SpecificationBuilder /> : <Navigate to="/login" replace />
+            authUser ? (
+              <>
+                <Navigation />
+                <SpecificationBuilder />
+              </>
+            ) : (
+              <Navigate to="/login" replace />
+            )
           }
         />
 
@@ -298,10 +397,13 @@ const AppContent: React.FC = () => {
           path="/final-comments"
           element={
             authUser ? (
-              <FinalCommentsPage
-                qapData={qapData}
-                onSubmitFinalComments={handleSubmitFinalComments}
-              />
+              <>
+                <Navigation />
+                <FinalCommentsPage
+                  qapData={qapData}
+                  onSubmitFinalComments={handleSubmitFinalComments}
+                />
+              </>
             ) : (
               <Navigate to="/login" replace />
             )
@@ -313,21 +415,11 @@ const AppContent: React.FC = () => {
           element={
             authUser ? (
               <>
-                <Navigation user={convertToQAPUser(authUser)} onLogout={logout} />
+                <Navigation />
                 <Index
                   qapData={qapData}
-                  user={convertToQAPUser(authUser)}
                   onSave={handleSaveQAP}
-                  onSubmit={handleSubmitQAP}
-                  onLevel2Next={handleLevel2Next}
-                  onLevel3Next={handleLevel3Next}
-                  onLevel4Next={handleLevel4Next}
-                  onApprove={handleApproveQAP}
-                  onReject={handleRejectQAP}
-                  onSubmitFinalComments={handleSubmitFinalComments}
                   onDelete={handleDeleteQAP}
-                  users={users}
-                  setUsers={setUsers}
                 />
               </>
             ) : (

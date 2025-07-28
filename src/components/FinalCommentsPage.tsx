@@ -75,7 +75,7 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({ qapData, onSubmit
     const unmatchedItems = getUnmatchedItems();
     return (
       <>
-        <Navigation user={user!} onLogout={logout} />
+        <Navigation />
         <div className="container mx-auto px-4 py-6">
           <div className="mb-6">
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Final Comments</h1>
@@ -246,7 +246,7 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({ qapData, onSubmit
 
   return (
     <>
-      <Navigation user={user!} onLogout={logout} />
+      <Navigation />
       <div className="container mx-auto px-4 py-6">
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Final Comments</h1>

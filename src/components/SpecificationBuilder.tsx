@@ -68,7 +68,7 @@ const SpecificationBuilder: React.FC = () => {
 
   return (
     <>
-      <Navigation user={user!} onLogout={logout} />
+      <Navigation />
       <div className="container mx-auto px-6 py-8">
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Specification Builder</h1>
