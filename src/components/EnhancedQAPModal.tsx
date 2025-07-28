@@ -6,27 +6,19 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Checkbox } from '@/components/ui/checkbox';
 import { QAPSpecification, QAPFormData } from '@/types/qap';
 import { mqpSpecifications, visualElSpecifications } from '@/data/qapSpecifications';
 import { useAuth } from '@/contexts/AuthContext';
-import { Save, Send } from 'lucide-react';
 
 interface EnhancedQAPModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (qapData: QAPFormData, status?: string) => void;
+  onSave: (qapData: QAPFormData) => void;
   nextSno: number;
   editingQAP?: QAPFormData | null;
 }
 
-const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({ 
-  isOpen, 
-  onClose, 
-  onSave, 
-  nextSno, 
-  editingQAP 
-}) => {
+const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({ isOpen, onClose, onSave, nextSno, editingQAP }) => {
   const { user } = useAuth();
   
   const [customerName, setCustomerName] = useState('');
@@ -34,7 +26,6 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
   const [orderQuantity, setOrderQuantity] = useState(0);
   const [productType, setProductType] = useState('');
   const [plant, setPlant] = useState('');
-  const [showReviewSelection, setShowReviewSelection] = useState(false);
   
   const [mqpData, setMqpData] = useState<QAPSpecification[]>([]);
   const [visualElData, setVisualElData] = useState<QAPSpecification[]>([]);
@@ -71,19 +62,57 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
       ...spec,
       sno: nextSno + index,
       match: undefined,
-      customerSpecification: undefined,
-      selectedForReview: false,
-      reviewBy: []
+      customerSpecification: undefined
     })));
     
     setVisualElData(visualElSpecifications.map((spec, index) => ({
       ...spec,
       sno: nextSno + mqpSpecifications.length + index,
       match: undefined,
-      customerSpecification: undefined,
-      selectedForReview: false,
-      reviewBy: []
+      customerSpecification: undefined
     })));
+  };
+
+  const handleSave = (isDraft: boolean = true) => {
+    const allData = [...mqpData, ...visualElData];
+    const now = new Date();
+    
+    const qapData: QAPFormData = {
+      id: editingQAP?.id || Date.now().toString(),
+      customerName,
+      projectName,
+      orderQuantity,
+      productType,
+      plant,
+      status: isDraft ? 'draft' : 'level-2',
+      submittedBy: user?.username || 'unknown',
+      submittedAt: isDraft ? undefined : now,
+      currentLevel: isDraft ? 1 : 2,
+      levelResponses: {},
+      timeline: isDraft ? [] : [{
+        level: 2,
+        action: 'Submitted for Level 2 review',
+        user: user?.username || 'unknown',
+        timestamp: now
+      }],
+      qaps: allData,
+      createdAt: editingQAP?.createdAt || now,
+      lastModifiedAt: now,
+      levelStartTimes: isDraft ? { 1: now } : { 1: now, 2: now },
+      levelEndTimes: isDraft ? {} : { 1: now }
+    };
+    
+    onSave(qapData);
+    onClose();
+    resetForm();
+  };
+
+  const resetForm = () => {
+    setCustomerName('');
+    setProjectName('');
+    setOrderQuantity(0);
+    setProductType('');
+    setPlant('');
   };
 
   const handleMatchChange = (section: 'mqp' | 'visual', index: number, match: 'yes' | 'no') => {
@@ -97,8 +126,7 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
     newData[index] = {
       ...spec,
       match,
-      customerSpecification: match === 'yes' ? premierSpec : '',
-      selectedForReview: match === 'no'
+      customerSpecification: match === 'yes' ? premierSpec : ''
     };
     updateSection(newData);
   };
@@ -113,156 +141,6 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
       customerSpecification: value
     };
     updateSection(newData);
-  };
-
-  const handleReviewByChange = (section: 'mqp' | 'visual', index: number, role: string, checked: boolean) => {
-    const updateSection = section === 'mqp' ? setMqpData : setVisualElData;
-    const currentData = section === 'mqp' ? mqpData : visualElData;
-    
-    const newData = [...currentData];
-    const reviewBy = newData[index].reviewBy || [];
-    
-    if (checked) {
-      newData[index].reviewBy = [...reviewBy, role];
-    } else {
-      newData[index].reviewBy = reviewBy.filter(r => r !== role);
-    }
-    updateSection(newData);
-  };
-
-  const handleNext = () => {
-    setShowReviewSelection(true);
-  };
-
-  const handleSend = () => {
-    const allData = [...mqpData, ...visualElData];
-    const qapData: QAPFormData = {
-      id: editingQAP?.id || Date.now().toString(),
-      customerName,
-      projectName,
-      orderQuantity,
-      productType,
-      plant,
-      status: 'level-2',
-      submittedBy: user?.username,
-      submittedAt: new Date(),
-      currentLevel: 2,
-      levelResponses: {},
-      timeline: [{
-        level: 1,
-        action: 'Submitted by requestor',
-        user: user?.username,
-        timestamp: new Date()
-      }],
-      qaps: allData
-    };
-    
-    onSave(qapData, 'level-2');
-    onClose();
-    resetForm();
-    setShowReviewSelection(false);
-  };
-
-  const handleSave = () => {
-    const allData = [...mqpData, ...visualElData];
-    const qapData: QAPFormData = {
-      id: editingQAP?.id || Date.now().toString(),
-      customerName,
-      projectName,
-      orderQuantity,
-      productType,
-      plant,
-      status: 'draft',
-      submittedBy: user?.username,
-      currentLevel: 1,
-      levelResponses: {},
-      timeline: [],
-      qaps: allData
-    };
-    
-    onSave(qapData, 'draft');
-    onClose();
-    resetForm();
-  };
-
-  const resetForm = () => {
-    setCustomerName('');
-    setProjectName('');
-    setOrderQuantity(0);
-    setProductType('');
-    setPlant('');
-    setShowReviewSelection(false);
-  };
-
-  const getUnmatchedItems = () => {
-    return [...mqpData, ...visualElData].filter(item => item.match === 'no');
-  };
-
-  const renderReviewSelection = () => {
-    const unmatchedItems = getUnmatchedItems();
-    
-    return (
-      <div className="space-y-4">
-        <h3 className="text-lg font-semibold text-red-600">Unmatched Items for Review</h3>
-        {unmatchedItems.map((item, index) => (
-          <div key={item.sno} className="border border-red-200 rounded-lg p-4 bg-red-50">
-            <div className="mb-3">
-              <Badge variant="destructive" className="mb-2">Unmatched</Badge>
-              <p className="font-medium">{item.criteria} - {item.subCriteria}</p>
-              <p className="text-sm text-gray-600">{item.specification || item.criteriaLimits}</p>
-              <p className="text-sm font-medium">Customer Specification: {item.customerSpecification}</p>
-            </div>
-            <div className="flex gap-4">
-              <label className="flex items-center space-x-2">
-                <Checkbox
-                  checked={item.reviewBy?.includes('production') || false}
-                  onCheckedChange={(checked) => handleReviewByChange(
-                    item.criteria === 'MQP' ? 'mqp' : 'visual',
-                    mqpData.includes(item) ? mqpData.indexOf(item) : visualElData.indexOf(item),
-                    'production',
-                    checked as boolean
-                  )}
-                />
-                <span>Production</span>
-              </label>
-              <label className="flex items-center space-x-2">
-                <Checkbox
-                  checked={item.reviewBy?.includes('quality') || false}
-                  onCheckedChange={(checked) => handleReviewByChange(
-                    item.criteria === 'MQP' ? 'mqp' : 'visual',
-                    mqpData.includes(item) ? mqpData.indexOf(item) : visualElData.indexOf(item),
-                    'quality',
-                    checked as boolean
-                  )}
-                />
-                <span>Quality</span>
-              </label>
-              <label className="flex items-center space-x-2">
-                <Checkbox
-                  checked={item.reviewBy?.includes('technical') || false}
-                  onCheckedChange={(checked) => handleReviewByChange(
-                    item.criteria === 'MQP' ? 'mqp' : 'visual',
-                    mqpData.includes(item) ? mqpData.indexOf(item) : visualElData.indexOf(item),
-                    'technical',
-                    checked as boolean
-                  )}
-                />
-                <span>Technical</span>
-              </label>
-            </div>
-          </div>
-        ))}
-        <div className="flex gap-3">
-          <Button onClick={() => setShowReviewSelection(false)} variant="outline">
-            Back
-          </Button>
-          <Button onClick={handleSend} className="bg-green-600 hover:bg-green-700">
-            <Send className="w-4 h-4 mr-2" />
-            Send for Review
-          </Button>
-        </div>
-      </div>
-    );
   };
 
   const getRowClassName = (item: QAPSpecification) => {
@@ -429,107 +307,94 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
         </DialogHeader>
         
         <div className="flex-1 overflow-auto p-6">
-          {!showReviewSelection ? (
-            <>
-              {/* Form Fields */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6 bg-blue-50 p-4 rounded-lg">
-                <div className="space-y-2">
-                  <Label>Customer Name *</Label>
-                  <Select value={customerName} onValueChange={setCustomerName}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select customer" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {customerOptions.map(option => (
-                        <SelectItem key={option} value={option}>{option}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+          {/* Form Fields */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6 bg-blue-50 p-4 rounded-lg">
+            <div className="space-y-2">
+              <Label>Customer Name *</Label>
+              <Select value={customerName} onValueChange={setCustomerName}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select customer" />
+                </SelectTrigger>
+                <SelectContent>
+                  {customerOptions.map(option => (
+                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-                <div className="space-y-2">
-                  <Label>Project Name *</Label>
-                  <Input
-                    value={projectName}
-                    onChange={(e) => setProjectName(e.target.value)}
-                    placeholder="Enter project name"
-                  />
-                </div>
+            <div className="space-y-2">
+              <Label>Project Name *</Label>
+              <Input
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                placeholder="Enter project name"
+              />
+            </div>
 
-                <div className="space-y-2">
-                  <Label>Quantity in MW *</Label>
-                  <Input
-                    type="number"
-                    value={orderQuantity}
-                    onChange={(e) => setOrderQuantity(Number(e.target.value))}
-                    placeholder="Enter quantity in MW"
-                  />
-                </div>
+            <div className="space-y-2">
+              <Label>Quantity in MW *</Label>
+              <Input
+                type="number"
+                value={orderQuantity}
+                onChange={(e) => setOrderQuantity(Number(e.target.value))}
+                placeholder="Enter quantity in MW"
+              />
+            </div>
 
-                <div className="space-y-2">
-                  <Label>Product Type *</Label>
-                  <Select value={productType} onValueChange={setProductType}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select product type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {productOptions.map(option => (
-                        <SelectItem key={option} value={option}>{option}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+            <div className="space-y-2">
+              <Label>Product Type *</Label>
+              <Select value={productType} onValueChange={setProductType}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select product type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {productOptions.map(option => (
+                    <SelectItem key={option} value={option}>{option}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-                <div className="space-y-2">
-                  <Label>Plant *</Label>
-                  <Select value={plant} onValueChange={setPlant}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select plant" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {plantOptions.map(option => (
-                        <SelectItem key={option} value={option}>{option.toUpperCase()}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {/* Tabs for MQP and Visual/EL - simplified version for this implementation */}
-              <Tabs defaultValue="mqp" className="w-full">
-                <TabsList className="grid w-full grid-cols-2 mb-4">
-                  <TabsTrigger value="mqp">MQP ({mqpData.length})</TabsTrigger>
-                  <TabsTrigger value="visual-el">Visual & EL ({visualElData.length})</TabsTrigger>
-                </TabsList>
-                
-                <TabsContent value="mqp">
-                  {renderMQPTable()}
-                </TabsContent>
-                
-                <TabsContent value="visual-el">
-                  {renderVisualElTable()}
-                </TabsContent>
-              </Tabs>
-            </>
-          ) : (
-            renderReviewSelection()
-          )}
-        </div>
-        
-        {!showReviewSelection && (
-          <div className="p-6 pt-0 border-t bg-gray-50">
-            <div className="flex gap-3">
-              <Button onClick={onClose} variant="outline">Cancel</Button>
-              <Button onClick={handleSave} variant="outline">
-                <Save className="w-4 h-4 mr-2" />
-                Save Draft
-              </Button>
-              <Button onClick={handleNext} className="bg-blue-600 hover:bg-blue-700">
-                Next
-              </Button>
+            <div className="space-y-2">
+              <Label>Plant *</Label>
+              <Select value={plant} onValueChange={setPlant}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select plant" />
+                </SelectTrigger>
+                <SelectContent>
+                  {plantOptions.map(option => (
+                    <SelectItem key={option} value={option.toUpperCase()}>{option.toUpperCase()}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
-        )}
+
+          {/* Tabs for MQP and Visual/EL */}
+          <Tabs defaultValue="mqp" className="w-full">
+            <TabsList className="grid w-full grid-cols-2 mb-4">
+              <TabsTrigger value="mqp">MQP ({mqpData.length})</TabsTrigger>
+              <TabsTrigger value="visual-el">Visual & EL ({visualElData.length})</TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="mqp">
+              {renderMQPTable()}
+            </TabsContent>
+            
+            <TabsContent value="visual-el">
+              {renderVisualElTable()}
+            </TabsContent>
+          </Tabs>
+        </div>
+        
+        <div className="p-6 pt-0 border-t bg-gray-50">
+          <div className="flex gap-3">
+            <Button onClick={onClose} variant="outline">Cancel</Button>
+            <Button onClick={() => handleSave(true)} variant="outline">Save Draft</Button>
+            <Button onClick={() => handleSave(false)} className="bg-blue-600 hover:bg-blue-700">Submit</Button>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );
