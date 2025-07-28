@@ -7,11 +7,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { QAPFormData } from '@/types/qap';
 import { useAuth } from '@/contexts/AuthContext';
-import { Eye, Search, Send, Paperclip, X } from 'lucide-react';
+import { Eye, Search, Send } from 'lucide-react';
 
 interface FinalCommentsPageProps {
   qapData: QAPFormData[];
-  onSubmitFinalComments: (id: string, finalComments: string, attachment?: File) => void;
+  onSubmitFinalComments: (id: string, finalComments: string) => void;
 }
 
 const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({ qapData, onSubmitFinalComments }) => {
@@ -19,7 +19,6 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({ qapData, onSubmit
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedQAP, setSelectedQAP] = useState<QAPFormData | null>(null);
   const [finalComments, setFinalComments] = useState('');
-  const [attachment, setAttachment] = useState<File | null>(null);
 
   const filteredQAPs = useMemo(() => {
     return qapData.filter(qap => {
@@ -41,31 +40,13 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({ qapData, onSubmit
   const handleQAPSelect = (qap: QAPFormData) => {
     setSelectedQAP(qap);
     setFinalComments(qap.finalComments || '');
-    setAttachment(null);
-  };
-
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      // Check file size (max 10MB)
-      if (file.size > 10 * 1024 * 1024) {
-        alert('File size must be less than 10MB');
-        return;
-      }
-      setAttachment(file);
-    }
-  };
-
-  const removeAttachment = () => {
-    setAttachment(null);
   };
 
   const handleSubmit = () => {
     if (!selectedQAP || !finalComments.trim()) return;
-    onSubmitFinalComments(selectedQAP.id, finalComments, attachment || undefined);
+    onSubmitFinalComments(selectedQAP.id, finalComments);
     setSelectedQAP(null);
     setFinalComments('');
-    setAttachment(null);
   };
 
   const getUnmatchedItems = () => {
@@ -192,49 +173,6 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({ qapData, onSubmit
                 placeholder="Add your final comments before submitting for plant head approval..."
                 className="min-h-[120px]"
               />
-              
-              {/* File Attachment */}
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-600">
-                  Optional Attachment (Max 10MB)
-                </label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="file"
-                    onChange={handleFileChange}
-                    accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
-                    className="flex-1"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => document.querySelector<HTMLInputElement>('input[type="file"]')?.click()}
-                  >
-                    <Paperclip className="w-4 h-4 mr-2" />
-                    Attach File
-                  </Button>
-                </div>
-                
-                {attachment && (
-                  <div className="flex items-center gap-2 p-2 bg-gray-50 rounded border">
-                    <Paperclip className="w-4 h-4 text-gray-500" />
-                    <span className="text-sm text-gray-700 flex-1">{attachment.name}</span>
-                    <span className="text-xs text-gray-500">
-                      ({(attachment.size / 1024 / 1024).toFixed(2)} MB)
-                    </span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={removeAttachment}
-                      className="h-8 w-8 p-0"
-                    >
-                      <X className="w-4 h-4" />
-                    </Button>
-                  </div>
-                )}
-              </div>
             </div>
           </CardContent>
         </Card>
