@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
-import LoginPage from './pages/LoginPage';
+import LoginPage from './components/LoginPage';
 import Index from './pages/Index';
 import NotFound from './pages/NotFound';
 import Navigation from './components/Navigation';
 import QAPViewEditPage from './pages/QAPViewEditPage';
 import AdminAnalytics from './components/AdminAnalytics';
 import WorkflowPage from './pages/WorkflowPage';
-import { QAPFormData, User, QAPSpecification } from './types/qap';
+import { QAPFormData, User as QAPUser, QAPSpecification } from './types/qap';
+import { User } from './contexts/AuthContext';
 
 const mockQAPData: QAPSpecification[] = [
   {
@@ -95,7 +96,7 @@ const App: React.FC = () => {
     }
   ]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [users, setUsers] = useState<User[]>([
+  const [users, setUsers] = useState<QAPUser[]>([
     {
       id: '1',
       username: 'john_doe',
@@ -251,7 +252,6 @@ const App: React.FC = () => {
       return qap;
     }));
 
-    // Transition to next level after all level 2 reviews are done
     const qap = qapData.find(q => q.id === qapId);
     if (qap) {
       const allLevel2Roles = ['technical', 'production', 'quality'];
@@ -275,7 +275,6 @@ const App: React.FC = () => {
         const updatedQAP = { ...qap };
         const plant = updatedQAP.plant.toLowerCase();
 
-        // End Level 2 timing
         if (updatedQAP.levelEndTimes) {
           updatedQAP.levelEndTimes[2] = now;
         } else {
@@ -308,7 +307,6 @@ const App: React.FC = () => {
           });
         }
 
-        // Start new level timing
         if (updatedQAP.levelStartTimes) {
           updatedQAP.levelStartTimes[updatedQAP.currentLevel] = now;
         } else {
@@ -335,7 +333,6 @@ const App: React.FC = () => {
           respondedAt: now
         };
 
-        // End Level 3 timing
         if (qap.levelEndTimes) {
           qap.levelEndTimes[3] = now;
         } else {
@@ -378,7 +375,6 @@ const App: React.FC = () => {
           respondedAt: now
         };
 
-        // End Level 4 timing
         if (qap.levelEndTimes) {
           qap.levelEndTimes[4] = now;
         } else {
@@ -479,7 +475,6 @@ const App: React.FC = () => {
           };
         }
 
-        // End Final Comments (Level 1) timing
         if (updatedQAP.levelEndTimes) {
           updatedQAP.levelEndTimes[1] = now;
         } else {
@@ -509,7 +504,6 @@ const App: React.FC = () => {
           });
         }
 
-        // Start new level timing
         if (updatedQAP.levelStartTimes) {
           updatedQAP.levelStartTimes[updatedQAP.currentLevel] = now;
         } else {
@@ -528,6 +522,14 @@ const App: React.FC = () => {
     }
   };
 
+  const convertToQAPUser = (user: User): QAPUser => ({
+    id: user.username,
+    username: user.username,
+    password: '',
+    role: user.role,
+    plant: user.plant
+  });
+
   return (
     <Router>
       <div className="min-h-screen bg-gray-50">
@@ -535,16 +537,16 @@ const App: React.FC = () => {
           <Route path="/login" element={<LoginPage onLogin={handleLogin} />} />
           <Route path="/workflow" element={<WorkflowPage />} />
           <Route path="/analytics" element={<AdminAnalytics qapData={qapData} />} />
-          <Route path="/qap/:id" element={<QAPViewEditPage qapData={qapData} onSave={handleSaveQAP} />} />
+          <Route path="/qap/:id" element={<QAPViewEditPage qapData={qapData} onSave={handleSaveQAP} onSubmit={handleSubmitQAP} />} />
           <Route 
             path="/" 
             element={
               currentUser ? (
                 <div>
-                  <Navigation user={currentUser} onLogout={handleLogout} />
+                  <Navigation user={convertToQAPUser(currentUser)} onLogout={handleLogout} />
                   <Index 
                     qapData={qapData} 
-                    user={currentUser}
+                    user={convertToQAPUser(currentUser)}
                     onSave={handleSaveQAP}
                     onSubmit={handleSubmitQAP}
                     onLevel2Next={handleLevel2Next}

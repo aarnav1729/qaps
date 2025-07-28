@@ -29,12 +29,6 @@ const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave, onSu
   const [filterMatch, setFilterMatch] = useState('all'); // all, matched, unmatched
   const [editedQAP, setEditedQAP] = useState<QAPFormData | null>(null);
 
-  React.useEffect(() => {
-    if (qap) {
-      setEditedQAP({ ...qap });
-    }
-  }, [qap]);
-
   // Move useMemo hook before any conditional returns
   const filteredItems = useMemo(() => {
     if (!editedQAP) return [];
@@ -76,6 +70,12 @@ const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave, onSu
 
     return filtered.sort((a, b) => a.sno - b.sno);
   }, [editedQAP, searchTerm, filterType, filterMatch]);
+
+  React.useEffect(() => {
+    if (qap) {
+      setEditedQAP({ ...qap });
+    }
+  }, [qap]);
 
   // Now handle the conditional returns after all hooks
   if (!qap || !editedQAP) {
