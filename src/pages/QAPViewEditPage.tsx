@@ -9,14 +9,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { QAPFormData, QAPSpecification } from '@/types/qap';
 import { useAuth } from '@/contexts/AuthContext';
-import { ArrowLeft, Save, Search, Filter, Edit3, Eye } from 'lucide-react';
+import { ArrowLeft, Save, Search, Filter, Edit3, Eye, ArrowRight } from 'lucide-react';
 
 interface QAPViewEditPageProps {
   qapData: QAPFormData[];
   onSave: (qapData: QAPFormData) => void;
+  onSubmit?: (qapData: QAPFormData) => void;
 }
 
-const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave }) => {
+const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave, onSubmit }) => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -34,23 +35,10 @@ const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave }) =>
     }
   }, [qap]);
 
-  if (!qap || !editedQAP) {
-    return (
-      <div className="container mx-auto px-4 py-6">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900 mb-4">QAP Not Found</h1>
-          <Button onClick={() => navigate('/')}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Dashboard
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  const canEdit = user?.username === qap.submittedBy && ['draft', 'edit-requested'].includes(qap.status);
-
+  // Move useMemo hook before any conditional returns
   const filteredItems = useMemo(() => {
+    if (!editedQAP) return [];
+    
     let filtered = editedQAP.qaps.filter(item => {
       // Filter by type
       if (filterType === 'visual') {
@@ -87,12 +75,37 @@ const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave }) =>
     });
 
     return filtered.sort((a, b) => a.sno - b.sno);
-  }, [editedQAP.qaps, searchTerm, filterType, filterMatch]);
+  }, [editedQAP, searchTerm, filterType, filterMatch]);
+
+  // Now handle the conditional returns after all hooks
+  if (!qap || !editedQAP) {
+    return (
+      <div className="container mx-auto px-4 py-6">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-gray-900 mb-4">QAP Not Found</h1>
+          <Button onClick={() => navigate('/')}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Dashboard
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const canEdit = user?.username === qap.submittedBy && ['draft', 'edit-requested'].includes(qap.status);
+  const canSubmit = user?.username === qap.submittedBy && qap.status === 'draft' && onSubmit;
 
   const handleSave = () => {
     if (editedQAP) {
       onSave(editedQAP);
       setIsEditing(false);
+    }
+  };
+
+  const handleSubmit = () => {
+    if (editedQAP && onSubmit) {
+      onSubmit(editedQAP);
+      navigate('/');
     }
   };
 
@@ -155,6 +168,12 @@ const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave }) =>
                 </Button>
               )}
             </>
+          )}
+          {canSubmit && (
+            <Button onClick={handleSubmit} className="bg-green-600 hover:bg-green-700">
+              <ArrowRight className="mr-2 h-4 w-4" />
+              Submit for Review
+            </Button>
           )}
         </div>
       </div>

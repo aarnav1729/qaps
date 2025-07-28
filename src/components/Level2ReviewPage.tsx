@@ -8,7 +8,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { QAPFormData } from '@/types/qap';
 import { useAuth } from '@/contexts/AuthContext';
-import { Search, Filter, ChevronDown, ChevronUp, Clock, CheckCircle2, Send } from 'lucide-react';
+import { Search, Filter, ChevronDown, ChevronUp, Clock, CheckCircle2, Send, MessageSquare } from 'lucide-react';
 
 interface Level2ReviewPageProps {
   qapData: QAPFormData[];
@@ -23,6 +23,7 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({ qapData, onNext }) 
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [responses, setResponses] = useState<{[qapId: string]: {[itemIndex: number]: string}}>({});
   const [expandedMatched, setExpandedMatched] = useState<{[qapId: string]: boolean}>({});
+  const [expandedComments, setExpandedComments] = useState<{[qapId: string]: boolean}>({});
 
   // Filter QAPs for current user's role and plant
   const availableQAPs = useMemo(() => {
@@ -117,6 +118,22 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({ qapData, onNext }) 
     return `${days}d ${hours}h remaining`;
   };
 
+  const getAllLevel2Comments = (qap: QAPFormData) => {
+    const comments: { [itemIndex: number]: { [role: string]: string } } = {};
+    
+    if (qap.levelResponses[2]) {
+      Object.entries(qap.levelResponses[2]).forEach(([role, response]) => {
+        Object.entries(response.comments).forEach(([itemIndex, comment]) => {
+          const idx = parseInt(itemIndex);
+          if (!comments[idx]) comments[idx] = {};
+          comments[idx][role] = comment;
+        });
+      });
+    }
+    
+    return comments;
+  };
+
   const renderQAPCard = (qap: QAPFormData) => {
     const unmatchedItems = qap.qaps.filter(spec => 
       spec.match === 'no' && spec.reviewBy?.includes(user?.role || '')
@@ -125,6 +142,7 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({ qapData, onNext }) 
     
     const hasUserResponded = qap.levelResponses[2]?.[user?.role || '']?.acknowledged || false;
     const qapResponses = responses[qap.id] || {};
+    const allLevel2Comments = getAllLevel2Comments(qap);
     
     return (
       <Card key={qap.id} className="mb-6">
@@ -156,6 +174,49 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({ qapData, onNext }) 
         </CardHeader>
         
         <CardContent>
+          {/* Existing Level 2 Comments */}
+          {Object.keys(allLevel2Comments).length > 0 && (
+            <Collapsible 
+              open={expandedComments[qap.id] || false} 
+              onOpenChange={(open) => setExpandedComments(prev => ({...prev, [qap.id]: open}))}
+            >
+              <CollapsibleTrigger asChild>
+                <Button variant="outline" className="mb-4">
+                  <MessageSquare className="mr-2 h-4 w-4" />
+                  <span>View All Level 2 Comments ({Object.keys(allLevel2Comments).length} items)</span>
+                  {expandedComments[qap.id] ? 
+                    <ChevronUp className="ml-2 h-4 w-4" /> : 
+                    <ChevronDown className="ml-2 h-4 w-4" />
+                  }
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="space-y-3 mb-4">
+                  {Object.entries(allLevel2Comments).map(([itemIndex, roleComments]) => {
+                    const item = qap.qaps.find(q => q.sno === parseInt(itemIndex) + 1);
+                    if (!item) return null;
+                    
+                    return (
+                      <div key={itemIndex} className="border border-blue-200 rounded-lg p-3 bg-blue-50">
+                        <div className="font-medium text-blue-800 mb-2">
+                          {item.criteria} - {item.subCriteria}
+                        </div>
+                        <div className="space-y-1">
+                          {Object.entries(roleComments).map(([role, comment]) => (
+                            <div key={role} className="flex items-start gap-2">
+                              <Badge variant="outline" className="text-xs">{role}</Badge>
+                              <span className="text-sm text-gray-700 flex-1">{comment}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+
           {/* Unmatched Items for Review */}
           <div className="mb-6">
             <h3 className="text-lg font-semibold mb-3 text-red-600">
