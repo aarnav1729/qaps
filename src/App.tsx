@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
-import LoginPage from './pages/LoginPage';
+import { AuthProvider, useAuth, User } from './contexts/AuthContext';
+import LoginPage from './components/LoginPage';
 import Index from './pages/Index';
 import NotFound from './pages/NotFound';
 import Navigation from './components/Navigation';
 import QAPViewEditPage from './pages/QAPViewEditPage';
 import AdminAnalytics from './components/AdminAnalytics';
 import WorkflowPage from './pages/WorkflowPage';
-import { QAPFormData, User, QAPSpecification } from './types/qap';
+import { QAPFormData, User as QAPUser, QAPSpecification } from './types/qap';
 
 const mockQAPData: QAPSpecification[] = [
   {
@@ -50,7 +51,8 @@ const mockQAPData: QAPSpecification[] = [
   }
 ];
 
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
+  const { user: currentUser, login, logout } = useAuth();
   const [qapData, setQapData] = useState<QAPFormData[]>([
     {
       id: '1',
@@ -60,7 +62,7 @@ const App: React.FC = () => {
       productType: 'Wind Turbine',
       plant: 'P4',
       status: 'draft',
-      submittedBy: 'john_doe',
+      submittedBy: 'praful',
       submittedAt: new Date('2024-01-10'),
       currentLevel: 1,
       levelResponses: {},
@@ -79,7 +81,7 @@ const App: React.FC = () => {
       productType: 'Solar Panel',
       plant: 'P2',
       status: 'approved',
-      submittedBy: 'jane_smith',
+      submittedBy: 'yamini',
       submittedAt: new Date('2024-01-05'),
       currentLevel: 5,
       levelResponses: {},
@@ -94,89 +96,23 @@ const App: React.FC = () => {
       levelEndTimes: { 1: new Date('2024-01-02'), 5: new Date('2024-01-15') }
     }
   ]);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [users, setUsers] = useState<User[]>([
+
+  const [users, setUsers] = useState<QAPUser[]>([
     {
       id: '1',
-      username: 'john_doe',
-      password: 'password',
+      username: 'praful',
+      password: 'praful',
       role: 'requestor',
       plant: 'P4'
     },
     {
       id: '2',
-      username: 'jane_smith',
-      password: 'password',
+      username: 'yamini',
+      password: 'yamini',
       role: 'requestor',
       plant: 'P2'
-    },
-    {
-      id: '3',
-      username: 'mike_tech',
-      password: 'password',
-      role: 'technical',
-      plant: 'P4'
-    },
-    {
-      id: '4',
-      username: 'nrao',
-      password: 'password',
-      role: 'head',
-      plant: 'P4, P5'
-    },
-    {
-      id: '5',
-      username: 'jmr',
-      password: 'password',
-      role: 'technical-head',
-      plant: 'P2, P4, P5'
-    },
-    {
-      id: '6',
-      username: 'cmk',
-      password: 'password',
-      role: 'plant-head',
-      plant: 'P2, P4, P5'
-    },
-    {
-      id: '7',
-      username: 'baskara',
-      password: 'password',
-      role: 'technical',
-      plant: 'P2'
-    },
-    {
-      id: '8',
-      username: 'production_p4',
-      password: 'password',
-      role: 'production',
-      plant: 'P4'
-    },
-    {
-      id: '9',
-      username: 'quality_p4',
-      password: 'password',
-      role: 'quality',
-      plant: 'P4'
     }
   ]);
-
-  useEffect(() => {
-    const storedUser = localStorage.getItem('currentUser');
-    if (storedUser) {
-      setCurrentUser(JSON.parse(storedUser));
-    }
-  }, []);
-
-  const handleLogin = (user: User) => {
-    setCurrentUser(user);
-    localStorage.setItem('currentUser', JSON.stringify(user));
-  };
-
-  const handleLogout = () => {
-    setCurrentUser(null);
-    localStorage.removeItem('currentUser');
-  };
 
   const handleSaveQAP = (qap: QAPFormData) => {
     const now = new Date();
@@ -202,7 +138,7 @@ const App: React.FC = () => {
     const updatedQAP = { 
       ...qap, 
       status: 'level-2' as const,
-      currentLevel: 2 as const,
+      currentLevel: 2,
       submittedAt: now,
       lastModifiedAt: now,
       createdAt: qap.createdAt || now,
@@ -251,7 +187,6 @@ const App: React.FC = () => {
       return qap;
     }));
 
-    // Transition to next level after all level 2 reviews are done
     const qap = qapData.find(q => q.id === qapId);
     if (qap) {
       const allLevel2Roles = ['technical', 'production', 'quality'];
@@ -275,7 +210,6 @@ const App: React.FC = () => {
         const updatedQAP = { ...qap };
         const plant = updatedQAP.plant.toLowerCase();
 
-        // End Level 2 timing
         if (updatedQAP.levelEndTimes) {
           updatedQAP.levelEndTimes[2] = now;
         } else {
@@ -308,7 +242,6 @@ const App: React.FC = () => {
           });
         }
 
-        // Start new level timing
         if (updatedQAP.levelStartTimes) {
           updatedQAP.levelStartTimes[updatedQAP.currentLevel] = now;
         } else {
@@ -335,7 +268,6 @@ const App: React.FC = () => {
           respondedAt: now
         };
 
-        // End Level 3 timing
         if (qap.levelEndTimes) {
           qap.levelEndTimes[3] = now;
         } else {
@@ -378,7 +310,6 @@ const App: React.FC = () => {
           respondedAt: now
         };
 
-        // End Level 4 timing
         if (qap.levelEndTimes) {
           qap.levelEndTimes[4] = now;
         } else {
@@ -479,7 +410,6 @@ const App: React.FC = () => {
           };
         }
 
-        // End Final Comments (Level 1) timing
         if (updatedQAP.levelEndTimes) {
           updatedQAP.levelEndTimes[1] = now;
         } else {
@@ -509,7 +439,6 @@ const App: React.FC = () => {
           });
         }
 
-        // Start new level timing
         if (updatedQAP.levelStartTimes) {
           updatedQAP.levelStartTimes[updatedQAP.currentLevel] = now;
         } else {
@@ -528,44 +457,60 @@ const App: React.FC = () => {
     }
   };
 
+  const convertToQAPUser = (user: User): QAPUser => ({
+    id: user.username,
+    username: user.username,
+    password: '',
+    role: user.role,
+    plant: user.plant
+  });
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/workflow" element={<WorkflowPage />} />
+        <Route path="/analytics" element={<AdminAnalytics qapData={qapData} />} />
+        <Route path="/qap/:id" element={<QAPViewEditPage qapData={qapData} onSave={handleSaveQAP} onSubmit={handleSubmitQAP} />} />
+        <Route 
+          path="/" 
+          element={
+            currentUser ? (
+              <div>
+                <Navigation user={convertToQAPUser(currentUser)} onLogout={logout} />
+                <Index 
+                  qapData={qapData} 
+                  user={convertToQAPUser(currentUser)}
+                  onSave={handleSaveQAP}
+                  onSubmit={handleSubmitQAP}
+                  onLevel2Next={handleLevel2Next}
+                  onLevel3Next={handleLevel3Next}
+                  onLevel4Next={handleLevel4Next}
+                  onApprove={handleApproveQAP}
+                  onReject={handleRejectQAP}
+                  onSubmitFinalComments={handleSubmitFinalComments}
+                  onDelete={handleDeleteQAP}
+                  users={users}
+                  setUsers={setUsers}
+                />
+              </div>
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          } 
+        />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </div>
+  );
+};
+
+const App: React.FC = () => {
   return (
     <Router>
-      <div className="min-h-screen bg-gray-50">
-        <Routes>
-          <Route path="/login" element={<LoginPage onLogin={handleLogin} />} />
-          <Route path="/workflow" element={<WorkflowPage />} />
-          <Route path="/analytics" element={<AdminAnalytics qapData={qapData} />} />
-          <Route path="/qap/:id" element={<QAPViewEditPage qapData={qapData} onSave={handleSaveQAP} />} />
-          <Route 
-            path="/" 
-            element={
-              currentUser ? (
-                <div>
-                  <Navigation user={currentUser} onLogout={handleLogout} />
-                  <Index 
-                    qapData={qapData} 
-                    user={currentUser}
-                    onSave={handleSaveQAP}
-                    onSubmit={handleSubmitQAP}
-                    onLevel2Next={handleLevel2Next}
-                    onLevel3Next={handleLevel3Next}
-                    onLevel4Next={handleLevel4Next}
-                    onApprove={handleApproveQAP}
-                    onReject={handleRejectQAP}
-                    onSubmitFinalComments={handleSubmitFinalComments}
-                    onDelete={handleDeleteQAP}
-                    users={users}
-                    setUsers={setUsers}
-                  />
-                </div>
-              ) : (
-                <Navigate to="/login" replace />
-              )
-            } 
-          />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </div>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
     </Router>
   );
 };

@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { QAPFormData, QAPSpecification } from '@/types/qap';
 import { useAuth } from '@/contexts/AuthContext';
 import { ArrowLeft, Save, Search, Filter, Edit3, Eye, ArrowRight } from 'lucide-react';
@@ -25,22 +26,24 @@ const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave, onSu
   const qap = qapData.find(q => q.id === id);
   const [isEditing, setIsEditing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState('all'); // all, visual, mqp
-  const [filterMatch, setFilterMatch] = useState('all'); // all, matched, unmatched
+  const [filterType, setFilterType] = useState('all');
+  const [filterMatch, setFilterMatch] = useState('all');
   const [editedQAP, setEditedQAP] = useState<QAPFormData | null>(null);
 
-  React.useEffect(() => {
-    if (qap) {
-      setEditedQAP({ ...qap });
-    }
-  }, [qap]);
+  const mqpItems = useMemo(() => {
+    if (!editedQAP) return [];
+    return editedQAP.qaps.filter(item => item.criteria === 'MQP');
+  }, [editedQAP]);
 
-  // Move useMemo hook before any conditional returns
+  const visualElItems = useMemo(() => {
+    if (!editedQAP) return [];
+    return editedQAP.qaps.filter(item => item.criteria === 'Visual' || item.criteria === 'EL');
+  }, [editedQAP]);
+
   const filteredItems = useMemo(() => {
     if (!editedQAP) return [];
     
     let filtered = editedQAP.qaps.filter(item => {
-      // Filter by type
       if (filterType === 'visual') {
         const isVisual = item.criteria?.toLowerCase().includes('visual') || 
                          item.characteristics?.toLowerCase().includes('visual') ||
@@ -54,11 +57,9 @@ const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave, onSu
         if (!isMQP) return false;
       }
 
-      // Filter by match
       if (filterMatch === 'matched' && item.match !== 'yes') return false;
       if (filterMatch === 'unmatched' && item.match !== 'no') return false;
 
-      // Filter by search term
       if (searchTerm) {
         const searchLower = searchTerm.toLowerCase();
         return (
@@ -77,7 +78,12 @@ const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave, onSu
     return filtered.sort((a, b) => a.sno - b.sno);
   }, [editedQAP, searchTerm, filterType, filterMatch]);
 
-  // Now handle the conditional returns after all hooks
+  React.useEffect(() => {
+    if (qap) {
+      setEditedQAP({ ...qap });
+    }
+  }, [qap]);
+
   if (!qap || !editedQAP) {
     return (
       <div className="container mx-auto px-4 py-6">
@@ -135,6 +141,156 @@ const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave, onSu
     if (item.match === 'yes') return 'bg-green-50 border-green-200';
     if (item.match === 'no') return 'bg-red-50 border-red-200';
     return 'bg-white border-gray-200';
+  };
+
+  const renderMQPTable = (items: QAPSpecification[]) => {
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse border border-gray-300 text-sm">
+          <thead>
+            <tr className="bg-gradient-to-r from-gray-100 to-gray-200">
+              <th className="border border-gray-300 p-2 text-left font-semibold">S.No</th>
+              <th className="border border-gray-300 p-2 text-left font-semibold">Criteria</th>
+              <th className="border border-gray-300 p-2 text-left font-semibold">Sub Criteria</th>
+              <th className="border border-gray-300 p-2 text-left font-semibold">Component & Operation</th>
+              <th className="border border-gray-300 p-2 text-left font-semibold">Characteristics</th>
+              <th className="border border-gray-300 p-2 text-left font-semibold">Class</th>
+              <th className="border border-gray-300 p-2 text-left font-semibold">Specification</th>
+              <th className="border border-gray-300 p-2 text-left font-semibold">Match</th>
+              <th className="border border-gray-300 p-2 text-left font-semibold">Customer Specification</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item, index) => (
+              <tr key={item.sno} className={`border-b ${getRowClassName(item)}`}>
+                <td className="border border-gray-300 p-2">{item.sno}</td>
+                <td className="border border-gray-300 p-2">
+                  <Badge variant="outline" className="text-xs bg-blue-100 text-blue-800">
+                    {item.criteria}
+                  </Badge>
+                </td>
+                <td className="border border-gray-300 p-2">{item.subCriteria || '-'}</td>
+                <td className="border border-gray-300 p-2">{item.componentOperation || '-'}</td>
+                <td className="border border-gray-300 p-2">{item.characteristics || '-'}</td>
+                <td className="border border-gray-300 p-2">
+                  <Badge variant={item.class === 'Critical' ? 'destructive' : 'default'} className="text-xs">
+                    {item.class || '-'}
+                  </Badge>
+                </td>
+                <td className="border border-gray-300 p-2">{item.specification || '-'}</td>
+                <td className="border border-gray-300 p-2">
+                  {isEditing && canEdit ? (
+                    <Select 
+                      value={item.match || ''} 
+                      onValueChange={(value) => handleItemChange(index, 'match', value)}
+                    >
+                      <SelectTrigger className="w-20">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="yes">Yes</SelectItem>
+                        <SelectItem value="no">No</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Badge variant={item.match === 'yes' ? 'default' : item.match === 'no' ? 'destructive' : 'secondary'} className="text-xs">
+                      {item.match || 'N/A'}
+                    </Badge>
+                  )}
+                </td>
+                <td className="border border-gray-300 p-2">
+                  {isEditing && canEdit ? (
+                    <Textarea
+                      value={item.customerSpecification || ''}
+                      onChange={(e) => handleItemChange(index, 'customerSpecification', e.target.value)}
+                      className="min-h-[60px] text-xs"
+                      placeholder="Enter customer specification..."
+                    />
+                  ) : (
+                    <span>{item.customerSpecification || '-'}</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
+  const renderVisualElTable = (items: QAPSpecification[]) => {
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse border border-gray-300 text-sm">
+          <thead>
+            <tr className="bg-gradient-to-r from-gray-100 to-gray-200">
+              <th className="border border-gray-300 p-2 text-left font-semibold">S.No</th>
+              <th className="border border-gray-300 p-2 text-left font-semibold">Criteria</th>
+              <th className="border border-gray-300 p-2 text-left font-semibold">Sub Criteria</th>
+              <th className="border border-gray-300 p-2 text-left font-semibold">Defect</th>
+              <th className="border border-gray-300 p-2 text-left font-semibold">Defect Class</th>
+              <th className="border border-gray-300 p-2 text-left font-semibold">Description</th>
+              <th className="border border-gray-300 p-2 text-left font-semibold">Criteria Limits</th>
+              <th className="border border-gray-300 p-2 text-left font-semibold">Match</th>
+              <th className="border border-gray-300 p-2 text-left font-semibold">Customer Specification</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item, index) => (
+              <tr key={item.sno} className={`border-b ${getRowClassName(item)}`}>
+                <td className="border border-gray-300 p-2">{item.sno}</td>
+                <td className="border border-gray-300 p-2">
+                  <Badge variant="outline" className={`text-xs ${item.criteria === 'Visual' ? 'bg-purple-100 text-purple-800' : 'bg-orange-100 text-orange-800'}`}>
+                    {item.criteria}
+                  </Badge>
+                </td>
+                <td className="border border-gray-300 p-2">{item.subCriteria || '-'}</td>
+                <td className="border border-gray-300 p-2">{item.defect || '-'}</td>
+                <td className="border border-gray-300 p-2">
+                  <Badge variant={item.defectClass === 'Critical' ? 'destructive' : 'default'} className="text-xs">
+                    {item.defectClass || '-'}
+                  </Badge>
+                </td>
+                <td className="border border-gray-300 p-2">{item.description || '-'}</td>
+                <td className="border border-gray-300 p-2">{item.criteriaLimits || '-'}</td>
+                <td className="border border-gray-300 p-2">
+                  {isEditing && canEdit ? (
+                    <Select 
+                      value={item.match || ''} 
+                      onValueChange={(value) => handleItemChange(index, 'match', value)}
+                    >
+                      <SelectTrigger className="w-20">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="yes">Yes</SelectItem>
+                        <SelectItem value="no">No</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Badge variant={item.match === 'yes' ? 'default' : item.match === 'no' ? 'destructive' : 'secondary'} className="text-xs">
+                      {item.match || 'N/A'}
+                    </Badge>
+                  )}
+                </td>
+                <td className="border border-gray-300 p-2">
+                  {isEditing && canEdit ? (
+                    <Textarea
+                      value={item.customerSpecification || ''}
+                      onChange={(e) => handleItemChange(index, 'customerSpecification', e.target.value)}
+                      className="min-h-[60px] text-xs"
+                      placeholder="Enter customer specification..."
+                    />
+                  ) : (
+                    <span>{item.customerSpecification || '-'}</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
   };
 
   return (
@@ -215,137 +371,26 @@ const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave, onSu
         </CardContent>
       </Card>
 
-      {/* Filters */}
-      <Card className="mb-6">
-        <CardContent className="p-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <Input
-                placeholder="Search items..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-            <Select value={filterType} onValueChange={setFilterType}>
-              <SelectTrigger>
-                <Filter className="w-4 h-4 mr-2" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="visual">Visual Only</SelectItem>
-                <SelectItem value="mqp">MQP Only</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={filterMatch} onValueChange={setFilterMatch}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Items</SelectItem>
-                <SelectItem value="matched">Matched Only</SelectItem>
-                <SelectItem value="unmatched">Unmatched Only</SelectItem>
-              </SelectContent>
-            </Select>
-            <div className="text-sm text-gray-600 flex items-center">
-              {filteredItems.length} of {editedQAP.qaps.length} items
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* QAP Items Table */}
+      {/* QAP Items in Tabs */}
       <Card>
         <CardHeader>
           <CardTitle>QAP Specifications</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse border border-gray-300 text-sm">
-              <thead>
-                <tr className="bg-gradient-to-r from-gray-100 to-gray-200">
-                  <th className="border border-gray-300 p-2 text-left font-semibold">S.No</th>
-                  <th className="border border-gray-300 p-2 text-left font-semibold">Criteria</th>
-                  <th className="border border-gray-300 p-2 text-left font-semibold">Sub Criteria</th>
-                  <th className="border border-gray-300 p-2 text-left font-semibold">Component & Operation</th>
-                  <th className="border border-gray-300 p-2 text-left font-semibold">Characteristics</th>
-                  <th className="border border-gray-300 p-2 text-left font-semibold">Class</th>
-                  <th className="border border-gray-300 p-2 text-left font-semibold">Type of Check</th>
-                  <th className="border border-gray-300 p-2 text-left font-semibold">Sampling</th>
-                  <th className="border border-gray-300 p-2 text-left font-semibold">Specification</th>
-                  <th className="border border-gray-300 p-2 text-left font-semibold">Defect</th>
-                  <th className="border border-gray-300 p-2 text-left font-semibold">Defect Class</th>
-                  <th className="border border-gray-300 p-2 text-left font-semibold">Description</th>
-                  <th className="border border-gray-300 p-2 text-left font-semibold">Match</th>
-                  <th className="border border-gray-300 p-2 text-left font-semibold">Customer Specification</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredItems.map((item, index) => (
-                  <tr key={item.sno} className={`border-b ${getRowClassName(item)}`}>
-                    <td className="border border-gray-300 p-2">{item.sno}</td>
-                    <td className="border border-gray-300 p-2">
-                      <Badge variant="outline" className="text-xs">
-                        {item.criteria}
-                      </Badge>
-                    </td>
-                    <td className="border border-gray-300 p-2">{item.subCriteria || '-'}</td>
-                    <td className="border border-gray-300 p-2">{item.componentOperation || '-'}</td>
-                    <td className="border border-gray-300 p-2">{item.characteristics || '-'}</td>
-                    <td className="border border-gray-300 p-2">
-                      <Badge variant={item.class === 'Critical' ? 'destructive' : 'default'} className="text-xs">
-                        {item.class || '-'}
-                      </Badge>
-                    </td>
-                    <td className="border border-gray-300 p-2">{item.typeOfCheck || '-'}</td>
-                    <td className="border border-gray-300 p-2">{item.sampling || '-'}</td>
-                    <td className="border border-gray-300 p-2">{item.specification || '-'}</td>
-                    <td className="border border-gray-300 p-2">{item.defect || '-'}</td>
-                    <td className="border border-gray-300 p-2">
-                      <Badge variant={item.defectClass === 'Critical' ? 'destructive' : 'default'} className="text-xs">
-                        {item.defectClass || '-'}
-                      </Badge>
-                    </td>
-                    <td className="border border-gray-300 p-2">{item.description || '-'}</td>
-                    <td className="border border-gray-300 p-2">
-                      {isEditing && canEdit ? (
-                        <Select 
-                          value={item.match || ''} 
-                          onValueChange={(value) => handleItemChange(index, 'match', value)}
-                        >
-                          <SelectTrigger className="w-20">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="yes">Yes</SelectItem>
-                            <SelectItem value="no">No</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      ) : (
-                        <Badge variant={item.match === 'yes' ? 'default' : item.match === 'no' ? 'destructive' : 'secondary'} className="text-xs">
-                          {item.match || 'N/A'}
-                        </Badge>
-                      )}
-                    </td>
-                    <td className="border border-gray-300 p-2">
-                      {isEditing && canEdit ? (
-                        <Textarea
-                          value={item.customerSpecification || ''}
-                          onChange={(e) => handleItemChange(index, 'customerSpecification', e.target.value)}
-                          className="min-h-[60px] text-xs"
-                          placeholder="Enter customer specification..."
-                        />
-                      ) : (
-                        <span>{item.customerSpecification || '-'}</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Tabs defaultValue="mqp" className="w-full">
+            <TabsList className="grid w-full grid-cols-2 mb-4">
+              <TabsTrigger value="mqp">MQP ({mqpItems.length})</TabsTrigger>
+              <TabsTrigger value="visual-el">Visual & EL ({visualElItems.length})</TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="mqp">
+              {renderMQPTable(mqpItems)}
+            </TabsContent>
+            
+            <TabsContent value="visual-el">
+              {renderVisualElTable(visualElItems)}
+            </TabsContent>
+          </Tabs>
         </CardContent>
       </Card>
     </div>
