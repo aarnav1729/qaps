@@ -204,6 +204,7 @@ const AppContent: React.FC = () => {
         
         // Move to final comments stage
         updatedQAP.status = 'final-comments';
+        updatedQAP.currentLevel = 5;
         updatedQAP = addTimestampToQAP(updatedQAP, 'Level 4 reviewed by Technical Head, sent for final comments', 4);
         
         return updatedQAP;

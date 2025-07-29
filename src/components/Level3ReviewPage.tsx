@@ -1,33 +1,57 @@
-
-import React, { useState, useEffect, useMemo } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Badge } from '@/components/ui/badge';
-import { QAPFormData } from '@/types/qap';
-import { useAuth } from '@/contexts/AuthContext';
-import { Eye, Search, MessageSquare, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import React, { useState, useEffect, useMemo } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { QAPFormData } from "@/types/qap";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  Eye,
+  Search,
+  MessageSquare,
+  CheckCircle,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 
 interface Level3ReviewPageProps {
   qapData: QAPFormData[];
   onNext: (id: string, responses: { [itemIndex: number]: string }) => void;
 }
 
-const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({ qapData, onNext }) => {
+const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
+  qapData,
+  onNext,
+}) => {
   const { user } = useAuth();
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
   const [selectedQAP, setSelectedQAP] = useState<QAPFormData | null>(null);
   const [comments, setComments] = useState<{ [itemIndex: number]: string }>({});
-  const [acknowledged, setAcknowledged] = useState<{ [itemIndex: number]: boolean }>({});
+  const [acknowledged, setAcknowledged] = useState<{
+    [itemIndex: number]: boolean;
+  }>({});
   const [showGreenSpecs, setShowGreenSpecs] = useState(false);
 
   const filteredQAPs = useMemo(() => {
-    return qapData.filter(qap => {
-      if (qap.status !== 'level-3') return false;
-      if (user?.role !== 'admin' && qap.plant !== user?.plant?.toLowerCase()) return false;
-      
+    return qapData.filter((qap) => {
+      if (qap.status !== "level-3") return false;
+      if (user?.role !== "admin") {
+        const userPlants =
+          user.plant
+            ?.toLowerCase()
+            .split(",")
+            .map((p) => p.trim()) || [];
+        if (!userPlants.includes(qap.plant.toLowerCase())) {
+          return false;
+        }
+      }
+
       if (searchTerm) {
         const searchLower = searchTerm.toLowerCase();
         return (
@@ -36,7 +60,7 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({ qapData, onNext }) 
           qap.submittedBy?.toLowerCase().includes(searchLower)
         );
       }
-      
+
       return true;
     });
   }, [qapData, user, searchTerm]);
@@ -48,16 +72,16 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({ qapData, onNext }) 
   };
 
   const handleCommentChange = (itemIndex: number, comment: string) => {
-    setComments(prev => ({
+    setComments((prev) => ({
       ...prev,
-      [itemIndex]: comment
+      [itemIndex]: comment,
     }));
   };
 
   const handleAcknowledge = (itemIndex: number) => {
-    setAcknowledged(prev => ({
+    setAcknowledged((prev) => ({
       ...prev,
-      [itemIndex]: !prev[itemIndex]
+      [itemIndex]: !prev[itemIndex],
     }));
   };
 
@@ -71,12 +95,12 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({ qapData, onNext }) 
 
   const getUnmatchedItems = () => {
     if (!selectedQAP) return [];
-    return selectedQAP.qaps.filter(item => item.match === 'no');
+    return selectedQAP.qaps.filter((item) => item.match === "no");
   };
 
   const getMatchedItems = () => {
     if (!selectedQAP) return [];
-    return selectedQAP.qaps.filter(item => item.match === 'yes');
+    return selectedQAP.qaps.filter((item) => item.match === "yes");
   };
 
   const canProceed = () => {
@@ -91,8 +115,12 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({ qapData, onNext }) 
     return (
       <div className="container mx-auto px-4 py-6">
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Head Review - Level 3</h1>
-          <p className="text-gray-600">Review unmatched specifications and provide feedback</p>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            Head Review - Level 3
+          </h1>
+          <p className="text-gray-600">
+            Review unmatched specifications and provide feedback
+          </p>
         </div>
 
         <Card className="mb-6">
@@ -102,19 +130,27 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({ qapData, onNext }) 
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div>
-                <label className="text-sm font-medium text-gray-600">Customer</label>
+                <label className="text-sm font-medium text-gray-600">
+                  Customer
+                </label>
                 <p className="font-semibold">{selectedQAP.customerName}</p>
               </div>
               <div>
-                <label className="text-sm font-medium text-gray-600">Project</label>
+                <label className="text-sm font-medium text-gray-600">
+                  Project
+                </label>
                 <p className="font-semibold">{selectedQAP.projectName}</p>
               </div>
               <div>
-                <label className="text-sm font-medium text-gray-600">Plant</label>
+                <label className="text-sm font-medium text-gray-600">
+                  Plant
+                </label>
                 <Badge>{selectedQAP.plant.toUpperCase()}</Badge>
               </div>
               <div>
-                <label className="text-sm font-medium text-gray-600">Status</label>
+                <label className="text-sm font-medium text-gray-600">
+                  Status
+                </label>
                 <Badge variant="secondary">{selectedQAP.status}</Badge>
               </div>
             </div>
@@ -124,12 +160,17 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({ qapData, onNext }) 
         {/* Unmatched Items */}
         <Card className="mb-6">
           <CardHeader>
-            <CardTitle className="text-red-600">Unmatched Specifications ({unmatchedItems.length})</CardTitle>
+            <CardTitle className="text-red-600">
+              Unmatched Specifications ({unmatchedItems.length})
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
               {unmatchedItems.map((item, index) => (
-                <div key={item.sno} className="border border-red-200 rounded-lg p-4 bg-red-50">
+                <div
+                  key={item.sno}
+                  className="border border-red-200 rounded-lg p-4 bg-red-50"
+                >
                   <div className="mb-4">
                     <div className="flex items-center justify-between mb-2">
                       <Badge variant="destructive">S.No: {item.sno}</Badge>
@@ -147,20 +188,29 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({ qapData, onNext }) 
                   {/* Level 2 Comments */}
                   <div className="mb-4 p-3 bg-white rounded border">
                     <h5 className="font-medium mb-2">Level 2 Comments:</h5>
-                    {selectedQAP.levelResponses[2] && Object.entries(selectedQAP.levelResponses[2]).map(([role, response]) => (
-                      <div key={role} className="mb-2">
-                        <Badge variant="outline" className="mr-2">{role}</Badge>
-                        <span className="text-sm">{response.comments[index] || 'No comment'}</span>
-                      </div>
-                    ))}
+                    {selectedQAP.levelResponses[2] &&
+                      Object.entries(selectedQAP.levelResponses[2]).map(
+                        ([role, response]) => (
+                          <div key={role} className="mb-2">
+                            <Badge variant="outline" className="mr-2">
+                              {role}
+                            </Badge>
+                            <span className="text-sm">
+                              {response.comments[index] || "No comment"}
+                            </span>
+                          </div>
+                        )
+                      )}
                   </div>
 
                   {/* Head Comment Input */}
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Your Comment</label>
                     <Textarea
-                      value={comments[index] || ''}
-                      onChange={(e) => handleCommentChange(index, e.target.value)}
+                      value={comments[index] || ""}
+                      onChange={(e) =>
+                        handleCommentChange(index, e.target.value)
+                      }
                       placeholder="Add your comment for this specification..."
                       className="min-h-[80px]"
                     />
@@ -175,7 +225,10 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({ qapData, onNext }) 
                       onChange={() => handleAcknowledge(index)}
                       className="rounded"
                     />
-                    <label htmlFor={`ack-${index}`} className="text-sm font-medium">
+                    <label
+                      htmlFor={`ack-${index}`}
+                      className="text-sm font-medium"
+                    >
                       Acknowledge Review
                     </label>
                   </div>
@@ -191,8 +244,14 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({ qapData, onNext }) 
             <Card className="cursor-pointer hover:bg-gray-50">
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-green-600">Matched Specifications ({matchedItems.length})</CardTitle>
-                  {showGreenSpecs ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+                  <CardTitle className="text-green-600">
+                    Matched Specifications ({matchedItems.length})
+                  </CardTitle>
+                  {showGreenSpecs ? (
+                    <ChevronUp className="h-5 w-5" />
+                  ) : (
+                    <ChevronDown className="h-5 w-5" />
+                  )}
                 </div>
               </CardHeader>
             </Card>
@@ -201,15 +260,19 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({ qapData, onNext }) 
             <Card>
               <CardContent className="pt-6">
                 <div className="grid gap-3">
-                  {matchedItems.map(item => (
-                    <div key={item.sno} className="border border-green-200 rounded-lg p-3 bg-green-50">
+                  {matchedItems.map((item) => (
+                    <div
+                      key={item.sno}
+                      className="border border-green-200 rounded-lg p-3 bg-green-50"
+                    >
                       <div className="flex items-center justify-between mb-2">
                         <Badge variant="default">S.No: {item.sno}</Badge>
                         <Badge variant="outline">{item.criteria}</Badge>
                       </div>
                       <h4 className="font-medium">{item.subCriteria}</h4>
                       <p className="text-sm text-gray-600 mt-1">
-                        Specification: {item.specification || item.criteriaLimits}
+                        Specification:{" "}
+                        {item.specification || item.criteriaLimits}
                       </p>
                     </div>
                   ))}
@@ -224,8 +287,8 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({ qapData, onNext }) 
           <Button onClick={() => setSelectedQAP(null)} variant="outline">
             Back to List
           </Button>
-          <Button 
-            onClick={handleNext} 
+          <Button
+            onClick={handleNext}
             disabled={!canProceed()}
             className="bg-blue-600 hover:bg-blue-700"
           >
@@ -239,8 +302,12 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({ qapData, onNext }) 
   return (
     <div className="container mx-auto px-4 py-6">
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Head Review - Level 3</h1>
-        <p className="text-gray-600">Review QAPs from Level 2 and provide feedback</p>
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">
+          Head Review - Level 3
+        </h1>
+        <p className="text-gray-600">
+          Review QAPs from Level 2 and provide feedback
+        </p>
       </div>
 
       <Card>
@@ -262,29 +329,49 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({ qapData, onNext }) 
         </CardHeader>
         <CardContent>
           {filteredQAPs.length === 0 ? (
-            <p className="text-center text-gray-500 py-8">No QAPs pending review</p>
+            <p className="text-center text-gray-500 py-8">
+              No QAPs pending review
+            </p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full border-collapse border border-gray-300">
                 <thead>
                   <tr className="bg-gray-100">
-                    <th className="border border-gray-300 p-3 text-left">Customer</th>
-                    <th className="border border-gray-300 p-3 text-left">Project</th>
-                    <th className="border border-gray-300 p-3 text-left">Plant</th>
-                    <th className="border border-gray-300 p-3 text-left">Submitted By</th>
-                    <th className="border border-gray-300 p-3 text-left">Status</th>
-                    <th className="border border-gray-300 p-3 text-center">Actions</th>
+                    <th className="border border-gray-300 p-3 text-left">
+                      Customer
+                    </th>
+                    <th className="border border-gray-300 p-3 text-left">
+                      Project
+                    </th>
+                    <th className="border border-gray-300 p-3 text-left">
+                      Plant
+                    </th>
+                    <th className="border border-gray-300 p-3 text-left">
+                      Submitted By
+                    </th>
+                    <th className="border border-gray-300 p-3 text-left">
+                      Status
+                    </th>
+                    <th className="border border-gray-300 p-3 text-center">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredQAPs.map(qap => (
+                  {filteredQAPs.map((qap) => (
                     <tr key={qap.id} className="hover:bg-gray-50">
-                      <td className="border border-gray-300 p-3">{qap.customerName}</td>
-                      <td className="border border-gray-300 p-3">{qap.projectName}</td>
+                      <td className="border border-gray-300 p-3">
+                        {qap.customerName}
+                      </td>
+                      <td className="border border-gray-300 p-3">
+                        {qap.projectName}
+                      </td>
                       <td className="border border-gray-300 p-3">
                         <Badge>{qap.plant.toUpperCase()}</Badge>
                       </td>
-                      <td className="border border-gray-300 p-3">{qap.submittedBy}</td>
+                      <td className="border border-gray-300 p-3">
+                        {qap.submittedBy}
+                      </td>
                       <td className="border border-gray-300 p-3">
                         <Badge variant="secondary">{qap.status}</Badge>
                       </td>
