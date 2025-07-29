@@ -168,6 +168,7 @@ const AppContent: React.FC = () => {
             updatedQAP.levelResponses[2] = {};
           }
 
+          
           // Add response for this role
           updatedQAP.levelResponses[2][role] = {
             username: user?.username || "",
