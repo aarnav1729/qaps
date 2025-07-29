@@ -158,6 +158,7 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
         </Card>
 
         {/* Unmatched Items */}
+        {/* Unmatched Items as Table */}
         <Card className="mb-6">
           <CardHeader>
             <CardTitle className="text-red-600">
@@ -165,75 +166,81 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {unmatchedItems.map((item, index) => (
-                <div
-                  key={item.sno}
-                  className="border border-red-200 rounded-lg p-4 bg-red-50"
-                >
-                  <div className="mb-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <Badge variant="destructive">S.No: {item.sno}</Badge>
-                      <Badge variant="outline">{item.criteria}</Badge>
-                    </div>
-                    <h4 className="font-semibold">{item.subCriteria}</h4>
-                    <p className="text-sm text-gray-600 mt-1">
-                      Premier Spec: {item.specification || item.criteriaLimits}
-                    </p>
-                    <p className="text-sm font-medium text-red-700 mt-1">
-                      Customer Spec: {item.customerSpecification}
-                    </p>
-                  </div>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse border border-gray-300">
+                <thead className="bg-gray-100">
+                  <tr>
+                    <th className="border border-gray-300 p-2">S.No</th>
+                    <th className="border border-gray-300 p-2">Criteria</th>
+                    <th className="border border-gray-300 p-2">Premier Spec</th>
+                    <th className="border border-gray-300 p-2">
+                      Customer Spec
+                    </th>
+                    {/* Dynamically add one column per Level-2 role */}
+                    {Object.keys(selectedQAP.levelResponses[2] || {}).map(
+                      (role) => (
+                        <th
+                          key={role}
+                          className="border border-gray-300 p-2 capitalize"
+                        >
+                          {role} Comment
+                        </th>
+                      )
+                    )}
+                    <th className="border border-gray-300 p-2">Your Comment</th>
+                    <th className="border border-gray-300 p-2">Acknowledge</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {unmatchedItems.map((item, idx) => (
+                    <tr key={item.sno} className="hover:bg-gray-50">
+                      <td className="border border-gray-300 p-2 text-center">
+                        {item.sno}
+                      </td>
+                      <td className="border border-gray-300 p-2">
+                        {item.criteria}
+                      </td>
+                      <td className="border border-gray-300 p-2">
+                        {item.specification || item.criteriaLimits}
+                      </td>
+                      <td className="border border-gray-300 p-2 text-red-700 font-medium">
+                        {item.customerSpecification}
+                      </td>
 
-                  {/* Level 2 Comments */}
-                  <div className="mb-4 p-3 bg-white rounded border">
-                    <h5 className="font-medium mb-2">Level 2 Comments:</h5>
-                    {selectedQAP.levelResponses[2] &&
-                      Object.entries(selectedQAP.levelResponses[2]).map(
-                        ([role, response]) => (
-                          <div key={role} className="mb-2">
-                            <Badge variant="outline" className="mr-2">
-                              {role}
-                            </Badge>
-                            <span className="text-sm">
-                              {response.comments[index] || "No comment"}
-                            </span>
-                          </div>
+                      {/* Level 2 comments cells */}
+                      {Object.entries(selectedQAP.levelResponses[2] || {}).map(
+                        ([role, resp]) => (
+                          <td key={role} className="border border-gray-300 p-2">
+                            {resp.comments[idx] || "—"}
+                          </td>
                         )
                       )}
-                  </div>
 
-                  {/* Head Comment Input */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium">Your Comment</label>
-                    <Textarea
-                      value={comments[index] || ""}
-                      onChange={(e) =>
-                        handleCommentChange(index, e.target.value)
-                      }
-                      placeholder="Add your comment for this specification..."
-                      className="min-h-[80px]"
-                    />
-                  </div>
+                      {/* Head comment input */}
+                      <td className="border border-gray-300 p-2">
+                        <Textarea
+                          value={comments[idx] || ""}
+                          onChange={(e) =>
+                            handleCommentChange(idx, e.target.value)
+                          }
+                          placeholder="Your comment…"
+                          className="min-h-[60px] w-full"
+                        />
+                      </td>
 
-                  {/* Acknowledge Checkbox */}
-                  <div className="mt-3 flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id={`ack-${index}`}
-                      checked={acknowledged[index] || false}
-                      onChange={() => handleAcknowledge(index)}
-                      className="rounded"
-                    />
-                    <label
-                      htmlFor={`ack-${index}`}
-                      className="text-sm font-medium"
-                    >
-                      Acknowledge Review
-                    </label>
-                  </div>
-                </div>
-              ))}
+                      {/* Acknowledge */}
+                      <td className="border border-gray-300 p-2 text-center">
+                        <input
+                          type="checkbox"
+                          checked={acknowledged[idx] || false}
+                          onChange={() => handleAcknowledge(idx)}
+                          className="rounded"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </CardContent>
         </Card>
