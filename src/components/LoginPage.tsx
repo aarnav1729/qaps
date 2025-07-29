@@ -1,6 +1,5 @@
-// src/components/LoginPage.tsx
+
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,22 +8,17 @@ import { useAuth } from '@/contexts/AuthContext';
 import { LogIn, Users, Eye, EyeOff } from 'lucide-react';
 
 const LoginPage: React.FC = () => {
-  const { login } = useAuth();
-  const navigate = useNavigate();
-
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showCredentials, setShowCredentials] = useState(false);
   const [error, setError] = useState('');
+  const { login } = useAuth();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-    const success = login(username.trim(), password);
-    if (success) {
-      navigate('/', { replace: true });
-    } else {
+    const success = login(username, password);
+    if (!success) {
       setError('Invalid username or password');
     }
   };
@@ -62,14 +56,11 @@ const LoginPage: React.FC = () => {
     ]}
   ];
 
-  const quickLogin = (user: { username: string; password: string }) => {
-    setError('');
+  const quickLogin = (user: any) => {
     setUsername(user.username);
     setPassword(user.password);
     const success = login(user.username, user.password);
-    if (success) {
-      navigate('/', { replace: true });
-    } else {
+    if (!success) {
       setError('Login failed');
     }
   };
@@ -118,7 +109,7 @@ const LoginPage: React.FC = () => {
                     variant="ghost"
                     size="sm"
                     className="absolute right-2 top-1/2 transform -translate-y-1/2 h-6 w-6 p-0"
-                    onClick={() => setShowPassword((v) => !v)}
+                    onClick={() => setShowPassword(!showPassword)}
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
@@ -148,49 +139,52 @@ const LoginPage: React.FC = () => {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setShowCredentials((v) => !v)}
+                onClick={() => setShowCredentials(!showCredentials)}
               >
                 {showCredentials ? 'Hide' : 'Show'} Credentials
               </Button>
             </div>
           </CardHeader>
           <CardContent className="max-h-96 overflow-y-auto">
-            {showCredentials ? (
-              demoUsers.map((category, idx) => (
-                <div key={idx} className="space-y-4">
-                  <h3 className="font-semibold text-gray-800 mb-2">{category.category}</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
-                    {category.users.map((u, i) => (
-                      <div
-                        key={i}
-                        className="p-3 bg-gray-50 rounded border cursor-pointer hover:bg-gray-100 transition-colors"
-                        onClick={() => quickLogin(u)}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <div className="font-medium text-sm">{u.username}</div>
-                            <div className="text-xs text-gray-600">Password: {u.password}</div>
-                            <div className="flex items-center gap-1 mt-1">
-                              <Badge variant="outline" className="text-xs">
-                                {u.role}
-                              </Badge>
-                              {u.plant && (
-                                <Badge variant="secondary" className="text-xs">
-                                  {u.plant}
+            {showCredentials && (
+              <div className="space-y-4">
+                {demoUsers.map((category, idx) => (
+                  <div key={idx}>
+                    <h3 className="font-semibold text-gray-800 mb-2">{category.category}</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
+                      {category.users.map((user, userIdx) => (
+                        <div
+                          key={userIdx}
+                          className="p-3 bg-gray-50 rounded border cursor-pointer hover:bg-gray-100 transition-colors"
+                          onClick={() => quickLogin(user)}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="font-medium text-sm">{user.username}</div>
+                              <div className="text-xs text-gray-600">Password: {user.password}</div>
+                              <div className="flex items-center gap-1 mt-1">
+                                <Badge variant="outline" className="text-xs">
+                                  {user.role}
                                 </Badge>
-                              )}
+                                {user.plant && (
+                                  <Badge variant="secondary" className="text-xs">
+                                    {user.plant}
+                                  </Badge>
+                                )}
+                              </div>
                             </div>
+                            <Button size="sm" variant="ghost" className="text-xs">
+                              Quick Login
+                            </Button>
                           </div>
-                          <Button size="sm" variant="ghost" className="text-xs">
-                            Quick Login
-                          </Button>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))
-            ) : (
+                ))}
+              </div>
+            )}
+            {!showCredentials && (
               <p className="text-center text-gray-500 py-8">
                 Click "Show Credentials" to view demo user accounts
               </p>

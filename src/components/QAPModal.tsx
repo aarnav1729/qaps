@@ -103,8 +103,6 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, e
 
   const handleSave = (isDraft: boolean = true) => {
     const allData = [...mqpData, ...visualElData];
-    const now = new Date();
-    
     const qapData: QAPFormData = {
       id: editingQAP?.id || Date.now().toString(),
       customerName,
@@ -112,22 +110,18 @@ const QAPModal: React.FC<QAPModalProps> = ({ isOpen, onClose, onSave, nextSno, e
       orderQuantity,
       productType,
       plant,
-      status: isDraft ? 'draft' : 'level-2',
+      status: isDraft ? 'draft' : 'submitted',
       submittedBy: user?.username,
-      submittedAt: isDraft ? undefined : now,
-      currentLevel: isDraft ? 1 : 2,
+      submittedAt: isDraft ? undefined : new Date(),
+      currentLevel: 1,
       levelResponses: {},
       timeline: isDraft ? [] : [{
         level: 1,
         action: 'Submitted by requestor',
         user: user?.username,
-        timestamp: now
+        timestamp: new Date()
       }],
-      qaps: allData,
-      createdAt: editingQAP?.createdAt || now,
-      lastModifiedAt: now,
-      levelStartTimes: isDraft ? { 1: now } : { 1: now, 2: now },
-      levelEndTimes: isDraft ? {} : { 1: now }
+      qaps: allData
     };
     
     onSave(qapData);

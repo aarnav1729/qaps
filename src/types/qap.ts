@@ -1,6 +1,8 @@
 
 export interface User {
+  id: string;
   username: string;
+  password: string;
   role: 'requestor' | 'production' | 'quality' | 'technical' | 'head' | 'technical-head' | 'plant-head' | 'admin';
   plant?: string;
 }
@@ -12,7 +14,7 @@ export interface QAPFormData {
   orderQuantity: number;
   productType: string;
   plant: string;
-  status: 'draft' | 'submitted' | 'level-2' | 'level-3' | 'level-4' | 'final-comments' | 'level-3-final' | 'level-4-final' | 'level-5' | 'approved' | 'rejected';
+  status: 'draft' | 'submitted' | 'level-2' | 'level-3' | 'level-4' | 'final-comments' | 'level-5' | 'approved' | 'rejected';
   submittedBy?: string;
   submittedAt?: Date;
   currentLevel: 1 | 2 | 3 | 4 | 5;
@@ -34,16 +36,15 @@ export interface QAPFormData {
     url: string;
     type: string;
     size: number;
-    content?: string; // For document viewing
   };
   approver?: string;
   approvedAt?: Date;
   feedback?: string;
   timeline: TimelineEntry[];
   qaps: QAPSpecification[];
-  // Required timestamp tracking for analytics
-  createdAt: Date;
-  lastModifiedAt: Date;
+  // Timestamp tracking for analytics
+  createdAt?: Date;
+  lastModifiedAt?: Date;
   levelStartTimes?: { [level: number]: Date };
   levelEndTimes?: { [level: number]: Date };
 }

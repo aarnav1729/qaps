@@ -1,80 +1,59 @@
-import { QAPFormData } from '@/types/qap';
-import { User } from '@/contexts/AuthContext';
 
-export const getNextLevelUsers = (qap: QAPFormData, currentLevel: number | string): string[] => {
+import { QAPFormData, User } from '@/types/qap';
+
+export const getNextLevelUsers = (qap: QAPFormData, currentLevel: number): string[] => {
   const plant = qap.plant.toLowerCase();
   
   switch (currentLevel) {
     case 2: // Level 2 to Level 3
-      if (['p4', 'p5'].includes(plant)) {
-        return ['nrao']; // Head for P4/P5
+      if (plant === 'p2') {
+        // Auto-bypass to Technical Head for P2
+        return ['jmr', 'baskara'];
       } else {
-        return ['jmr', 'baskara']; // Direct to Technical Head for P2
+        // Send to Head for P4/P5
+        return ['nrao'];
       }
     
     case 3: // Level 3 to Level 4
-      return ['jmr', 'baskara']; // Technical Head
+      return ['jmr', 'baskara'];
     
-    case 4: // Level 4 to Final Comments (back to requestor)
-      return [qap.submittedBy || ''];
-    
-    case 'final-comments': // Final Comments to Level 3 (Head) for P4/P5
-      if (['p4', 'p5'].includes(plant)) {
-        return ['nrao']; // Head for P4/P5
-      } else {
-        return ['jmr', 'baskara']; // Direct to Technical Head for P2
-      }
-    
-    case 'level-3-final': // Level 3 Final to Level 4 Final
-      return ['jmr', 'baskara']; // Technical Head
-    
-    case 'level-4-final': // Level 4 Final to Level 5 (Plant Head)
-      return ['cmk']; // Plant Head
+    case 4: // Level 4 to Level 5 (after final comments)
+      return ['cmk'];
     
     default:
       return [];
   }
 };
 
-export const processWorkflowTransition = (qap: QAPFormData, nextLevel: number | string): QAPFormData => {
+export const processWorkflowTransition = (qap: QAPFormData, nextLevel: number): QAPFormData => {
   const updatedQAP = { ...qap };
-  const now = new Date();
-  
-  // End current level timing
-  if (typeof updatedQAP.currentLevel === 'number') {
-    if (updatedQAP.levelEndTimes) {
-      updatedQAP.levelEndTimes[updatedQAP.currentLevel] = now;
-    } else {
-      updatedQAP.levelEndTimes = { [updatedQAP.currentLevel]: now };
-    }
-  }
   
   switch (nextLevel) {
     case 3:
-      if (['p4', 'p5'].includes(qap.plant.toLowerCase())) {
-        updatedQAP.status = 'level-3';
-        updatedQAP.currentLevel = 3;
-        updatedQAP.timeline.push({
-          level: 3,
-          action: 'Sent to Head for review',
-          user: 'system',
-          timestamp: now
-        });
-      } else {
-        // Skip to Level 4 for P2
+      if (qap.plant.toLowerCase() === 'p2') {
+        // Auto-bypass to Level 4 for P2
         updatedQAP.status = 'level-4';
         updatedQAP.currentLevel = 4;
         updatedQAP.timeline.push({
           level: 3,
           action: 'Auto-bypassed (P2 plant)',
           user: 'system',
-          timestamp: now
+          timestamp: new Date()
         });
         updatedQAP.timeline.push({
           level: 4,
           action: 'Sent to Technical Head',
           user: 'system',
-          timestamp: now
+          timestamp: new Date()
+        });
+      } else {
+        updatedQAP.status = 'level-3';
+        updatedQAP.currentLevel = 3;
+        updatedQAP.timeline.push({
+          level: 3,
+          action: 'Sent to Head for review',
+          user: 'system',
+          timestamp: new Date()
         });
       }
       break;
@@ -86,40 +65,7 @@ export const processWorkflowTransition = (qap: QAPFormData, nextLevel: number | 
         level: 4,
         action: 'Sent to Technical Head',
         user: 'system',
-        timestamp: now
-      });
-      break;
-    
-    case 'final-comments':
-      updatedQAP.status = 'final-comments';
-      updatedQAP.currentLevel = 1;
-      updatedQAP.timeline.push({
-        level: 1,
-        action: 'Sent to Requestor for final comments',
-        user: 'system',
-        timestamp: now
-      });
-      break;
-    
-    case 'level-3-final':
-      updatedQAP.status = 'level-3-final';
-      updatedQAP.currentLevel = 3;
-      updatedQAP.timeline.push({
-        level: 3,
-        action: 'Sent to Head for final review',
-        user: 'system',
-        timestamp: now
-      });
-      break;
-    
-    case 'level-4-final':
-      updatedQAP.status = 'level-4-final';
-      updatedQAP.currentLevel = 4;
-      updatedQAP.timeline.push({
-        level: 4,
-        action: 'Sent to Technical Head for final review',
-        user: 'system',
-        timestamp: now
+        timestamp: new Date()
       });
       break;
     
@@ -128,9 +74,9 @@ export const processWorkflowTransition = (qap: QAPFormData, nextLevel: number | 
       updatedQAP.currentLevel = 5;
       updatedQAP.timeline.push({
         level: 5,
-        action: 'Sent to Plant Head for final approval',
+        action: 'Sent to Plant Head for approval',
         user: 'system',
-        timestamp: now
+        timestamp: new Date()
       });
       break;
     
@@ -138,16 +84,6 @@ export const processWorkflowTransition = (qap: QAPFormData, nextLevel: number | 
       break;
   }
   
-  // Start new level timing
-  if (typeof updatedQAP.currentLevel === 'number') {
-    if (updatedQAP.levelStartTimes) {
-      updatedQAP.levelStartTimes[updatedQAP.currentLevel] = now;
-    } else {
-      updatedQAP.levelStartTimes = { [updatedQAP.currentLevel]: now };
-    }
-  }
-  
-  updatedQAP.lastModifiedAt = now;
   return updatedQAP;
 };
 
@@ -169,10 +105,10 @@ export const canUserAccessQAP = (user: User, qap: QAPFormData): boolean => {
     case 'head':
       return userPlants.some(plant => ['p4', 'p5'].includes(plant)) && 
              userPlants.includes(qapPlant) && 
-             (qap.currentLevel === 3 || qap.status === 'level-3-final');
+             qap.currentLevel === 3;
     
     case 'technical-head':
-      return qap.currentLevel === 4 || qap.status === 'level-4-final';
+      return qap.currentLevel === 4;
     
     case 'plant-head':
       return qap.currentLevel === 5;
