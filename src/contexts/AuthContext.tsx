@@ -13,7 +13,7 @@ interface User {
     | "admin";
   plant?: string;
 }
-const API = "http://localhost:4000";
+const API = window.location.origin;
 
 interface AuthContextType {
   user: User | null;
@@ -26,7 +26,7 @@ const AuthContext = createContext<AuthContextType|undefined>(undefined);
 
 export const AuthProvider: React.FC<{children:React.ReactNode}> = ({children}) => {
   const [user, setUser] = useState<User|null>(null);
-  const API = 'http://localhost:4000';
+  const API = window.location.origin;
 
   // on mount, try /api/me (with cookie) → fall back to localStorage
   useEffect(() => {

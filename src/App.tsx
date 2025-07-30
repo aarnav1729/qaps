@@ -30,6 +30,7 @@ import AdminAnalytics from "./components/AdminAnalytics";
 import { QAPFormData } from "./types/qap";
 import { processWorkflowTransition } from "./utils/workflowUtils";
 
+const API = window.location.origin;
 const queryClient = new QueryClient();
 
 const AppContent: React.FC = () => {
@@ -43,7 +44,7 @@ const AppContent: React.FC = () => {
   } = useQuery<QAPFormData[]>({
     queryKey: ["qaps"],
     queryFn: () =>
-      fetch("http://localhost:4000/api/qaps", { credentials: "include" }).then(
+      fetch(`${API}/api/qaps`, { credentials: "include" }).then(
         (r) => {
           if (!r.ok) throw new Error("Failed to fetch QAPs");
           return r.json();
@@ -54,7 +55,7 @@ const AppContent: React.FC = () => {
   // ─── CRUD mutations ─────────────────────────────────────────────────────
   const createQAP = useMutation<QAPFormData, Error, QAPFormData>({
     mutationFn: async (newQap) => {
-      const res = await fetch("http://localhost:4000/api/qaps", {
+      const res = await fetch(`${API}/api/qaps`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -70,7 +71,7 @@ const AppContent: React.FC = () => {
 
   const updateQAP = useMutation<void, Error, QAPFormData>({
     mutationFn: async (updated) => {
-      const res = await fetch(`http://localhost:4000/api/qaps/${updated.id}`, {
+      const res = await fetch(`${API}/api/qaps/${updated.id}`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -85,7 +86,7 @@ const AppContent: React.FC = () => {
 
   const deleteQAP = useMutation<void, Error, string>({
     mutationFn: async (id) => {
-      const res = await fetch(`http://localhost:4000/api/qaps/${id}`, {
+      const res = await fetch(`${API}/api/qaps/${id}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -104,7 +105,7 @@ const AppContent: React.FC = () => {
   >({
     mutationFn: async ({ qapId, comments }) => {
       const res = await fetch(
-        `http://localhost:4000/api/qaps/${qapId}/responses`,
+        `${API}/api/qaps/${qapId}/responses`,
         {
           method: "POST",
           credentials: "include",
@@ -126,7 +127,7 @@ const AppContent: React.FC = () => {
   >({
     mutationFn: async ({ qapId, comments }) => {
       const res = await fetch(
-        `http://localhost:4000/api/qaps/${qapId}/responses`,
+        `${API}/api/qaps/${qapId}/responses`,
         {
           method: "POST",
           credentials: "include",
@@ -148,7 +149,7 @@ const AppContent: React.FC = () => {
   >({
     mutationFn: async ({ qapId, comments }) => {
       const res = await fetch(
-        `http://localhost:4000/api/qaps/${qapId}/responses`,
+        `${API}/api/qaps/${qapId}/responses`,
         {
           method: "POST",
           credentials: "include",
@@ -170,7 +171,7 @@ const AppContent: React.FC = () => {
     { id: string; feedback?: string }
   >({
     mutationFn: async ({ id, feedback }) => {
-      const res = await fetch(`http://localhost:4000/api/qaps/${id}/approve`, {
+      const res = await fetch(`${API}/api/qaps/${id}/approve`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -185,7 +186,7 @@ const AppContent: React.FC = () => {
 
   const rejectQAP = useMutation<void, Error, { id: string; reason: string }>({
     mutationFn: async ({ id, reason }) => {
-      const res = await fetch(`http://localhost:4000/api/qaps/${id}/reject`, {
+      const res = await fetch(`${API}/api/qaps/${id}/reject`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -271,7 +272,7 @@ const AppContent: React.FC = () => {
     if (attachment) form.append("attachment", attachment);
 
     const res = await fetch(
-      `http://localhost:4000/api/qaps/${qapId}/final-comments`,
+      `${API}/api/qaps/${qapId}/final-comments`,
       {
         method: "POST",
         credentials: "include",

@@ -12,12 +12,7 @@ const { body, param, validationResult } = require("express-validator");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
-const https       = require("https");
-
-
-
-
-
+const https = require("https");
 
 const app = express();
 
@@ -25,12 +20,10 @@ const app = express();
 /* Middleware                                                         */
 /* ------------------------------------------------------------------ */
 
-// allow our front‑end at localhost:8080 to send/receive cookies
-// allow credentials from your React host
 app.use(
   cors({
-    origin: "http://localhost:8080",
-    credentials: true,
+    origin: true, // reflect request origin, no patterns / regex
+    credentials: true, // let browsers send & receive cookies
   })
 );
 
@@ -230,6 +223,16 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 // serve static uploads
 app.use("/uploads", express.static(uploadDir));
+
+const distDir = path.join(__dirname, "dist");
+const indexHtml = path.join(distDir, "index.html");
+
+app.use(express.static(distDir));
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/")) return next();
+  res.sendFile(indexHtml);
+});
+
 
 // multer setup
 const storage = multer.diskStorage({
@@ -1535,7 +1538,31 @@ app.post(
 // ─────────────────────────────────────────────────────────────────────────────
 //   ───   S T A R T   S E R V E R   ─────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server listening on http://localhost:${PORT}`);
-});
+/* ----------------------------------------------------------
+ * HTTPS boot – same port for FE & API
+ * -------------------------------------------------------- */
+const httpsOptions = {
+  key: fs.readFileSync(path.join(__dirname, "certs", "mydomain.key")),
+  cert: fs.readFileSync(path.join(__dirname, "certs", "d466aacf3db3f299.crt")),
+  ca: fs.readFileSync(path.join(__dirname, "certs", "gd_bundle-g2-g1.crt")),
+};
+
+const PORT = Number(process.env.PORT) || 11443;
+const HOST = process.env.HOST || "0.0.0.0";
+
+async function start() {
+  try {
+    await initDatabases();
+    https.createServer(httpsOptions, app).listen(PORT, HOST, () => {
+      console.log(
+        `🔒  HTTPS ready → https://${
+          HOST === "0.0.0.0" ? "localhost" : HOST
+        }:${PORT}`
+      );
+    });
+  } catch (err) {
+    console.error("❌  Server start failed:", err);
+    process.exit(1);
+  }
+}
+start();
