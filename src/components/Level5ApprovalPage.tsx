@@ -1,12 +1,36 @@
+// src/components/Level5ApprovalPage.tsx
 import React, { useState, useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardContent,
+} from "@/components/ui/card";
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from "@/components/ui/collapsible";
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
-import { QAPFormData } from "@/types/qap";
+import {
+  Eye,
+  Search,
+  CheckCircle,
+  XCircle,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { Eye, Search, CheckCircle, XCircle } from "lucide-react";
+import { QAPFormData, QAPSpecification } from "@/types/qap";
 
 interface Level5ApprovalPageProps {
   qapData: QAPFormData[];
@@ -20,412 +44,459 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
   onReject,
 }) => {
   const { user } = useAuth();
+
+  /* ───────── state ───────── */
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedQAP, setSelectedQAP] = useState<QAPFormData | null>(null);
-  const [feedback, setFeedback] = useState("");
-  const [actionType, setActionType] = useState<"approve" | "reject" | null>(
-    null
-  );
+  const [rowFilter, setRowFilter] =
+    useState<"all" | "matched" | "unmatched">("all");
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [decision, setDecision] = useState<{
+    [qapId: string]: "approve" | "reject" | null;
+  }>({});
+  const [feedback, setFeedback] = useState<Record<string, string>>({});
 
-  const filteredQAPs = useMemo(() => {
-    return qapData.filter((qap) => {
-      if (qap.status !== "level-5") return false;
+  /* ───────── reviewable list ───────── */
+  const plantRaw = user?.plant || "";
+  const userPlants = plantRaw
+    .split(",")
+    .map((p) => p.trim().toLowerCase())
+    .filter(Boolean);
 
-      if (searchTerm) {
-        const searchLower = searchTerm.toLowerCase();
+  const reviewable = useMemo(() => {
+    return qapData
+      .filter((q) => {
+        if (q.status !== "level-5") return false;
+        const allowed =
+          plantRaw === "" || userPlants.includes(q.plant.toLowerCase());
+        if (!allowed) return false;
+        if (!searchTerm) return true;
+        const s = searchTerm.toLowerCase();
         return (
-          qap.customerName.toLowerCase().includes(searchLower) ||
-          qap.projectName.toLowerCase().includes(searchLower) ||
-          qap.submittedBy?.toLowerCase().includes(searchLower)
+          q.customerName.toLowerCase().includes(s) ||
+          q.projectName.toLowerCase().includes(s) ||
+          (q.submittedBy || "").toLowerCase().includes(s)
         );
-      }
+      })
+      .map((q) => ({
+        ...q,
+        allSpecs: [
+          ...(q.specs.mqp || []),
+          ...(q.specs.visual || []),
+        ] as QAPSpecification[],
+      }));
+  }, [qapData, plantRaw, userPlants, searchTerm]);
 
-      return true;
-    });
-  }, [qapData, searchTerm]);
+  /* ───────── helpers ───────── */
+  const submitDecision = (qap: QAPFormData) => {
+    const action = decision[qap.id];
+    const note = feedback[qap.id]?.trim();
+    if (!action) return;
 
-  const handleQAPSelect = (qap: QAPFormData) => {
-    setSelectedQAP(qap);
-    setFeedback("");
-    setActionType(null);
-  };
-
-  const handleAction = (action: "approve" | "reject") => {
-    setActionType(action);
-  };
-
-  const handleSubmit = () => {
-    if (!selectedQAP || !actionType) return;
-
-    if (actionType === "approve") {
-      onApprove(selectedQAP.id, feedback);
+    if (action === "approve") {
+      onApprove(qap.id, note || undefined);
     } else {
-      if (!feedback.trim()) {
-        alert("Please provide feedback for rejection");
+      if (!note) {
+        alert("Please provide reason for rejection.");
         return;
       }
-      onReject(selectedQAP.id, feedback);
+      onReject(qap.id, note);
     }
 
-    setSelectedQAP(null);
-    setFeedback("");
-    setActionType(null);
+    // reset collapsed state
+    setExpanded((p) => ({ ...p, [qap.id]: false }));
+    setDecision((p) => ({ ...p, [qap.id]: null }));
+    setFeedback((p) => ({ ...p, [qap.id]: "" }));
   };
 
-  const getUnmatchedItems = () => {
-    if (!selectedQAP) return [];
-    return selectedQAP.qaps.filter((item) => item.match === "no");
-  };
-
-  if (selectedQAP) {
-    const unmatchedItems = getUnmatchedItems();
-
-    return (
-      <div className="container mx-auto px-4 py-6">
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Plant Head Approval - Level 5
-          </h1>
-          <p className="text-gray-600">Final approval for QAP specifications</p>
-        </div>
-
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle>QAP Details</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div>
-                <label className="text-sm font-medium text-gray-600">
-                  Customer
-                </label>
-                <p className="font-semibold">{selectedQAP.customerName}</p>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-600">
-                  Project
-                </label>
-                <p className="font-semibold">{selectedQAP.projectName}</p>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-600">
-                  Plant
-                </label>
-                <Badge>{selectedQAP.plant.toUpperCase()}</Badge>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-600">
-                  Submitted By
-                </label>
-                <p className="font-semibold">{selectedQAP.submittedBy}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Final Comments */}
-        {selectedQAP.finalComments && (
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle>Final Comments from Requestor</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
-                <p className="text-gray-800">{selectedQAP.finalComments}</p>
-                <p className="text-sm text-gray-600 mt-2">
-                  By: {selectedQAP.finalCommentsBy} at{" "}
-                  {selectedQAP.finalCommentsAt
-                    ? new Date(selectedQAP.finalCommentsAt).toLocaleString()
-                    : "N/A"}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Complete Review History */}
-        {/* Complete Review History as Table */}
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle>Complete Review History</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse border border-gray-300">
-                <thead className="bg-gray-100">
-                  <tr>
-                    <th className="border border-gray-300 p-2">S.No</th>
-                    <th className="border border-gray-300 p-2">Criteria</th>
-                    <th className="border border-gray-300 p-2">Premier Spec</th>
-                    <th className="border border-gray-300 p-2">
-                      Customer Spec
-                    </th>
-                    {/* Level 2 columns */}
-                    {Object.keys(selectedQAP.levelResponses[2] || {}).map(
-                      (role) => (
-                        <th
-                          key={`l2-${role}`}
-                          className="border border-gray-300 p-2 capitalize"
-                        >
-                          {role} (L2)
-                        </th>
-                      )
-                    )}
-                    {/* Level 3 columns */}
-                    {Object.keys(selectedQAP.levelResponses[3] || {}).map(
-                      (role) => (
-                        <th
-                          key={`l3-${role}`}
-                          className="border border-gray-300 p-2 capitalize"
-                        >
-                          {role} (L3)
-                        </th>
-                      )
-                    )}
-                    {/* Level 4 columns */}
-                    {Object.keys(selectedQAP.levelResponses[4] || {}).map(
-                      (role) => (
-                        <th
-                          key={`l4-${role}`}
-                          className="border border-gray-300 p-2 capitalize"
-                        >
-                          {role} (L4)
-                        </th>
-                      )
-                    )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {unmatchedItems.map((item, idx) => (
-                    <tr key={item.sno} className="hover:bg-gray-50">
-                      <td className="border border-gray-300 p-2 text-center">
-                        {item.sno}
-                      </td>
-                      <td className="border border-gray-300 p-2">
-                        {item.criteria}
-                      </td>
-                      <td className="border border-gray-300 p-2">
-                        {item.specification || item.criteriaLimits}
-                      </td>
-                      <td className="border border-gray-300 p-2 text-red-700 font-medium">
-                        {item.customerSpecification}
-                      </td>
-                      {/* Level 2 comment cells */}
-                      {Object.entries(selectedQAP.levelResponses[2] || {}).map(
-                        ([role, resp]) => (
-                          <td
-                            key={`l2-${role}-${item.sno}`}
-                            className="border border-gray-300 p-2"
-                          >
-                            {resp.comments[idx] || "–"}
-                          </td>
-                        )
-                      )}
-                      {/* Level 3 comment cells */}
-                      {Object.entries(selectedQAP.levelResponses[3] || {}).map(
-                        ([role, resp]) => (
-                          <td
-                            key={`l3-${role}-${item.sno}`}
-                            className="border border-gray-300 p-2"
-                          >
-                            {resp.comments[idx] || "–"}
-                          </td>
-                        )
-                      )}
-                      {/* Level 4 comment cells */}
-                      {Object.entries(selectedQAP.levelResponses[4] || {}).map(
-                        ([role, resp]) => (
-                          <td
-                            key={`l4-${role}-${item.sno}`}
-                            className="border border-gray-300 p-2"
-                          >
-                            {resp.comments[idx] || "–"}
-                          </td>
-                        )
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Plant Head Decision */}
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle>Plant Head Decision</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div className="flex gap-4">
-                <Button
-                  onClick={() => handleAction("approve")}
-                  variant={actionType === "approve" ? "default" : "outline"}
-                  className={
-                    actionType === "approve"
-                      ? "bg-green-600 hover:bg-green-700"
-                      : ""
-                  }
-                >
-                  <CheckCircle className="w-4 h-4 mr-2" />
-                  Approve
-                </Button>
-                <Button
-                  onClick={() => handleAction("reject")}
-                  variant={actionType === "reject" ? "destructive" : "outline"}
-                >
-                  <XCircle className="w-4 h-4 mr-2" />
-                  Reject
-                </Button>
-              </div>
-
-              {actionType && (
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">
-                    {actionType === "approve"
-                      ? "Approval Comments (Optional)"
-                      : "Rejection Reason (Required)"}
-                  </label>
-                  <Textarea
-                    value={feedback}
-                    onChange={(e) => setFeedback(e.target.value)}
-                    placeholder={
-                      actionType === "approve"
-                        ? "Add any final approval comments..."
-                        : "Please provide reason for rejection..."
-                    }
-                    className="min-h-[100px]"
-                  />
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Action Buttons */}
-        <div className="flex gap-3">
-          <Button onClick={() => setSelectedQAP(null)} variant="outline">
-            Back to List
-          </Button>
-          {actionType && (
-            <Button
-              onClick={handleSubmit}
-              disabled={actionType === "reject" && !feedback.trim()}
-              className={
-                actionType === "approve"
-                  ? "bg-green-600 hover:bg-green-700"
-                  : "bg-red-600 hover:bg-red-700"
-              }
-            >
-              {actionType === "approve" ? "Approve QAP" : "Reject QAP"}
-            </Button>
-          )}
-        </div>
-      </div>
-    );
-  }
-
+  /* ───────── render ───────── */
   return (
     <div className="container mx-auto px-4 py-6">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">
-          Plant Head Approval - Level 5
-        </h1>
-        <p className="text-gray-600">Final approval for QAP specifications</p>
+      <h1 className="text-3xl font-bold mb-4">Plant Head Approval – Level 5</h1>
+
+      {/* top bar */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
+        <div className="flex items-center gap-2">
+          <Search className="w-4 h-4 text-gray-400" />
+          <Input
+            placeholder="Search QAPs…"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-64"
+          />
+          <label className="font-medium">Show Rows:</label>
+          <select
+            value={rowFilter}
+            onChange={(e) => setRowFilter(e.target.value as any)}
+            className="border rounded px-2 py-1"
+          >
+            <option value="all">All</option>
+            <option value="matched">Matched (Green)</option>
+            <option value="unmatched">Unmatched (Red)</option>
+          </select>
+        </div>
+        <span className="text-sm text-gray-600">
+          Pending QAPs: {reviewable.length}
+        </span>
       </div>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>
-              QAPs Pending Final Approval ({filteredQAPs.length})
-            </CardTitle>
-            <div className="flex items-center gap-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <Input
-                  placeholder="Search QAPs..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 w-64"
-                />
-              </div>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {filteredQAPs.length === 0 ? (
-            <p className="text-center text-gray-500 py-8">
-              No QAPs pending final approval
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse border border-gray-300">
-                <thead>
-                  <tr className="bg-gray-100">
-                    <th className="border border-gray-300 p-3 text-left">
-                      Customer
-                    </th>
-                    <th className="border border-gray-300 p-3 text-left">
-                      Project
-                    </th>
-                    <th className="border border-gray-300 p-3 text-left">
-                      Plant
-                    </th>
-                    <th className="border border-gray-300 p-3 text-left">
-                      Submitted By
-                    </th>
-                    <th className="border border-gray-300 p-3 text-left">
-                      Product Type
-                    </th>
-                    <th className="border border-gray-300 p-3 text-left">
-                      Status
-                    </th>
-                    <th className="border border-gray-300 p-3 text-center">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredQAPs.map((qap) => (
-                    <tr key={qap.id} className="hover:bg-gray-50">
-                      <td className="border border-gray-300 p-3">
-                        {qap.customerName}
-                      </td>
-                      <td className="border border-gray-300 p-3">
-                        {qap.projectName}
-                      </td>
-                      <td className="border border-gray-300 p-3">
-                        <Badge>{qap.plant.toUpperCase()}</Badge>
-                      </td>
-                      <td className="border border-gray-300 p-3">
-                        {qap.submittedBy}
-                      </td>
-                      <td className="border border-gray-300 p-3">
-                        {qap.productType}
-                      </td>
-                      <td className="border border-gray-300 p-3">
-                        <Badge variant="secondary">{qap.status}</Badge>
-                      </td>
-                      <td className="border border-gray-300 p-3 text-center">
+      {reviewable.length === 0 ? (
+        <div className="text-center text-gray-500 py-20">
+          No QAPs pending final approval
+        </div>
+      ) : (
+        reviewable.map((qap) => {
+          const specs = qap.allSpecs.filter((s) =>
+            rowFilter === "all"
+              ? true
+              : rowFilter === "matched"
+              ? s.match === "yes"
+              : s.match === "no"
+          );
+
+          /* previous level comments */
+          const L2 = qap.levelResponses?.[2] || {};
+          const L3 = qap.levelResponses?.[3] || {};
+          const L4 = qap.levelResponses?.[4] || {};
+          const l3Roles = Object.keys(L3);
+          const l4Roles = Object.keys(L4);
+
+          const isOpen = expanded[qap.id] || false;
+          const unmatched = specs.filter((s) => s.match === "no");
+
+          return (
+            <Collapsible
+              key={qap.id}
+              open={isOpen}
+              onOpenChange={(o) => setExpanded((p) => ({ ...p, [qap.id]: o }))}
+              className="mb-4"
+            >
+              {/* header */}
+              <CollapsibleTrigger asChild>
+                <Card className="cursor-pointer hover:bg-gray-50">
+                  <CardHeader className="flex justify-between items-center p-4">
+                    <div className="flex items-center gap-3">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 p-0"
+                        tabIndex={-1}
+                      >
+                        {isOpen ? (
+                          <ChevronUp className="h-5 w-5" />
+                        ) : (
+                          <ChevronDown className="h-5 w-5" />
+                        )}
+                      </Button>
+                      <div>
+                        <CardTitle className="text-lg">
+                          {qap.customerName} – {qap.projectName}
+                        </CardTitle>
+                        <div className="flex gap-2 mt-1">
+                          <Badge variant="outline">
+                            {qap.plant.toUpperCase()}
+                          </Badge>
+                          <Badge variant="outline">{qap.productType}</Badge>
+                          <Badge>{qap.orderQuantity} MW</Badge>
+                        </div>
+                      </div>
+                    </div>
+                    <Badge variant="secondary">{qap.status}</Badge>
+                  </CardHeader>
+                </Card>
+              </CollapsibleTrigger>
+
+              {/* detail */}
+              <CollapsibleContent>
+                <Card className="border-t-0">
+                  <CardContent className="p-4">
+                    <Tabs defaultValue="mqp">
+                      <TabsList className="mb-4">
+                        <TabsTrigger value="mqp">
+                          MQP ({qap.specs.mqp.length})
+                        </TabsTrigger>
+                        <TabsTrigger value="visual">
+                          Visual ({qap.specs.visual.length})
+                        </TabsTrigger>
+                      </TabsList>
+
+                      {/* MQP TAB */}
+                      <TabsContent value="mqp">
+                        <div className="overflow-x-auto">
+                          <table className="w-full border-collapse text-sm">
+                            <thead>
+                              <tr className="bg-gray-100">
+                                <th className="p-2 border">S.No</th>
+                                <th className="p-2 border">Criteria</th>
+                                <th className="p-2 border">Sub‑Criteria</th>
+                                <th className="p-2 border">Premier Spec</th>
+                                <th className="p-2 border">Customer Spec</th>
+                                <th className="p-2 border">Prod L2</th>
+                                <th className="p-2 border">Qual L2</th>
+                                <th className="p-2 border">Tech L2</th>
+                                {l3Roles.map((r) => (
+                                  <th
+                                    key={`mqp-l3-h-${r}`}
+                                    className="p-2 border capitalize"
+                                  >
+                                    {r} L3
+                                  </th>
+                                ))}
+                                {l4Roles.map((r) => (
+                                  <th
+                                    key={`mqp-l4-h-${r}`}
+                                    className="p-2 border capitalize"
+                                  >
+                                    {r} L4
+                                  </th>
+                                ))}
+                                <th className="p-2 border">Final Comment</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {specs
+                                .filter((s) => qap.specs.mqp.includes(s as any))
+                                .map((s) => (
+                                  <tr
+                                    key={s.sno}
+                                    className={`border-b ${
+                                      s.match === "yes"
+                                        ? "bg-green-50"
+                                        : "bg-red-50"
+                                    }`}
+                                  >
+                                    <td className="p-2 border">{s.sno}</td>
+                                    <td className="p-2 border">{s.criteria}</td>
+                                    <td className="p-2 border">
+                                      {s.subCriteria}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {s.specification}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {s.customerSpecification}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {L2.production?.comments?.[s.sno] || "—"}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {L2.quality?.comments?.[s.sno] || "—"}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {L2.technical?.comments?.[s.sno] || "—"}
+                                    </td>
+                                    {l3Roles.map((r) => (
+                                      <td
+                                        key={`mqp-l3-${r}-${s.sno}`}
+                                        className="p-2 border"
+                                      >
+                                        {L3[r]?.comments?.[s.sno] || "—"}
+                                      </td>
+                                    ))}
+                                    {l4Roles.map((r) => (
+                                      <td
+                                        key={`mqp-l4-${r}-${s.sno}`}
+                                        className="p-2 border"
+                                      >
+                                        {L4[r]?.comments?.[s.sno] || "—"}
+                                      </td>
+                                    ))}
+                                    <td className="p-2 border">
+                                      {qap.finalCommentsPerItem?.[s.sno] || "—"}
+                                    </td>
+                                  </tr>
+                                ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </TabsContent>
+
+                      {/* VISUAL TAB */}
+                      <TabsContent value="visual">
+                        <div className="overflow-x-auto">
+                          <table className="w-full border-collapse text-sm">
+                            <thead>
+                              <tr className="bg-gray-100">
+                                <th className="p-2 border">S.No</th>
+                                <th className="p-2 border">Criteria</th>
+                                <th className="p-2 border">Sub‑Criteria</th>
+                                <th className="p-2 border">Limits</th>
+                                <th className="p-2 border">Customer Spec</th>
+                                <th className="p-2 border">Prod L2</th>
+                                <th className="p-2 border">Qual L2</th>
+                                <th className="p-2 border">Tech L2</th>
+                                {l3Roles.map((r) => (
+                                  <th
+                                    key={`vis-l3-h-${r}`}
+                                    className="p-2 border capitalize"
+                                  >
+                                    {r} L3
+                                  </th>
+                                ))}
+                                {l4Roles.map((r) => (
+                                  <th
+                                    key={`vis-l4-h-${r}`}
+                                    className="p-2 border capitalize"
+                                  >
+                                    {r} L4
+                                  </th>
+                                ))}
+                                <th className="p-2 border">Final Comment</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {specs
+                                .filter((s) =>
+                                  qap.specs.visual.includes(s as any)
+                                )
+                                .map((s) => (
+                                  <tr
+                                    key={s.sno}
+                                    className={`border-b ${
+                                      s.match === "yes"
+                                        ? "bg-green-50"
+                                        : "bg-red-50"
+                                    }`}
+                                  >
+                                    <td className="p-2 border">{s.sno}</td>
+                                    <td className="p-2 border">{s.criteria}</td>
+                                    <td className="p-2 border">
+                                      {s.subCriteria}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {s.criteriaLimits}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {s.customerSpecification}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {L2.production?.comments?.[s.sno] || "—"}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {L2.quality?.comments?.[s.sno] || "—"}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {L2.technical?.comments?.[s.sno] || "—"}
+                                    </td>
+                                    {l3Roles.map((r) => (
+                                      <td
+                                        key={`vis-l3-${r}-${s.sno}`}
+                                        className="p-2 border"
+                                      >
+                                        {L3[r]?.comments?.[s.sno] || "—"}
+                                      </td>
+                                    ))}
+                                    {l4Roles.map((r) => (
+                                      <td
+                                        key={`vis-l4-${r}-${s.sno}`}
+                                        className="p-2 border"
+                                      >
+                                        {L4[r]?.comments?.[s.sno] || "—"}
+                                      </td>
+                                    ))}
+                                    <td className="p-2 border">
+                                      {qap.finalCommentsPerItem?.[s.sno] || "—"}
+                                    </td>
+                                  </tr>
+                                ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </TabsContent>
+                    </Tabs>
+
+                    {/* Decision area */}
+                    <div className="mt-6 space-y-4">
+                      <div className="flex gap-4">
                         <Button
-                          onClick={() => handleQAPSelect(qap)}
-                          size="sm"
-                          className="bg-blue-600 hover:bg-blue-700"
+                          onClick={() =>
+                            setDecision((p) => ({
+                              ...p,
+                              [qap.id]:
+                                p[qap.id] === "approve" ? null : "approve",
+                            }))
+                          }
+                          variant={
+                            decision[qap.id] === "approve" ? "default" : "outline"
+                          }
+                          className={
+                            decision[qap.id] === "approve"
+                              ? "bg-green-600 hover:bg-green-700"
+                              : ""
+                          }
                         >
-                          <Eye className="w-4 h-4 mr-2" />
-                          Review & Approve
+                          <CheckCircle className="w-4 h-4 mr-2" /> Approve
                         </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                        <Button
+                          onClick={() =>
+                            setDecision((p) => ({
+                              ...p,
+                              [qap.id]:
+                                p[qap.id] === "reject" ? null : "reject",
+                            }))
+                          }
+                          variant={
+                            decision[qap.id] === "reject"
+                              ? "destructive"
+                              : "outline"
+                          }
+                        >
+                          <XCircle className="w-4 h-4 mr-2" /> Reject
+                        </Button>
+                      </div>
+
+                      {decision[qap.id] && (
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">
+                            {decision[qap.id] === "approve"
+                              ? "Approval comments (optional)"
+                              : "Rejection reason (required)"}
+                          </label>
+                          <Textarea
+                            value={feedback[qap.id] || ""}
+                            onChange={(e) =>
+                              setFeedback((p) => ({
+                                ...p,
+                                [qap.id]: e.target.value,
+                              }))
+                            }
+                            placeholder={
+                              decision[qap.id] === "approve"
+                                ? "Add approval comments…"
+                                : "State reason for rejection…"
+                            }
+                            className="min-h-[100px]"
+                          />
+                        </div>
+                      )}
+
+                      {decision[qap.id] && (
+                        <div className="flex justify-end">
+                          <Button
+                            onClick={() => submitDecision(qap)}
+                            disabled={
+                              decision[qap.id] === "reject" &&
+                              !feedback[qap.id]?.trim()
+                            }
+                            className={
+                              decision[qap.id] === "approve"
+                                ? "bg-green-600 hover:bg-green-700"
+                                : "bg-red-600 hover:bg-red-700"
+                            }
+                          >
+                            {decision[qap.id] === "approve"
+                              ? "Confirm Approval"
+                              : "Confirm Rejection"}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </CollapsibleContent>
+            </Collapsible>
+          );
+        })
+      )}
     </div>
   );
 };

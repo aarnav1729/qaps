@@ -1,11 +1,17 @@
-import React, { useState, useEffect } from "react";
+// src/App.tsx
+import React, { useState } from "react";
 import {
   BrowserRouter as Router,
   Routes,
   Route,
   Navigate,
 } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  QueryClient,
+  QueryClientProvider,
+  useQuery,
+  useMutation,
+} from "@tanstack/react-query";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import Navigation from "./components/Navigation";
 import LoginPage from "./components/LoginPage";
@@ -26,360 +32,285 @@ import { processWorkflowTransition } from "./utils/workflowUtils";
 
 const queryClient = new QueryClient();
 
-// Main App Content Component
 const AppContent: React.FC = () => {
   const { user, isAuthenticated } = useAuth();
-  const [qapData, setQapData] = useState<QAPFormData[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
 
-  // Track action timestamps
+  // ─── Fetch all QAPs ─────────────────────────────────────────────────────────
+  const {
+    data: qapData = [],
+    isLoading: qapsLoading,
+    refetch: refetchQaps,
+  } = useQuery<QAPFormData[]>({
+    queryKey: ["qaps"],
+    queryFn: () =>
+      fetch("http://localhost:4000/api/qaps", { credentials: "include" }).then(
+        (r) => {
+          if (!r.ok) throw new Error("Failed to fetch QAPs");
+          return r.json();
+        }
+      ),
+  });
+
+  // ─── CRUD mutations ─────────────────────────────────────────────────────
+  const createQAP = useMutation<QAPFormData, Error, QAPFormData>({
+    mutationFn: async (newQap) => {
+      const res = await fetch("http://localhost:4000/api/qaps", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newQap),
+      });
+      if (!res.ok) throw new Error("Failed to create QAP");
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchQaps();
+    },
+  });
+
+  const updateQAP = useMutation<void, Error, QAPFormData>({
+    mutationFn: async (updated) => {
+      const res = await fetch(`http://localhost:4000/api/qaps/${updated.id}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updated),
+      });
+      if (!res.ok) throw new Error("Failed to update QAP");
+    },
+    onSuccess: () => {
+      refetchQaps();
+    },
+  });
+
+  const deleteQAP = useMutation<void, Error, string>({
+    mutationFn: async (id) => {
+      const res = await fetch(`http://localhost:4000/api/qaps/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to delete QAP");
+    },
+    onSuccess: () => {
+      refetchQaps();
+    },
+  });
+
+  // ─── reviewer mutations ──────────────────────────────────────────────────
+  const level2Response = useMutation<
+    void,
+    Error,
+    { qapId: string; comments: Record<number, string> }
+  >({
+    mutationFn: async ({ qapId, comments }) => {
+      const res = await fetch(
+        `http://localhost:4000/api/qaps/${qapId}/responses`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ level: 2, comments }),
+        }
+      );
+      if (!res.ok) throw new Error("Failed to submit level-2 review");
+    },
+    onSuccess: () => {
+      refetchQaps();
+    },
+  });
+
+  const level3Response = useMutation<
+    void,
+    Error,
+    { qapId: string; comments: Record<number, string> }
+  >({
+    mutationFn: async ({ qapId, comments }) => {
+      const res = await fetch(
+        `http://localhost:4000/api/qaps/${qapId}/responses`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ level: 3, comments }),
+        }
+      );
+      if (!res.ok) throw new Error("Failed to submit level-3 review");
+    },
+    onSuccess: () => {
+      refetchQaps();
+    },
+  });
+
+  const level4Response = useMutation<
+    void,
+    Error,
+    { qapId: string; comments: Record<number, string> }
+  >({
+    mutationFn: async ({ qapId, comments }) => {
+      const res = await fetch(
+        `http://localhost:4000/api/qaps/${qapId}/responses`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ level: 4, comments }),
+        }
+      );
+      if (!res.ok) throw new Error("Failed to submit level-4 review");
+    },
+    onSuccess: () => {
+      refetchQaps();
+    },
+  });
+
+  // ─── Plant-Head Approve / Reject Mutations ────────────────────────────────
+  const approveQAP = useMutation<
+    void,
+    Error,
+    { id: string; feedback?: string }
+  >({
+    mutationFn: async ({ id, feedback }) => {
+      const res = await fetch(`http://localhost:4000/api/qaps/${id}/approve`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feedback }),
+      });
+      if (!res.ok) throw new Error("Failed to approve QAP");
+    },
+    onSuccess: () => {
+      refetchQaps();
+    },
+  });
+
+  const rejectQAP = useMutation<void, Error, { id: string; reason: string }>({
+    mutationFn: async ({ id, reason }) => {
+      const res = await fetch(`http://localhost:4000/api/qaps/${id}/reject`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      });
+      if (!res.ok) throw new Error("Failed to reject QAP");
+    },
+    onSuccess: () => {
+      refetchQaps();
+    },
+  });
+
+  // ─── Helpers ───────────────────────────────────────────────────────────────
   const addTimestampToQAP = (
     qap: QAPFormData,
     action: string,
     level?: number
   ): QAPFormData => {
     const now = new Date();
-    const updatedQAP = {
+    const updated: QAPFormData = {
       ...qap,
       lastModifiedAt: now,
       timeline: [
-        ...qap.timeline,
+        ...(qap.timeline || []),
         {
-          level: level || qap.currentLevel,
+          level: level ?? qap.currentLevel,
           action,
           user: user?.username,
           timestamp: now,
         },
       ],
+      levelStartTimes: { ...(qap.levelStartTimes || {}) },
+      levelEndTimes: { ...(qap.levelEndTimes || {}) },
     };
-
-    // Track level start/end times
     if (action.includes("Sent to") && level) {
-      updatedQAP.levelStartTimes = { ...qap.levelStartTimes, [level]: now };
+      updated.levelStartTimes[level] = now;
     } else if (action.includes("Reviewed") || action.includes("Approved")) {
-      updatedQAP.levelEndTimes = {
-        ...qap.levelEndTimes,
-        [qap.currentLevel]: now,
-      };
+      updated.levelEndTimes[qap.currentLevel] = now;
     }
-
-    return updatedQAP;
+    return updated;
   };
 
-  // Load data from localStorage on component mount
-  useEffect(() => {
-    const savedData = localStorage.getItem("qapData");
-    if (savedData) {
-      try {
-        const parsedData = JSON.parse(savedData);
-        setQapData(
-          parsedData.map((qap: any) => ({
-            ...qap,
-            submittedAt: qap.submittedAt
-              ? new Date(qap.submittedAt)
-              : undefined,
-            approvedAt: qap.approvedAt ? new Date(qap.approvedAt) : undefined,
-            finalCommentsAt: qap.finalCommentsAt
-              ? new Date(qap.finalCommentsAt)
-              : undefined,
-            createdAt: qap.createdAt ? new Date(qap.createdAt) : new Date(),
-            lastModifiedAt: qap.lastModifiedAt
-              ? new Date(qap.lastModifiedAt)
-              : new Date(),
-            levelStartTimes: qap.levelStartTimes
-              ? Object.fromEntries(
-                  Object.entries(qap.levelStartTimes).map(([k, v]) => [
-                    k,
-                    new Date(v as string),
-                  ])
-                )
-              : {},
-            levelEndTimes: qap.levelEndTimes
-              ? Object.fromEntries(
-                  Object.entries(qap.levelEndTimes).map(([k, v]) => [
-                    k,
-                    new Date(v as string),
-                  ])
-                )
-              : {},
-            timeline:
-              qap.timeline?.map((entry: any) => ({
-                ...entry,
-                timestamp: new Date(entry.timestamp),
-              })) || [],
-          }))
-        );
-      } catch (error) {
-        console.error("Error loading QAP data:", error);
-      }
-    }
-  }, []);
-
-  // Save data to localStorage whenever qapData changes
-  useEffect(() => {
-    localStorage.setItem("qapData", JSON.stringify(qapData));
-  }, [qapData]);
-
-  const handleSaveQAP = (qapFormData: QAPFormData, status?: string) => {
-    const now = new Date();
-    setQapData((prev) => {
-      const existingIndex = prev.findIndex((q) => q.id === qapFormData.id);
-      let updatedQAP = {
-        ...qapFormData,
-        lastModifiedAt: now,
-        createdAt: qapFormData.createdAt || now,
-      };
-
-      // Add submission timestamp if status changed to submitted
-      if (
-        status === "submitted" ||
-        (qapFormData.status !== "draft" && !qapFormData.submittedAt)
-      ) {
-        updatedQAP.submittedAt = now;
-        updatedQAP = addTimestampToQAP(updatedQAP, "Submitted for review", 2);
-      }
-
-      if (existingIndex >= 0) {
-        const updated = [...prev];
-        updated[existingIndex] = updatedQAP;
-        return updated;
-      } else {
-        return [...prev, updatedQAP];
-      }
-    });
+  // ─── CRUD HANDLERS ─────────────────────────────────────────────────────────
+  const handleSaveQAP = (q: QAPFormData) => {
+    if (q.id) updateQAP.mutate(q);
+    else createQAP.mutate(q);
   };
 
   const handleDeleteQAP = (id: string) => {
-    setQapData((prev) => prev.filter((q) => q.id !== id));
+    deleteQAP.mutate(id);
   };
 
+  // ─── REVIEW HANDLERS ───────────────────────────────────────────────────────
   const handleLevel2Next = (
     qapId: string,
     role: string,
     responses: { [itemIndex: number]: string }
   ) => {
-    setQapData((prev) =>
-      prev.map((qap) => {
-        if (qap.id === qapId) {
-          let updatedQAP = { ...qap };
-
-          // Initialize level responses if not exists
-          if (!updatedQAP.levelResponses[2]) {
-            updatedQAP.levelResponses[2] = {};
-          }
-
-          
-          // Add response for this role
-          updatedQAP.levelResponses[2][role] = {
-            username: user?.username || "",
-            acknowledged: true,
-            comments: responses,
-            respondedAt: new Date(),
-          };
-
-          updatedQAP = addTimestampToQAP(
-            updatedQAP,
-            `Level 2 reviewed by ${role}`,
-            2
-          );
-
-          // Check if all required roles have responded
-          const requiredRoles = qap.qaps
-            .filter((spec) => spec.match === "no")
-            .flatMap((spec) => spec.reviewBy || []);
-
-          const uniqueRoles = [...new Set(requiredRoles)];
-          const respondedRoles = Object.keys(updatedQAP.levelResponses[2]);
-
-          // If all roles responded, move to next level
-          const allResponded = uniqueRoles.every((role) =>
-            respondedRoles.includes(role)
-          );
-
-          if (allResponded) {
-            updatedQAP = addTimestampToQAP(
-              updatedQAP,
-              "Level 2 completed, moving to next level",
-              2
-            );
-            return processWorkflowTransition(updatedQAP, 3);
-          }
-
-          return updatedQAP;
-        }
-        return qap;
-      })
-    );
+    level2Response.mutate({ qapId, comments: responses });
   };
 
   const handleLevel3Next = (
-    id: string,
+    qapId: string,
     responses: { [itemIndex: number]: string }
   ) => {
-    setQapData((prev) =>
-      prev.map((qap) => {
-        if (qap.id === id) {
-          let updatedQAP = { ...qap };
-
-          if (!updatedQAP.levelResponses[3]) {
-            updatedQAP.levelResponses[3] = {};
-          }
-
-          updatedQAP.levelResponses[3]["head"] = {
-            username: user?.username || "",
-            acknowledged: true,
-            comments: responses,
-            respondedAt: new Date(),
-          };
-
-          updatedQAP = addTimestampToQAP(
-            updatedQAP,
-            "Level 3 reviewed by Head",
-            3
-          );
-          return processWorkflowTransition(updatedQAP, 4);
-        }
-        return qap;
-      })
-    );
+    level3Response.mutate({ qapId, comments: responses });
   };
 
   const handleLevel4Next = (
-    id: string,
+    qapId: string,
     responses: { [itemIndex: number]: string }
   ) => {
-    setQapData((prev) =>
-      prev.map((qap) => {
-        if (qap.id === id) {
-          let updatedQAP = { ...qap };
-
-          if (!updatedQAP.levelResponses[4]) {
-            updatedQAP.levelResponses[4] = {};
-          }
-
-          updatedQAP.levelResponses[4]["technical-head"] = {
-            username: user?.username || "",
-            acknowledged: true,
-            comments: responses,
-            respondedAt: new Date(),
-          };
-
-          // Move to final comments stage
-          updatedQAP.status = "final-comments";
-          updatedQAP.currentLevel = 5;
-          updatedQAP = addTimestampToQAP(
-            updatedQAP,
-            "Level 4 reviewed by Technical Head, sent for final comments",
-            4
-          );
-
-          return updatedQAP;
-        }
-        return qap;
-      })
-    );
+    level4Response.mutate({ qapId, comments: responses });
   };
 
-  const handleSubmitFinalComments = (
-    id: string,
-    finalComments: string,
+  const handleSubmitFinalComments = async (
+    qapId: string,
+    comments: string,
     attachment?: File
   ) => {
-    setQapData((prev) =>
-      prev.map((qap) => {
-        if (qap.id === id) {
-          let updatedQAP = { ...qap };
-          updatedQAP.finalComments = finalComments;
-          updatedQAP.finalCommentsBy = user?.username;
-          updatedQAP.finalCommentsAt = new Date();
+    const form = new FormData();
+    form.append("comments", comments);
+    if (attachment) form.append("attachment", attachment);
 
-          // Handle attachment (in a real app, you'd upload to a server)
-          if (attachment) {
-            updatedQAP.finalCommentsAttachment = {
-              name: attachment.name,
-              url: URL.createObjectURL(attachment), // In production, this would be a server URL
-              type: attachment.type,
-              size: attachment.size,
-            };
-          }
-
-          updatedQAP = addTimestampToQAP(updatedQAP, "Final comments added", 4);
-          return processWorkflowTransition(updatedQAP, 5);
-        }
-        return qap;
-      })
+    const res = await fetch(
+      `http://localhost:4000/api/qaps/${qapId}/final-comments`,
+      {
+        method: "POST",
+        credentials: "include",
+        body: form,
+      }
     );
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.message || "Failed to save final comments");
+    }
+    // once successful, re-load QAPs
+    refetchQaps();
   };
 
-  const handleLevel5Approve = (id: string, feedback?: string) => {
-    setQapData((prev) =>
-      prev.map((qap) => {
-        if (qap.id === id) {
-          let updatedQAP = {
-            ...qap,
-            status: "approved" as const,
-            approver: user?.username,
-            approvedAt: new Date(),
-            feedback,
-          };
-
-          updatedQAP = addTimestampToQAP(
-            updatedQAP,
-            "Approved by Plant Head",
-            5
-          );
-          return updatedQAP;
-        }
-        return qap;
-      })
-    );
+  // ─── Plant-Head Handlers ───────────────────────────────────────────────────
+  const handleLevel5Approve = (qapId: string, feedback?: string) => {
+    approveQAP.mutate({ id: qapId, feedback });
   };
 
-  const handleLevel5Reject = (id: string, feedback: string) => {
-    setQapData((prev) =>
-      prev.map((qap) => {
-        if (qap.id === id) {
-          let updatedQAP = {
-            ...qap,
-            status: "rejected" as const,
-            feedback,
-          };
-
-          updatedQAP = addTimestampToQAP(
-            updatedQAP,
-            "Rejected by Plant Head",
-            5
-          );
-          return updatedQAP;
-        }
-        return qap;
-      })
-    );
+  const handleLevel5Reject = (qapId: string, reason: string) => {
+    rejectQAP.mutate({ id: qapId, reason });
   };
 
   const handleViewQAP = (qap: QAPFormData) => {
     console.log("Viewing QAP:", qap);
   };
 
-  // User management functions for AdminPage
-  const handleAddUser = (user: any) => {
-    setUsers((prev) => [
-      ...prev,
-      { ...user, id: user.id || Date.now().toString() },
-    ]);
-  };
+  // ─── Admin users remain in local state ──────────────────────────────────────
+  const [users, setUsers] = useState<any[]>([]);
+  const handleAddUser = (u: any) =>
+    setUsers((prev) => [...prev, { ...u, id: u.id || Date.now().toString() }]);
+  const handleEditUser = (u: any) =>
+    setUsers((prev) => prev.map((x) => (x.id === u.id ? u : x)));
+  const handleDeleteUser = (id: string) =>
+    setUsers((prev) => prev.filter((x) => x.id !== id));
 
-  const handleEditUser = (user: any) => {
-    setUsers((prev) => prev.map((u) => (u.id === user.id ? user : u)));
-  };
-
-  const handleDeleteUser = (id: string) => {
-    setUsers((prev) => prev.filter((u) => u.id !== id));
-  };
-
-  if (!isAuthenticated) {
-    return <LoginPage />;
-  }
+  // ─── Render ────────────────────────────────────────────────────────────────
+  if (!isAuthenticated) return <LoginPage />;
+  if (qapsLoading) return <div>Loading QAPs…</div>;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -397,7 +328,6 @@ const AppContent: React.FC = () => {
             }
           />
 
-          {/* QAP View/Edit Page */}
           <Route
             path="/qap/:id"
             element={
@@ -405,7 +335,6 @@ const AppContent: React.FC = () => {
             }
           />
 
-          {/* Level 2 Routes */}
           {(user?.role === "production" ||
             user?.role === "quality" ||
             user?.role === "technical" ||
@@ -418,7 +347,6 @@ const AppContent: React.FC = () => {
             />
           )}
 
-          {/* Level 3 Routes */}
           {(user?.role === "head" || user?.role === "admin") && (
             <Route
               path="/level3-review"
@@ -428,7 +356,6 @@ const AppContent: React.FC = () => {
             />
           )}
 
-          {/* Level 4 Routes */}
           {(user?.role === "technical-head" || user?.role === "admin") && (
             <Route
               path="/level4-review"
@@ -438,7 +365,6 @@ const AppContent: React.FC = () => {
             />
           )}
 
-          {/* Final Comments Routes */}
           {(user?.role === "requestor" || user?.role === "admin") && (
             <Route
               path="/final-comments"
@@ -451,7 +377,6 @@ const AppContent: React.FC = () => {
             />
           )}
 
-          {/* Level 5 Routes */}
           {(user?.role === "plant-head" || user?.role === "admin") && (
             <Route
               path="/level5-approval"
@@ -465,18 +390,15 @@ const AppContent: React.FC = () => {
             />
           )}
 
-          {/* Specification Builder */}
           {(user?.role === "requestor" || user?.role === "admin") && (
             <Route path="/spec-builder" element={<SpecificationBuilder />} />
           )}
 
-          {/* Analytics */}
           <Route
             path="/analytics"
             element={<AnalyticsPage qapData={qapData} />}
           />
 
-          {/* Admin Analytics */}
           {user?.role === "admin" && (
             <Route
               path="/admin-analytics"
@@ -484,7 +406,6 @@ const AppContent: React.FC = () => {
             />
           )}
 
-          {/* Approvals */}
           {(user?.role === "plant-head" || user?.role === "admin") && (
             <Route
               path="/approvals"
@@ -499,7 +420,6 @@ const AppContent: React.FC = () => {
             />
           )}
 
-          {/* Admin */}
           {user?.role === "admin" && (
             <Route
               path="/admin"
@@ -522,8 +442,7 @@ const AppContent: React.FC = () => {
   );
 };
 
-// Main App Component
-const App: React.FC = () => {
+export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
@@ -533,6 +452,4 @@ const App: React.FC = () => {
       </AuthProvider>
     </QueryClientProvider>
   );
-};
-
-export default App;
+}

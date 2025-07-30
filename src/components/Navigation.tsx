@@ -1,31 +1,30 @@
-
-import React from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { useAuth } from '@/contexts/AuthContext';
-import { 
-  Home, 
-  FileText, 
-  Users, 
-  BarChart3, 
-  Settings, 
+import React from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  Home,
+  FileText,
+  Users,
+  BarChart3,
+  Settings,
   LogOut,
   ClipboardCheck,
   MessageSquare,
   UserCheck,
   CheckCircle,
-  Building2
-} from 'lucide-react';
+  Building2,
+} from "lucide-react";
 
 const Navigation: React.FC = () => {
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
 
-  const handleLogout = () => {
-    logout();
-    navigate('/');
+  const handleLogout = async () => {
+    await logout();
+    navigate("/");
   };
 
   const isActive = (path: string) => {
@@ -34,69 +33,87 @@ const Navigation: React.FC = () => {
 
   const navItems = [
     {
-      path: '/',
-      label: 'Dashboard',
+      path: "/",
+      label: "Dashboard",
       icon: Home,
-      roles: ['requestor', 'production', 'quality', 'technical', 'head', 'technical-head', 'plant-head', 'admin']
+      roles: [
+        "requestor",
+        "production",
+        "quality",
+        "technical",
+        "head",
+        "technical-head",
+        "plant-head",
+        "admin",
+      ],
     },
     {
-      path: '/level2-review',
-      label: 'Level 2 Review',
+      path: "/level2-review",
+      label: "Level 2 Review",
       icon: ClipboardCheck,
-      roles: ['production', 'quality', 'technical', 'admin']
+      roles: ["production", "quality", "technical", "admin"],
     },
     {
-      path: '/level3-review',
-      label: 'Head Review',
+      path: "/level3-review",
+      label: "Head Review",
       icon: UserCheck,
-      roles: ['head', 'admin']
+      roles: ["head", "admin"],
     },
     {
-      path: '/level4-review',
-      label: 'Technical Head',
+      path: "/level4-review",
+      label: "Technical Head",
       icon: Users,
-      roles: ['technical-head', 'admin']
+      roles: ["technical-head", "admin"],
     },
     {
-      path: '/final-comments',
-      label: 'Final Comments',
+      path: "/final-comments",
+      label: "Final Comments",
       icon: MessageSquare,
-      roles: ['requestor', 'admin']
+      roles: ["requestor", "admin"],
     },
     {
-      path: '/level5-approval',
-      label: 'Plant Head Approval',
+      path: "/level5-approval",
+      label: "Plant Head Approval",
       icon: CheckCircle,
-      roles: ['plant-head', 'admin']
+      roles: ["plant-head", "admin"],
     },
     {
-      path: '/spec-builder',
-      label: 'Spec Builder',
+      path: "/spec-builder",
+      label: "Spec Builder",
       icon: Building2,
-      roles: ['requestor', 'admin']
+      roles: ["requestor", "admin"],
     },
     {
-      path: '/analytics',
-      label: 'Analytics',
+      path: "/analytics",
+      label: "Analytics",
       icon: BarChart3,
-      roles: ['requestor', 'production', 'quality', 'technical', 'head', 'technical-head', 'plant-head', 'admin']
+      roles: [
+        "requestor",
+        "production",
+        "quality",
+        "technical",
+        "head",
+        "technical-head",
+        "plant-head",
+        "admin",
+      ],
     },
     {
-      path: '/approvals',
-      label: 'Approvals',
+      path: "/approvals",
+      label: "Approvals",
       icon: FileText,
-      roles: ['plant-head', 'admin']
+      roles: ["plant-head", "admin"],
     },
     {
-      path: '/admin',
-      label: 'Admin',
+      path: "/admin",
+      label: "Admin",
       icon: Settings,
-      roles: ['admin']
-    }
+      roles: ["admin"],
+    },
   ];
 
-  const visibleNavItems = navItems.filter(item => 
-    item.roles.includes(user?.role || '')
+  const visibleNavItems = navItems.filter((item) =>
+    item.roles.includes(user?.role || "")
   );
 
   return (
@@ -119,8 +136,8 @@ const Navigation: React.FC = () => {
                     to={item.path}
                     className={`inline-flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                       isActive(item.path)
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                        ? "bg-blue-100 text-blue-700"
+                        : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
                     }`}
                   >
                     <Icon className="w-4 h-4 mr-2" />
@@ -135,15 +152,11 @@ const Navigation: React.FC = () => {
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-2">
               <Badge variant="outline" className="capitalize">
-                {user?.role?.replace('-', ' ')}
+                {user?.role?.replace("-", " ")}
               </Badge>
-              <span className="text-sm text-gray-700">
-                {user?.username}
-              </span>
+              <span className="text-sm text-gray-700">{user?.username}</span>
               {user?.plant && (
-                <Badge variant="secondary">
-                  {user.plant.toUpperCase()}
-                </Badge>
+                <Badge variant="secondary">{user.plant.toUpperCase()}</Badge>
               )}
             </div>
             <Button
@@ -169,8 +182,8 @@ const Navigation: React.FC = () => {
                   to={item.path}
                   className={`flex items-center px-3 py-2 rounded-md text-base font-medium transition-colors ${
                     isActive(item.path)
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                      ? "bg-blue-100 text-blue-700"
+                      : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
                   }`}
                 >
                   <Icon className="w-4 h-4 mr-3" />

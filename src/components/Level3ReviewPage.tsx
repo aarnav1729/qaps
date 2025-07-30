@@ -1,28 +1,38 @@
-import React, { useState, useEffect, useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+// src/components/Level3ReviewPage.tsx
+import React, { useState, useMemo } from "react";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardContent,
+} from "@/components/ui/card";
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
-import { QAPFormData } from "@/types/qap";
 import { useAuth } from "@/contexts/AuthContext";
+import { QAPFormData, QAPSpecification } from "@/types/qap";
 import {
-  Eye,
-  Search,
-  MessageSquare,
-  CheckCircle,
+  Clock,
+  Send,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
 import {
   Collapsible,
-  CollapsibleContent,
   CollapsibleTrigger,
+  CollapsibleContent,
 } from "@/components/ui/collapsible";
 
 interface Level3ReviewPageProps {
   qapData: QAPFormData[];
-  onNext: (id: string, responses: { [itemIndex: number]: string }) => void;
+  onNext: (qapId: string, comments: Record<number, string>) => void;
 }
 
 const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
@@ -30,376 +40,422 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
   onNext,
 }) => {
   const { user } = useAuth();
+
+  /* ───────────────────────── state ───────────────────────── */
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedQAP, setSelectedQAP] = useState<QAPFormData | null>(null);
-  const [comments, setComments] = useState<{ [itemIndex: number]: string }>({});
-  const [acknowledged, setAcknowledged] = useState<{
-    [itemIndex: number]: boolean;
+  const [rowFilter, setRowFilter] =
+    useState<"all" | "matched" | "unmatched">("all");
+  const [responses, setResponses] = useState<{
+    [qapId: string]: Record<number, string>;
   }>({});
-  const [showGreenSpecs, setShowGreenSpecs] = useState(false);
+  const [acknowledged, setAcknowledged] = useState<{
+    [qapId: string]: Record<number, boolean>;
+  }>({});
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-  const filteredQAPs = useMemo(() => {
-    return qapData.filter((qap) => {
-      if (qap.status !== "level-3") return false;
-      if (user?.role !== "admin") {
-        const userPlants =
-          user.plant
-            ?.toLowerCase()
-            .split(",")
-            .map((p) => p.trim()) || [];
-        if (!userPlants.includes(qap.plant.toLowerCase())) {
+  /* ───────────────────── derive reviewable ───────────────────── */
+  const userPlants = (user?.plant || "")
+    .split(",")
+    .map((p) => p.trim().toLowerCase());
+
+  const reviewable = useMemo(() => {
+    return qapData
+      .filter((q) => {
+        if (q.currentLevel !== 3) return false;
+        if (
+          user?.role !== "admin" &&
+          !userPlants.includes(q.plant.toLowerCase())
+        )
           return false;
-        }
-      }
-
-      if (searchTerm) {
-        const searchLower = searchTerm.toLowerCase();
+        if (!searchTerm) return true;
+        const s = searchTerm.toLowerCase();
         return (
-          qap.customerName.toLowerCase().includes(searchLower) ||
-          qap.projectName.toLowerCase().includes(searchLower) ||
-          qap.submittedBy?.toLowerCase().includes(searchLower)
+          q.customerName.toLowerCase().includes(s) ||
+          q.projectName.toLowerCase().includes(s) ||
+          (q.submittedBy || "").toLowerCase().includes(s)
         );
-      }
+      })
+      .map((q) => ({
+        ...q,
+        allSpecs: [
+          ...(q.specs.mqp || []),
+          ...(q.specs.visual || []),
+        ] as QAPSpecification[],
+      }));
+  }, [qapData, userPlants, searchTerm, user]);
 
-      return true;
-    });
-  }, [qapData, user, searchTerm]);
-
-  const handleQAPSelect = (qap: QAPFormData) => {
-    setSelectedQAP(qap);
-    setComments({});
-    setAcknowledged({});
-  };
-
-  const handleCommentChange = (itemIndex: number, comment: string) => {
-    setComments((prev) => ({
+  /* ───────────────────────── helpers ───────────────────────── */
+  const handleResponseChange = (
+    qapId: string,
+    sno: number,
+    text: string
+  ) =>
+    setResponses((prev) => ({
       ...prev,
-      [itemIndex]: comment,
+      [qapId]: { ...(prev[qapId] || {}), [sno]: text },
     }));
-  };
 
-  const handleAcknowledge = (itemIndex: number) => {
+  const handleAcknowledge = (qapId: string, sno: number) =>
     setAcknowledged((prev) => ({
       ...prev,
-      [itemIndex]: !prev[itemIndex],
+      [qapId]: {
+        ...(prev[qapId] || {}),
+        [sno]: !(prev[qapId]?.[sno] || false),
+      },
     }));
+
+  const getTimeRemaining = (submittedAt?: string) => {
+    if (!submittedAt) return "Unknown";
+    const elapsed = Date.now() - new Date(submittedAt).getTime();
+    const remaining = 4 * 86_400_000 - elapsed;
+    if (remaining <= 0) return "Expired";
+    const d = Math.floor(remaining / 86_400_000);
+    const h = Math.floor((remaining % 86_400_000) / 3_600_000);
+    return `${d}d ${h}h left`;
   };
 
-  const handleNext = () => {
-    if (!selectedQAP) return;
-    onNext(selectedQAP.id, comments);
-    setSelectedQAP(null);
-    setComments({});
-    setAcknowledged({});
+  const submit = (qapId: string) => {
+    onNext(qapId, responses[qapId] || {});
   };
 
-  const getUnmatchedItems = () => {
-    if (!selectedQAP) return [];
-    return selectedQAP.qaps.filter((item) => item.match === "no");
-  };
-
-  const getMatchedItems = () => {
-    if (!selectedQAP) return [];
-    return selectedQAP.qaps.filter((item) => item.match === "yes");
-  };
-
-  const canProceed = () => {
-    const unmatchedItems = getUnmatchedItems();
-    return unmatchedItems.every((_, index) => acknowledged[index]);
-  };
-
-  if (selectedQAP) {
-    const unmatchedItems = getUnmatchedItems();
-    const matchedItems = getMatchedItems();
-
-    return (
-      <div className="container mx-auto px-4 py-6">
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Head Review - Level 3
-          </h1>
-          <p className="text-gray-600">
-            Review unmatched specifications and provide feedback
-          </p>
-        </div>
-
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle>QAP Details</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div>
-                <label className="text-sm font-medium text-gray-600">
-                  Customer
-                </label>
-                <p className="font-semibold">{selectedQAP.customerName}</p>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-600">
-                  Project
-                </label>
-                <p className="font-semibold">{selectedQAP.projectName}</p>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-600">
-                  Plant
-                </label>
-                <Badge>{selectedQAP.plant.toUpperCase()}</Badge>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-600">
-                  Status
-                </label>
-                <Badge variant="secondary">{selectedQAP.status}</Badge>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Unmatched Items */}
-        {/* Unmatched Items as Table */}
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="text-red-600">
-              Unmatched Specifications ({unmatchedItems.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse border border-gray-300">
-                <thead className="bg-gray-100">
-                  <tr>
-                    <th className="border border-gray-300 p-2">S.No</th>
-                    <th className="border border-gray-300 p-2">Criteria</th>
-                    <th className="border border-gray-300 p-2">Premier Spec</th>
-                    <th className="border border-gray-300 p-2">
-                      Customer Spec
-                    </th>
-                    {/* Dynamically add one column per Level-2 role */}
-                    {Object.keys(selectedQAP.levelResponses[2] || {}).map(
-                      (role) => (
-                        <th
-                          key={role}
-                          className="border border-gray-300 p-2 capitalize"
-                        >
-                          {role} Comment
-                        </th>
-                      )
-                    )}
-                    <th className="border border-gray-300 p-2">Your Comment</th>
-                    <th className="border border-gray-300 p-2">Acknowledge</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {unmatchedItems.map((item, idx) => (
-                    <tr key={item.sno} className="hover:bg-gray-50">
-                      <td className="border border-gray-300 p-2 text-center">
-                        {item.sno}
-                      </td>
-                      <td className="border border-gray-300 p-2">
-                        {item.criteria}
-                      </td>
-                      <td className="border border-gray-300 p-2">
-                        {item.specification || item.criteriaLimits}
-                      </td>
-                      <td className="border border-gray-300 p-2 text-red-700 font-medium">
-                        {item.customerSpecification}
-                      </td>
-
-                      {/* Level 2 comments cells */}
-                      {Object.entries(selectedQAP.levelResponses[2] || {}).map(
-                        ([role, resp]) => (
-                          <td key={role} className="border border-gray-300 p-2">
-                            {resp.comments[idx] || "—"}
-                          </td>
-                        )
-                      )}
-
-                      {/* Head comment input */}
-                      <td className="border border-gray-300 p-2">
-                        <Textarea
-                          value={comments[idx] || ""}
-                          onChange={(e) =>
-                            handleCommentChange(idx, e.target.value)
-                          }
-                          placeholder="Your comment…"
-                          className="min-h-[60px] w-full"
-                        />
-                      </td>
-
-                      {/* Acknowledge */}
-                      <td className="border border-gray-300 p-2 text-center">
-                        <input
-                          type="checkbox"
-                          checked={acknowledged[idx] || false}
-                          onChange={() => handleAcknowledge(idx)}
-                          className="rounded"
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Matched Items (Collapsible) */}
-        <Collapsible open={showGreenSpecs} onOpenChange={setShowGreenSpecs}>
-          <CollapsibleTrigger asChild>
-            <Card className="cursor-pointer hover:bg-gray-50">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-green-600">
-                    Matched Specifications ({matchedItems.length})
-                  </CardTitle>
-                  {showGreenSpecs ? (
-                    <ChevronUp className="h-5 w-5" />
-                  ) : (
-                    <ChevronDown className="h-5 w-5" />
-                  )}
-                </div>
-              </CardHeader>
-            </Card>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="grid gap-3">
-                  {matchedItems.map((item) => (
-                    <div
-                      key={item.sno}
-                      className="border border-green-200 rounded-lg p-3 bg-green-50"
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <Badge variant="default">S.No: {item.sno}</Badge>
-                        <Badge variant="outline">{item.criteria}</Badge>
-                      </div>
-                      <h4 className="font-medium">{item.subCriteria}</h4>
-                      <p className="text-sm text-gray-600 mt-1">
-                        Specification:{" "}
-                        {item.specification || item.criteriaLimits}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          </CollapsibleContent>
-        </Collapsible>
-
-        {/* Action Buttons */}
-        <div className="mt-6 flex gap-3">
-          <Button onClick={() => setSelectedQAP(null)} variant="outline">
-            Back to List
-          </Button>
-          <Button
-            onClick={handleNext}
-            disabled={!canProceed()}
-            className="bg-blue-600 hover:bg-blue-700"
-          >
-            Next to Technical Head
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
+  /* ───────────────────────── render ───────────────────────── */
   return (
     <div className="container mx-auto px-4 py-6">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">
-          Head Review - Level 3
-        </h1>
-        <p className="text-gray-600">
-          Review QAPs from Level 2 and provide feedback
-        </p>
+      <h1 className="text-3xl font-bold mb-4">
+        Level 3 Review –{" "}
+        {user?.role
+          ? user.role.charAt(0).toUpperCase() + user.role.slice(1)
+          : ""}
+      </h1>
+
+      {/* top bar */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
+        <div className="flex items-center gap-2">
+          <Input
+            placeholder="Search QAPs…"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-64"
+          />
+          <label className="font-medium">Show Rows:</label>
+          <select
+            value={rowFilter}
+            onChange={(e) => setRowFilter(e.target.value as any)}
+            className="border rounded px-2 py-1"
+          >
+            <option value="all">All</option>
+            <option value="matched">Matched (Green)</option>
+            <option value="unmatched">Unmatched (Red)</option>
+          </select>
+        </div>
+        <span className="text-sm text-gray-600">
+          Pending QAPs: {reviewable.length}
+        </span>
       </div>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>QAPs Pending Review ({filteredQAPs.length})</CardTitle>
-            <div className="flex items-center gap-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <Input
-                  placeholder="Search QAPs..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 w-64"
-                />
-              </div>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {filteredQAPs.length === 0 ? (
-            <p className="text-center text-gray-500 py-8">
-              No QAPs pending review
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse border border-gray-300">
-                <thead>
-                  <tr className="bg-gray-100">
-                    <th className="border border-gray-300 p-3 text-left">
-                      Customer
-                    </th>
-                    <th className="border border-gray-300 p-3 text-left">
-                      Project
-                    </th>
-                    <th className="border border-gray-300 p-3 text-left">
-                      Plant
-                    </th>
-                    <th className="border border-gray-300 p-3 text-left">
-                      Submitted By
-                    </th>
-                    <th className="border border-gray-300 p-3 text-left">
-                      Status
-                    </th>
-                    <th className="border border-gray-300 p-3 text-center">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredQAPs.map((qap) => (
-                    <tr key={qap.id} className="hover:bg-gray-50">
-                      <td className="border border-gray-300 p-3">
-                        {qap.customerName}
-                      </td>
-                      <td className="border border-gray-300 p-3">
-                        {qap.projectName}
-                      </td>
-                      <td className="border border-gray-300 p-3">
-                        <Badge>{qap.plant.toUpperCase()}</Badge>
-                      </td>
-                      <td className="border border-gray-300 p-3">
-                        {qap.submittedBy}
-                      </td>
-                      <td className="border border-gray-300 p-3">
-                        <Badge variant="secondary">{qap.status}</Badge>
-                      </td>
-                      <td className="border border-gray-300 p-3 text-center">
-                        <Button
-                          onClick={() => handleQAPSelect(qap)}
-                          size="sm"
-                          className="bg-blue-600 hover:bg-blue-700"
-                        >
-                          <Eye className="w-4 h-4 mr-2" />
-                          Review
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {reviewable.length === 0 ? (
+        <div className="text-center text-gray-500 py-20">
+          No QAPs to review
+        </div>
+      ) : (
+        reviewable.map((qap) => {
+          const specs = qap.allSpecs.filter((s) =>
+            rowFilter === "all"
+              ? true
+              : rowFilter === "matched"
+              ? s.match === "yes"
+              : s.match === "no"
+          );
+          const allAck = Object.values(acknowledged[qap.id] || {}).every(
+            Boolean
+          );
+
+          /* L2 comments */
+          const l2 = qap.levelResponses?.[2] || {};
+          const prodComments = l2.production?.comments || {};
+          const qualComments = l2.quality?.comments || {};
+          const techComments = l2.technical?.comments || {};
+
+          const isOpen = expanded[qap.id] || false;
+
+          return (
+            <Collapsible
+              key={qap.id}
+              open={isOpen}
+              onOpenChange={(o) =>
+                setExpanded((p) => ({ ...p, [qap.id]: o }))
+              }
+              className="mb-4"
+            >
+              {/* header */}
+              <CollapsibleTrigger asChild>
+                <Card className="cursor-pointer hover:bg-gray-50">
+                  <CardHeader className="flex justify-between items-center p-4">
+                    <div className="flex items-center gap-3">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 p-0"
+                        tabIndex={-1}
+                      >
+                        {isOpen ? (
+                          <ChevronUp className="h-5 w-5" />
+                        ) : (
+                          <ChevronDown className="h-5 w-5" />
+                        )}
+                      </Button>
+                      <div>
+                        <CardTitle className="text-lg">
+                          {qap.customerName} – {qap.projectName}
+                        </CardTitle>
+                        <div className="flex gap-2 mt-1">
+                          <Badge variant="outline">
+                            {qap.plant.toUpperCase()}
+                          </Badge>
+                          <Badge variant="outline">{qap.productType}</Badge>
+                          <Badge>{qap.orderQuantity} MW</Badge>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                      <Clock className="h-4 w-4 text-orange-500" />
+                      <span>{getTimeRemaining(qap.submittedAt)}</span>
+                    </div>
+                  </CardHeader>
+                </Card>
+              </CollapsibleTrigger>
+
+              {/* detail */}
+              <CollapsibleContent>
+                <Card className="border-t-0">
+                  <CardContent className="p-4">
+                    <Tabs defaultValue="mqp">
+                      <TabsList className="mb-4">
+                        <TabsTrigger value="mqp">
+                          MQP ({qap.specs.mqp.length})
+                        </TabsTrigger>
+                        <TabsTrigger value="visual">
+                          Visual ({qap.specs.visual.length})
+                        </TabsTrigger>
+                      </TabsList>
+
+                      {/* MQP TAB */}
+                      <TabsContent value="mqp">
+                        <div className="overflow-x-auto">
+                          <table className="w-full border-collapse text-sm">
+                            <thead>
+                              <tr className="bg-gray-100">
+                                <th className="p-2 border">S.No</th>
+                                <th className="p-2 border">Criteria</th>
+                                <th className="p-2 border">Sub‑Criteria</th>
+                                <th className="p-2 border">Premier Spec</th>
+                                <th className="p-2 border">Customer Spec</th>
+                                <th className="p-2 border">Production Comment</th>
+                                <th className="p-2 border">Quality Comment</th>
+                                <th className="p-2 border">Technical Comment</th>
+                                <th className="p-2 border">Match</th>
+                                <th className="p-2 border">Your Comment</th>
+                                <th className="p-2 border">Ack</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {specs
+                                .filter((s) => qap.specs.mqp.includes(s as any))
+                                .map((s) => (
+                                  <tr
+                                    key={s.sno}
+                                    className={`border-b ${
+                                      s.match === "yes"
+                                        ? "bg-green-50"
+                                        : "bg-red-50"
+                                    }`}
+                                  >
+                                    <td className="p-2 border">{s.sno}</td>
+                                    <td className="p-2 border">{s.criteria}</td>
+                                    <td className="p-2 border">
+                                      {s.subCriteria}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {s.specification}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {s.customerSpecification}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {prodComments[s.sno] || "—"}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {qualComments[s.sno] || "—"}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {techComments[s.sno] || "—"}
+                                    </td>
+                                    <td className="p-2 border">
+                                      <Badge
+                                        variant={
+                                          s.match === "yes"
+                                            ? "success"
+                                            : "destructive"
+                                        }
+                                      >
+                                        {s.match?.toUpperCase()}
+                                      </Badge>
+                                    </td>
+                                    <td className="p-2 border">
+                                      <Textarea
+                                        value={
+                                          responses[qap.id]?.[s.sno] || ""
+                                        }
+                                        onChange={(e) =>
+                                          handleResponseChange(
+                                            qap.id,
+                                            s.sno,
+                                            e.target.value
+                                          )
+                                        }
+                                        placeholder="Comments…"
+                                        className="min-h-[3rem]"
+                                      />
+                                    </td>
+                                    <td className="p-2 border text-center">
+                                      <input
+                                        type="checkbox"
+                                        checked={
+                                          acknowledged[qap.id]?.[s.sno] || false
+                                        }
+                                        onChange={() =>
+                                          handleAcknowledge(qap.id, s.sno)
+                                        }
+                                        className="rounded"
+                                      />
+                                    </td>
+                                  </tr>
+                                ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </TabsContent>
+
+                      {/* VISUAL TAB */}
+                      <TabsContent value="visual">
+                        <div className="overflow-x-auto">
+                          <table className="w-full border-collapse text-sm">
+                            <thead>
+                              <tr className="bg-gray-100">
+                                <th className="p-2 border">S.No</th>
+                                <th className="p-2 border">Criteria</th>
+                                <th className="p-2 border">Sub‑Criteria</th>
+                                <th className="p-2 border">Limits</th>
+                                <th className="p-2 border">Customer Spec</th>
+                                <th className="p-2 border">Production Comment</th>
+                                <th className="p-2 border">Quality Comment</th>
+                                <th className="p-2 border">Technical Comment</th>
+                                <th className="p-2 border">Match</th>
+                                <th className="p-2 border">Your Comment</th>
+                                <th className="p-2 border">Ack</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {specs
+                                .filter((s) =>
+                                  qap.specs.visual.includes(s as any)
+                                )
+                                .map((s) => (
+                                  <tr
+                                    key={s.sno}
+                                    className={`border-b ${
+                                      s.match === "yes"
+                                        ? "bg-green-50"
+                                        : "bg-red-50"
+                                    }`}
+                                  >
+                                    <td className="p-2 border">{s.sno}</td>
+                                    <td className="p-2 border">{s.criteria}</td>
+                                    <td className="p-2 border">
+                                      {s.subCriteria}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {s.criteriaLimits}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {s.customerSpecification}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {prodComments[s.sno] || "—"}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {qualComments[s.sno] || "—"}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {techComments[s.sno] || "—"}
+                                    </td>
+                                    <td className="p-2 border">
+                                      <Badge
+                                        variant={
+                                          s.match === "yes"
+                                            ? "success"
+                                            : "destructive"
+                                        }
+                                      >
+                                        {s.match?.toUpperCase()}
+                                      </Badge>
+                                    </td>
+                                    <td className="p-2 border">
+                                      <Textarea
+                                        value={
+                                          responses[qap.id]?.[s.sno] || ""
+                                        }
+                                        onChange={(e) =>
+                                          handleResponseChange(
+                                            qap.id,
+                                            s.sno,
+                                            e.target.value
+                                          )
+                                        }
+                                        placeholder="Comments…"
+                                        className="min-h-[3rem]"
+                                      />
+                                    </td>
+                                    <td className="p-2 border text-center">
+                                      <input
+                                        type="checkbox"
+                                        checked={
+                                          acknowledged[qap.id]?.[s.sno] || false
+                                        }
+                                        onChange={() =>
+                                          handleAcknowledge(qap.id, s.sno)
+                                        }
+                                        className="rounded"
+                                      />
+                                    </td>
+                                  </tr>
+                                ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </TabsContent>
+                    </Tabs>
+
+                    <div className="mt-4 flex justify-end">
+                      <Button
+                        onClick={() => submit(qap.id)}
+                        disabled={
+                          !allAck ||
+                          Object.keys(responses[qap.id] || {}).length === 0
+                        }
+                        className="bg-blue-600 hover:bg-blue-700"
+                      >
+                        <Send className="h-4 w-4 mr-2" />
+                        {allAck ? "Ready to Submit" : "Submit Review"}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </CollapsibleContent>
+            </Collapsible>
+          );
+        })
+      )}
     </div>
   );
 };

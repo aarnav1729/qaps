@@ -1,68 +1,113 @@
+import React, { useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { useAuth } from "@/contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
 
-import React, { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
-import { useAuth } from '@/contexts/AuthContext';
-import { LogIn, Users, Eye, EyeOff } from 'lucide-react';
+import { LogIn, Users, Eye, EyeOff } from "lucide-react";
 
 const LoginPage: React.FC = () => {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showCredentials, setShowCredentials] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const { login } = useAuth();
+  const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const success = login(username, password);
-    if (!success) {
-      setError('Invalid username or password');
-    }
+    setError("");
+    const ok = await login(username, password);
+    if (!ok) setError("Invalid username or password");
   };
 
   const demoUsers = [
-    { category: 'Level 1 - Requestors', users: [
-      { username: 'praful', password: 'praful', role: 'Requestor' },
-      { username: 'yamini', password: 'yamini', role: 'Requestor' }
-    ]},
-    { category: 'Level 2 - Production', users: [
-      { username: 'manoj', password: 'manoj', role: 'Production', plant: 'P2' },
-      { username: 'malik', password: 'malik', role: 'Production', plant: 'P4' },
-      { username: 'siva', password: 'siva', role: 'Production', plant: 'P5' }
-    ]},
-    { category: 'Level 2 - Quality', users: [
-      { username: 'abbas', password: 'abbas', role: 'Quality', plant: 'P2' },
-      { username: 'sriram', password: 'sriram', role: 'Quality', plant: 'P4,P5' }
-    ]},
-    { category: 'Level 2 - Technical', users: [
-      { username: 'rahul', password: 'rahul', role: 'Technical', plant: 'P2' },
-      { username: 'ramu', password: 'ramu', role: 'Technical', plant: 'P4,P5' }
-    ]},
-    { category: 'Level 3 - Head', users: [
-      { username: 'nrao', password: 'nrao', role: 'Head', plant: 'P4,P5' }
-    ]},
-    { category: 'Level 4 - Technical Head', users: [
-      { username: 'jmr', password: 'jmr', role: 'Technical Head' },
-      { username: 'baskara', password: 'baskara', role: 'Technical Head' }
-    ]},
-    { category: 'Level 5 - Plant Head', users: [
-      { username: 'cmk', password: 'cmk', role: 'Plant Head' }
-    ]},
-    { category: 'Admin', users: [
-      { username: 'aarnav', password: 'aarnav', role: 'Admin' }
-    ]}
+    {
+      category: "Level 1 - Requestors",
+      users: [
+        { username: "praful", password: "praful", role: "Requestor" },
+        { username: "yamini", password: "yamini", role: "Requestor" },
+      ],
+    },
+    {
+      category: "Level 2 - Production",
+      users: [
+        {
+          username: "manoj",
+          password: "manoj",
+          role: "Production",
+          plant: "P2",
+        },
+        {
+          username: "malik",
+          password: "malik",
+          role: "Production",
+          plant: "P4",
+        },
+        { username: "siva", password: "siva", role: "Production", plant: "P5" },
+      ],
+    },
+    {
+      category: "Level 2 - Quality",
+      users: [
+        { username: "abbas", password: "abbas", role: "Quality", plant: "P2" },
+        {
+          username: "sriram",
+          password: "sriram",
+          role: "Quality",
+          plant: "P4,P5",
+        },
+      ],
+    },
+    {
+      category: "Level 2 - Technical",
+      users: [
+        {
+          username: "rahul",
+          password: "rahul",
+          role: "Technical",
+          plant: "P2",
+        },
+        {
+          username: "ramu",
+          password: "ramu",
+          role: "Technical",
+          plant: "P4,P5",
+        },
+      ],
+    },
+    {
+      category: "Level 3 - Head",
+      users: [
+        { username: "nrao", password: "nrao", role: "Head", plant: "P4,P5" },
+      ],
+    },
+    {
+      category: "Level 4 - Technical Head",
+      users: [
+        { username: "jmr", password: "jmr", role: "Technical Head" },
+        { username: "baskara", password: "baskara", role: "Technical Head" },
+      ],
+    },
+    {
+      category: "Level 5 - Plant Head",
+      users: [{ username: "cmk", password: "cmk", role: "Plant Head" }],
+    },
+    {
+      category: "Admin",
+      users: [{ username: "aarnav", password: "aarnav", role: "Admin" }],
+    },
   ];
 
-  const quickLogin = (user: any) => {
-    setUsername(user.username);
-    setPassword(user.password);
-    const success = login(user.username, user.password);
-    if (!success) {
-      setError('Login failed');
-    }
+  const quickLogin = async (user: any) => {
+    setError("");
+    await setUsername(user.username);
+    await setPassword(user.password);
+    const ok = await login(user.username, user.password);
+    if (!ok) setError("Login failed");
   };
 
   return (
@@ -79,7 +124,10 @@ const LoginPage: React.FC = () => {
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-1">
+                <label
+                  htmlFor="username"
+                  className="block text-sm font-medium text-gray-700 mb-1"
+                >
                   Username
                 </label>
                 <Input
@@ -92,13 +140,16 @@ const LoginPage: React.FC = () => {
                 />
               </div>
               <div>
-                <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+                <label
+                  htmlFor="password"
+                  className="block text-sm font-medium text-gray-700 mb-1"
+                >
                   Password
                 </label>
                 <div className="relative">
                   <Input
                     id="password"
-                    type={showPassword ? 'text' : 'password'}
+                    type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Enter your password"
@@ -111,7 +162,11 @@ const LoginPage: React.FC = () => {
                     className="absolute right-2 top-1/2 transform -translate-y-1/2 h-6 w-6 p-0"
                     onClick={() => setShowPassword(!showPassword)}
                   >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
                   </Button>
                 </div>
               </div>
@@ -141,7 +196,7 @@ const LoginPage: React.FC = () => {
                 size="sm"
                 onClick={() => setShowCredentials(!showCredentials)}
               >
-                {showCredentials ? 'Hide' : 'Show'} Credentials
+                {showCredentials ? "Hide" : "Show"} Credentials
               </Button>
             </div>
           </CardHeader>
@@ -150,7 +205,9 @@ const LoginPage: React.FC = () => {
               <div className="space-y-4">
                 {demoUsers.map((category, idx) => (
                   <div key={idx}>
-                    <h3 className="font-semibold text-gray-800 mb-2">{category.category}</h3>
+                    <h3 className="font-semibold text-gray-800 mb-2">
+                      {category.category}
+                    </h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
                       {category.users.map((user, userIdx) => (
                         <div
@@ -160,20 +217,31 @@ const LoginPage: React.FC = () => {
                         >
                           <div className="flex items-center justify-between">
                             <div>
-                              <div className="font-medium text-sm">{user.username}</div>
-                              <div className="text-xs text-gray-600">Password: {user.password}</div>
+                              <div className="font-medium text-sm">
+                                {user.username}
+                              </div>
+                              <div className="text-xs text-gray-600">
+                                Password: {user.password}
+                              </div>
                               <div className="flex items-center gap-1 mt-1">
                                 <Badge variant="outline" className="text-xs">
                                   {user.role}
                                 </Badge>
                                 {user.plant && (
-                                  <Badge variant="secondary" className="text-xs">
+                                  <Badge
+                                    variant="secondary"
+                                    className="text-xs"
+                                  >
                                     {user.plant}
                                   </Badge>
                                 )}
                               </div>
                             </div>
-                            <Button size="sm" variant="ghost" className="text-xs">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-xs"
+                            >
                               Quick Login
                             </Button>
                           </div>

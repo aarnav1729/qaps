@@ -1,22 +1,38 @@
-export interface QAPSpecification {
-  sno: number;
-  criteria: string;
-  subCriteria: string;
-  componentOperation?: string; // For MQP section
-  characteristics?: string; // For MQP section
-  defect?: string; // For Visual & EL section
-  class: string;
-  typeOfCheck?: string; // For MQP section
-  sampling?: string; // For MQP section
-  specification?: string; // For MQP section
-  defectClass?: string; // For Visual & EL section
-  description?: string; // For Visual & EL section
-  criteriaLimits?: string; // For Visual & EL section
-  match?: "yes" | "no";
-  customerSpecification?: string;
-}
+// server/seed_specs.cjs
+require("dotenv").config();
+const mysql = require("mysql2/promise");
+const sql = require("mssql");
 
-export const mqpSpecifications: QAPSpecification[] = [
+//
+// ─── CONFIGURE DATABASES (via env) ────────────────────────────────────────────
+//
+const mysqlConfig = {
+  host:               'localhost',
+  port:               3306,
+  user:               'root',
+  password:           'Singhcottage@1729',
+  database:           'QAP',
+  waitForConnections: true,
+  connectionLimit:    10,
+  queueLimit:         0
+};
+
+const mssqlConfig = {
+  user:     'SPOT_USER',
+  password: 'Marvik#72@',
+  server:   '10.0.40.10',
+  port:     1433,
+  database: 'QAP',
+  options: {
+    trustServerCertificate: true,
+    encrypt: false
+  }
+};
+
+//
+// ─── YOUR ARRAYS (paste your full lists here) ────────────────────────────────
+//
+const mqpSpecifications = [
   {
     sno: 1,
     criteria: "MQP",
@@ -2635,8 +2651,7 @@ export const mqpSpecifications: QAPSpecification[] = [
       "40N load applied, No mechnical damage, Power degradation not more than 5%, Insullation shall meet requirement.",
   },
 ];
-
-export const visualElSpecifications: QAPSpecification[] = [
+const visualElSpecifications = [
   {
     sno: 1,
     criteria: "Visual",
@@ -3373,7 +3388,194 @@ export const visualElSpecifications: QAPSpecification[] = [
   },
 ];
 
-export const qapSpecifications: QAPSpecification[] = [
-  ...mqpSpecifications,
-  ...visualElSpecifications,
-];
+//
+// ─── Helper: drop any MySQL FKs on qapId before dropping the column ─────────
+//
+async function dropQapIdFKs(pool, table) {
+  const [fks] = await pool.execute(
+    `SELECT constraint_name
+       FROM information_schema.key_column_usage
+      WHERE table_schema = ?
+        AND table_name   = ?
+        AND column_name  = 'qapId'
+        AND referenced_table_name IS NOT NULL`,
+    [mysqlConfig.database, table]
+  );
+
+  for (const { constraint_name } of fks) {
+    console.log(`⏳ Dropping FK ${constraint_name} on ${table}`);
+    await pool.execute(
+      `ALTER TABLE \`${table}\` DROP FOREIGN KEY \`${constraint_name}\`;`
+    );
+  }
+}
+
+//
+// ─── SEEDING LOGIC ────────────────────────────────────────────────────────────
+//
+(async () => {
+  let mysqlPool, mssqlPool;
+  try {
+    // 1) CONNECT
+    mysqlPool = await mysql.createPool(mysqlConfig);
+    console.log("✅ MySQL connected");
+    mssqlPool = await sql.connect(mssqlConfig);
+    console.log("✅ MSSQL connected");
+
+    //
+    // 2) DROP FK/PK & qapId column in MSSQL, then re‑PK on sno only
+    //
+    await mssqlPool.request().query(`
+      -- MQPSpecs
+      DECLARE @pk1 NVARCHAR(200);
+      SELECT @pk1 = kc.name
+        FROM sys.key_constraints kc
+        JOIN sys.tables t ON kc.parent_object_id = t.object_id
+        WHERE t.name = 'MQPSpecs' AND kc.type = 'PK';
+      IF @pk1 IS NOT NULL EXEC('ALTER TABLE dbo.MQPSpecs DROP CONSTRAINT [' + @pk1 + ']');
+      IF OBJECT_ID('dbo.FK_MQPSpecs_QAPs','F') IS NOT NULL
+        ALTER TABLE dbo.MQPSpecs DROP CONSTRAINT FK_MQPSpecs_QAPs;
+      IF EXISTS (
+        SELECT 1 FROM sys.columns 
+         WHERE object_id = OBJECT_ID('dbo.MQPSpecs') AND name = 'qapId'
+      )
+        ALTER TABLE dbo.MQPSpecs DROP COLUMN qapId;
+      ALTER TABLE dbo.MQPSpecs
+        ADD CONSTRAINT PK_MQPSpecs_sno PRIMARY KEY (sno);
+
+      -- VisualSpecs
+      DECLARE @pk2 NVARCHAR(200);
+      SELECT @pk2 = kc.name
+        FROM sys.key_constraints kc
+        JOIN sys.tables t ON kc.parent_object_id = t.object_id
+        WHERE t.name = 'VisualSpecs' AND kc.type = 'PK';
+      IF @pk2 IS NOT NULL EXEC('ALTER TABLE dbo.VisualSpecs DROP CONSTRAINT [' + @pk2 + ']');
+      IF OBJECT_ID('dbo.FK_VisualSpecs_QAPs','F') IS NOT NULL
+        ALTER TABLE dbo.VisualSpecs DROP CONSTRAINT FK_VisualSpecs_QAPs;
+      IF EXISTS (
+        SELECT 1 FROM sys.columns 
+         WHERE object_id = OBJECT_ID('dbo.VisualSpecs') AND name = 'qapId'
+      )
+        ALTER TABLE dbo.VisualSpecs DROP COLUMN qapId;
+      ALTER TABLE dbo.VisualSpecs
+        ADD CONSTRAINT PK_VisualSpecs_sno PRIMARY KEY (sno);
+    `);
+
+    //
+    // 3) DROP qapId column in MySQL (safely), re‑PK on sno only
+    //
+    await dropQapIdFKs(mysqlPool, "MQPSpecs");
+    await mysqlPool.execute(`
+      ALTER TABLE \`MQPSpecs\`
+        DROP PRIMARY KEY,
+        DROP COLUMN qapId,
+        ADD PRIMARY KEY (sno);
+    `);
+
+    await dropQapIdFKs(mysqlPool, "VisualSpecs");
+    await mysqlPool.execute(`
+      ALTER TABLE \`VisualSpecs\`
+        DROP PRIMARY KEY,
+        DROP COLUMN qapId,
+        ADD PRIMARY KEY (sno);
+    `);
+
+    //
+    // 4) SEED MQP specs
+    //
+    for (const spec of mqpSpecifications) {
+      // MSSQL insert-if-not-exists
+      await mssqlPool
+        .request()
+        .input("sno", sql.Int, spec.sno)
+        .input("sub", sql.NVarChar, spec.subCriteria)
+        .input("co", sql.NVarChar, spec.componentOperation || null)
+        .input("ch", sql.NVarChar, spec.characteristics || null)
+        .input("cls", sql.NVarChar, spec.class)
+        .input("tc", sql.NVarChar, spec.typeOfCheck || null)
+        .input("sm", sql.NVarChar, spec.sampling || null)
+        .input("spx", sql.NVarChar, spec.specification || null)
+        .input("m", sql.NVarChar, spec.match || null)
+        .input("cs", sql.NVarChar, spec.customerSpecification || null).query(`
+          IF NOT EXISTS (SELECT 1 FROM MQPSpecs WHERE sno = @sno)
+            INSERT INTO MQPSpecs
+              (sno, subCriteria, componentOperation, characteristics, [class],
+               typeOfCheck, sampling, specification, [match], customerSpecification)
+            VALUES
+              (@sno, @sub, @co, @ch, @cls, @tc, @sm, @spx, @m, @cs);
+        `);
+
+      // MySQL insert-ignore
+      await mysqlPool.execute(
+        `INSERT IGNORE INTO MQPSpecs
+           (sno, subCriteria, componentOperation, characteristics, \`class\`,
+            typeOfCheck, sampling, specification, \`match\`, customerSpecification)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [
+          spec.sno,
+          spec.subCriteria,
+          spec.componentOperation || null,
+          spec.characteristics || null,
+          spec.class,
+          spec.typeOfCheck || null,
+          spec.sampling || null,
+          spec.specification || null,
+          spec.match || null,
+          spec.customerSpecification || null,
+        ]
+      );
+    }
+    console.log(`✅ Seeded ${mqpSpecifications.length} MQP specs`);
+
+    //
+    // 5) SEED Visual/EL specs
+    //
+    for (const spec of visualElSpecifications) {
+      // MSSQL
+      await mssqlPool
+        .request()
+        .input("sno", sql.Int, spec.sno)
+        .input("sub", sql.NVarChar, spec.subCriteria)
+        .input("df", sql.NVarChar, spec.defect)
+        .input("dc", sql.NVarChar, spec.defectClass)
+        .input("desc", sql.NVarChar, spec.description || null)
+        .input("cl", sql.NVarChar, spec.criteriaLimits || null)
+        .input("m", sql.NVarChar, spec.match || null)
+        .input("cs", sql.NVarChar, spec.customerSpecification || null).query(`
+          IF NOT EXISTS (SELECT 1 FROM VisualSpecs WHERE sno = @sno)
+            INSERT INTO VisualSpecs
+              (sno, subCriteria, defect, defectClass,
+               description, criteriaLimits, [match], customerSpecification)
+            VALUES
+              (@sno, @sub, @df, @dc, @desc, @cl, @m, @cs);
+        `);
+
+      // MySQL
+      await mysqlPool.execute(
+        `INSERT IGNORE INTO VisualSpecs
+           (sno, subCriteria, defect, defectClass,
+            description, criteriaLimits, \`match\`, customerSpecification)
+         VALUES (?,?,?,?,?,?,?,?)`,
+        [
+          spec.sno,
+          spec.subCriteria,
+          spec.defect,
+          spec.defectClass,
+          spec.description || null,
+          spec.criteriaLimits || null,
+          spec.match || null,
+          spec.customerSpecification || null,
+        ]
+      );
+    }
+    console.log(`✅ Seeded ${visualElSpecifications.length} Visual/EL specs`);
+
+    process.exit(0);
+  } catch (err) {
+    console.error("❌ Seed error:", err);
+    process.exit(1);
+  } finally {
+    if (mysqlPool) await mysqlPool.end();
+    if (mssqlPool) await mssqlPool.close();
+  }
+})();
