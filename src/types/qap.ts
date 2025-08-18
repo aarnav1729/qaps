@@ -3,7 +3,7 @@ export interface User {
   id: string;
   username: string;
   password: string;
-  role: 'requestor' | 'production' | 'quality' | 'technical' | 'head' | 'technical-head' | 'plant-head' | 'admin';
+  role: 'requestor' | 'production' | 'quality' | 'technical' | 'head' | 'technical-head' | 'plant-head' | 'admin' | 'sales';
   plant?: string;
 }
 

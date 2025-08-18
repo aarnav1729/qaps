@@ -110,6 +110,12 @@ const Navigation: React.FC = () => {
       icon: Settings,
       roles: ["admin"],
     },
+    {
+      path: "/sales",
+      label: "Sales",
+      icon: Users,           // you already import Users from lucide-react
+      roles: ["sales", "admin"],
+    },    
   ];
 
   const visibleNavItems = navItems.filter((item) =>

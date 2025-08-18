@@ -27,6 +27,8 @@ import ApprovalsPage from "./components/ApprovalsPage";
 import AnalyticsPage from "./components/AnalyticsPage";
 import AdminPage from "./components/AdminPage";
 import AdminAnalytics from "./components/AdminAnalytics";
+import SalesRequestsPage from "./pages/SalesRequestPage";
+
 import { QAPFormData } from "./types/qap";
 import { processWorkflowTransition } from "./utils/workflowUtils";
 
@@ -44,12 +46,10 @@ const AppContent: React.FC = () => {
   } = useQuery<QAPFormData[]>({
     queryKey: ["qaps"],
     queryFn: () =>
-      fetch(`${API}/api/qaps`, { credentials: "include" }).then(
-        (r) => {
-          if (!r.ok) throw new Error("Failed to fetch QAPs");
-          return r.json();
-        }
-      ),
+      fetch(`${API}/api/qaps`, { credentials: "include" }).then((r) => {
+        if (!r.ok) throw new Error("Failed to fetch QAPs");
+        return r.json();
+      }),
   });
 
   // ─── CRUD mutations ─────────────────────────────────────────────────────
@@ -104,15 +104,12 @@ const AppContent: React.FC = () => {
     { qapId: string; comments: Record<number, string> }
   >({
     mutationFn: async ({ qapId, comments }) => {
-      const res = await fetch(
-        `${API}/api/qaps/${qapId}/responses`,
-        {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ level: 2, comments }),
-        }
-      );
+      const res = await fetch(`${API}/api/qaps/${qapId}/responses`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ level: 2, comments }),
+      });
       if (!res.ok) throw new Error("Failed to submit level-2 review");
     },
     onSuccess: () => {
@@ -126,15 +123,12 @@ const AppContent: React.FC = () => {
     { qapId: string; comments: Record<number, string> }
   >({
     mutationFn: async ({ qapId, comments }) => {
-      const res = await fetch(
-        `${API}/api/qaps/${qapId}/responses`,
-        {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ level: 3, comments }),
-        }
-      );
+      const res = await fetch(`${API}/api/qaps/${qapId}/responses`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ level: 3, comments }),
+      });
       if (!res.ok) throw new Error("Failed to submit level-3 review");
     },
     onSuccess: () => {
@@ -148,15 +142,12 @@ const AppContent: React.FC = () => {
     { qapId: string; comments: Record<number, string> }
   >({
     mutationFn: async ({ qapId, comments }) => {
-      const res = await fetch(
-        `${API}/api/qaps/${qapId}/responses`,
-        {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ level: 4, comments }),
-        }
-      );
+      const res = await fetch(`${API}/api/qaps/${qapId}/responses`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ level: 4, comments }),
+      });
       if (!res.ok) throw new Error("Failed to submit level-4 review");
     },
     onSuccess: () => {
@@ -271,14 +262,11 @@ const AppContent: React.FC = () => {
     form.append("comments", comments);
     if (attachment) form.append("attachment", attachment);
 
-    const res = await fetch(
-      `${API}/api/qaps/${qapId}/final-comments`,
-      {
-        method: "POST",
-        credentials: "include",
-        body: form,
-      }
-    );
+    const res = await fetch(`${API}/api/qaps/${qapId}/final-comments`, {
+      method: "POST",
+      credentials: "include",
+      body: form,
+    });
     if (!res.ok) {
       const err = await res.json();
       throw new Error(err.message || "Failed to save final comments");
@@ -328,14 +316,12 @@ const AppContent: React.FC = () => {
               />
             }
           />
-
           <Route
             path="/qap/:id"
             element={
               <QAPViewEditPage qapData={qapData} onSave={handleSaveQAP} />
             }
           />
-
           {(user?.role === "production" ||
             user?.role === "quality" ||
             user?.role === "technical" ||
@@ -347,7 +333,6 @@ const AppContent: React.FC = () => {
               }
             />
           )}
-
           {(user?.role === "head" || user?.role === "admin") && (
             <Route
               path="/level3-review"
@@ -356,7 +341,6 @@ const AppContent: React.FC = () => {
               }
             />
           )}
-
           {(user?.role === "technical-head" || user?.role === "admin") && (
             <Route
               path="/level4-review"
@@ -365,7 +349,6 @@ const AppContent: React.FC = () => {
               }
             />
           )}
-
           {(user?.role === "requestor" || user?.role === "admin") && (
             <Route
               path="/final-comments"
@@ -377,7 +360,6 @@ const AppContent: React.FC = () => {
               }
             />
           )}
-
           {(user?.role === "plant-head" || user?.role === "admin") && (
             <Route
               path="/level5-approval"
@@ -390,23 +372,19 @@ const AppContent: React.FC = () => {
               }
             />
           )}
-
           {(user?.role === "requestor" || user?.role === "admin") && (
             <Route path="/spec-builder" element={<SpecificationBuilder />} />
           )}
-
           <Route
             path="/analytics"
             element={<AnalyticsPage qapData={qapData} />}
           />
-
           {user?.role === "admin" && (
             <Route
               path="/admin-analytics"
               element={<AdminAnalytics qapData={qapData} />}
             />
           )}
-
           {(user?.role === "plant-head" || user?.role === "admin") && (
             <Route
               path="/approvals"
@@ -420,7 +398,6 @@ const AppContent: React.FC = () => {
               }
             />
           )}
-
           {user?.role === "admin" && (
             <Route
               path="/admin"
@@ -435,7 +412,11 @@ const AppContent: React.FC = () => {
               }
             />
           )}
-
+          
+          {(user?.role === "sales" || user?.role === "admin") && (
+            <Route path="/sales" element={<SalesRequestsPage />} />
+          )}
+          
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

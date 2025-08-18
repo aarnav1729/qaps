@@ -10,7 +10,8 @@ interface User {
     | "head"
     | "technical-head"
     | "plant-head"
-    | "admin";
+    | "admin"
+    | "sales";
   plant?: string;
 }
 const API = window.location.origin;
