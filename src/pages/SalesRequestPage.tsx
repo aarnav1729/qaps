@@ -14,6 +14,8 @@ import {
   getOptionsFor,
 } from "@/data/bomMaster";
 
+const API = window.location.origin;
+
 type YesNo = "yes" | "no";
 type Plant = "p2" | "p4" | "p5" | "p6";
 type OrderType = "m10" | "g12r" | "g12";
@@ -51,8 +53,6 @@ export interface SalesRequest {
   otherAttachments?: { title: string; url: string }[];
   createdBy: string;
   createdAt: string; // ISO
-
-  // Optional: if backend echoes BOM back later
   bom?: BomPayload;
 }
 
@@ -81,19 +81,30 @@ type BomPayload = {
   components: BomComponent[];
 };
 
-const API = window.location.origin;
+/* ────────────────────────────────────────────────────────────────────────── */
+/*  History types                                                            */
+/* ────────────────────────────────────────────────────────────────────────── */
+type HistoryChange = { field: string; before: any; after: any };
+type HistoryItem = {
+  id: number;
+  salesRequestId: string;
+  action: string; // "create" | "update" | ...
+  changedBy: string;
+  changedAt: string; // ISO
+  changes?: HistoryChange[] | null;
+};
 
 const SalesRequestsPage: React.FC = () => {
   const qc = useQueryClient();
   const { user } = useAuth();
-  const [open, setOpen] = useState(false);
+  const [openCreate, setOpenCreate] = useState(false);
+  const [viewId, setViewId] = useState<string | null>(null);
+  const [editItem, setEditItem] = useState<SalesRequest | null>(null);
 
   const { data: list = [], isLoading } = useQuery<SalesRequest[]>({
     queryKey: ["sales-requests"],
     queryFn: async () => {
-      const r = await fetch(`${API}/api/sales-requests`, {
-        credentials: "include",
-      });
+      const r = await fetch(`${API}/api/sales-requests`, { credentials: "include" });
       if (!r.ok) throw new Error("Failed to load sales requests");
       return r.json();
     },
@@ -114,7 +125,26 @@ const SalesRequestsPage: React.FC = () => {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["sales-requests"] });
-      setOpen(false);
+      setOpenCreate(false);
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, formData }: { id: string; formData: FormData }) => {
+      const r = await fetch(`${API}/api/sales-requests/${id}`, {
+        method: "PUT",
+        credentials: "include",
+        body: formData,
+      });
+      if (!r.ok) {
+        const t = await r.text().catch(() => "");
+        throw new Error(t || "Failed to update sales request");
+      }
+      return r.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["sales-requests"] });
+      setEditItem(null);
     },
   });
 
@@ -123,7 +153,7 @@ const SalesRequestsPage: React.FC = () => {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Sales Requests</CardTitle>
-          <Button onClick={() => setOpen(true)} className="bg-blue-600 hover:bg-blue-700">
+          <Button onClick={() => setOpenCreate(true)} className="bg-blue-600 hover:bg-blue-700">
             + Create New
           </Button>
         </CardHeader>
@@ -137,6 +167,7 @@ const SalesRequestsPage: React.FC = () => {
               <table className="min-w-full border divide-y divide-gray-200 text-sm">
                 <thead className="bg-gray-50">
                   <tr className="text-left">
+                    <Th>Actions</Th>
                     <Th>Customer Name</Th>
                     <Th>New Customer?</Th>
                     <Th>Plant</Th>
@@ -166,6 +197,24 @@ const SalesRequestsPage: React.FC = () => {
                 <tbody className="divide-y divide-gray-100">
                   {list.map((row) => (
                     <tr key={row.id} className="align-top">
+                      <Td>
+                        <div className="flex items-center gap-2">
+                          <button
+                            title="View"
+                            className="px-2 py-1 rounded hover:bg-gray-100 border"
+                            onClick={() => setViewId(row.id)}
+                          >
+                            👁️
+                          </button>
+                          <button
+                            title="Edit"
+                            className="px-2 py-1 rounded hover:bg-gray-100 border"
+                            onClick={() => setEditItem(row)}
+                          >
+                            ✏️
+                          </button>
+                        </div>
+                      </Td>
                       <Td>{row.customerName}</Td>
                       <Td className="capitalize">{row.isNewCustomer}</Td>
                       <Td className="uppercase">{row.moduleManufacturingPlant}</Td>
@@ -250,12 +299,35 @@ const SalesRequestsPage: React.FC = () => {
         </CardContent>
       </Card>
 
-      {open && (
+      {openCreate && (
         <SalesRequestModal
-          onClose={() => setOpen(false)}
+          mode="create"
+          onClose={() => setOpenCreate(false)}
           onCreate={(form) => createMutation.mutate(form)}
           creating={createMutation.isPending}
           currentUser={user?.username || "sales"}
+        />
+      )}
+
+      {editItem && (
+        <SalesRequestModal
+          mode="edit"
+          initial={editItem}
+          onClose={() => setEditItem(null)}
+          onUpdate={(id, form) => updateMutation.mutate({ id, formData: form })}
+          creating={updateMutation.isPending}
+          currentUser={user?.username || "sales"}
+        />
+      )}
+
+      {viewId && (
+        <ViewSalesRequestModal
+          id={viewId}
+          onClose={() => setViewId(null)}
+          onEdit={(data) => {
+            setViewId(null);
+            setEditItem(data);
+          }}
         />
       )}
     </div>
@@ -289,14 +361,17 @@ function displayFloat(s: any) {
 }
 
 /* ────────────────────────────────────────────────────────────────────────── */
-/*  Modal                                                                    */
+/*  Modal: Create + Edit (single component)                                  */
 /* ────────────────────────────────────────────────────────────────────────── */
 const SalesRequestModal: React.FC<{
+  mode?: "create" | "edit";
+  initial?: SalesRequest | null;
   onClose: () => void;
-  onCreate: (formData: FormData) => void;
+  onCreate?: (formData: FormData) => void;
+  onUpdate?: (id: string, formData: FormData) => void;
   creating: boolean;
   currentUser: string;
-}> = ({ onClose, onCreate, creating, currentUser }) => {
+}> = ({ mode = "create", initial, onClose, onCreate, onUpdate, creating, currentUser }) => {
   // Core request fields (store numbers as strings for smooth typing)
   const [state, setState] = useState({
     customerName: "",
@@ -323,7 +398,7 @@ const SalesRequestModal: React.FC<{
     remarks: "",
   });
 
-  // Attachments
+  // Attachments (when editing, leaving them empty keeps existing files)
   const [qapTypeFile, setQapTypeFile] = useState<File | null>(null);
   const [primaryBomFile, setPrimaryBomFile] = useState<File | null>(null);
   const [otherFiles, setOtherFiles] = useState<{ title: string; file: File | null }[]>([]);
@@ -340,8 +415,54 @@ const SalesRequestModal: React.FC<{
   // Preview toggle
   const [showPreview, setShowPreview] = useState(false);
 
-  // Auto-generate Document Ref when customer/tech/date change
+  // Pre-fill when editing
   useEffect(() => {
+    if (mode === "edit" && initial) {
+      setState({
+        customerName: initial.customerName || "",
+        isNewCustomer: initial.isNewCustomer || "no",
+        moduleManufacturingPlant: initial.moduleManufacturingPlant || "p2",
+        moduleOrderType: initial.moduleOrderType || "m10",
+        cellType: initial.cellType || "DCR",
+        wattageBinning: initial.wattageBinning != null ? String(initial.wattageBinning) : "",
+        rfqOrderQtyMW: initial.rfqOrderQtyMW != null ? String(initial.rfqOrderQtyMW) : "",
+        premierBiddedOrderQtyMW: initial.premierBiddedOrderQtyMW != null ? String(initial.premierBiddedOrderQtyMW) : "",
+        deliveryStartDate: initial.deliveryStartDate || "",
+        deliveryEndDate: initial.deliveryEndDate || "",
+        projectLocation: initial.projectLocation || "",
+        cableLengthRequired: initial.cableLengthRequired != null ? String(initial.cableLengthRequired) : "",
+        qapType: initial.qapType || "Customer",
+        primaryBom: initial.primaryBom || "no",
+        inlineInspection: initial.inlineInspection || "no",
+        cellProcuredBy: initial.cellProcuredBy || "Customer",
+        agreedCTM: initial.agreedCTM != null ? String(initial.agreedCTM) : "",
+        factoryAuditTentativeDate: initial.factoryAuditTentativeDate || "",
+        xPitchMm: initial.xPitchMm != null ? String(initial.xPitchMm) : "",
+        trackerDetails: initial.trackerDetails != null ? String(initial.trackerDetails) : "",
+        priority: initial.priority || "low",
+        remarks: initial.remarks || "",
+      });
+
+      const b = initial.bom;
+      if (b) {
+        setTech(b.technologyProposed);
+        setVendorAddress(b.vendorAddress || "");
+        setDocRef(b.documentRef || "");
+        setModuleWattageWp(b.moduleWattageWp != null ? String(b.moduleWattageWp) : "");
+        setModuleDimensionsOption(b.moduleDimensionsOption || "1");
+        setModuleModelNumber(b.moduleModelNumber || "");
+        setComponents(Array.isArray(b.components) ? b.components : []);
+      } else {
+        // fallback to orderType map if no bom
+        const map: Record<OrderType, Technology> = { m10: "M10", g12r: "G12R", g12: "G12" };
+        setTech(map[initial.moduleOrderType]);
+      }
+    }
+  }, [mode, initial]);
+
+  // Auto-generate Document Ref when customer/tech/date change (only if docRef not prefilled)
+  useEffect(() => {
+    if (mode === "edit" && initial?.bom?.documentRef) return; // keep existing docRef unless user changes
     const today = new Date();
     const dd = String(today.getDate()).padStart(2, "0");
     const mm = String(today.getMonth() + 1).padStart(2, "0");
@@ -351,13 +472,14 @@ const SalesRequestModal: React.FC<{
     const seq = "0001"; // FE placeholder; BE can override
     const ref = `BOM_${cus3}_${tech} Rev.0, ${dateStr}: BOM-${cus3}-${seq}-${yyyy}${mm}${dd}`;
     setDocRef(ref);
-  }, [state.customerName, tech]);
+  }, [state.customerName, tech, mode, initial?.bom?.documentRef]);
 
-  // Sync technology with Order Type
+  // Sync technology with Order Type on change in form (create only; in edit we respect BOM tech initially)
   useEffect(() => {
+    if (mode === "edit" && initial?.bom) return;
     const map: Record<OrderType, Technology> = { m10: "M10", g12r: "G12R", g12: "G12" };
     setTech(map[state.moduleOrderType]);
-  }, [state.moduleOrderType]);
+  }, [state.moduleOrderType, mode, initial?.bom]);
 
   const canSubmit = useMemo(() => {
     const basicsOk =
@@ -473,7 +595,7 @@ const SalesRequestModal: React.FC<{
     // BOM JSON payload
     fd.append("bom", JSON.stringify(bomPayload));
 
-    // attachments
+    // attachments: if provided, back-end will replace existing (for edit) or set new (for create)
     if (qapTypeFile) fd.append("qapTypeAttachment", qapTypeFile);
     if (state.primaryBom === "yes" && primaryBomFile) fd.append("primaryBomAttachment", primaryBomFile);
     if (otherFiles.length) {
@@ -483,14 +605,18 @@ const SalesRequestModal: React.FC<{
       });
     }
 
-    onCreate(fd);
+    if (mode === "edit" && initial?.id && onUpdate) {
+      onUpdate(initial.id, fd);
+    } else if (onCreate) {
+      onCreate(fd);
+    }
   };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
       <div className="bg-white rounded-lg shadow-xl max-h-[92vh] w-full max-w-6xl overflow-auto">
         <div className="p-4 border-b flex items-center justify-between sticky top-0 bg-white z-10">
-          <h2 className="text-lg font-semibold">Create Sales Request</h2>
+          <h2 className="text-lg font-semibold">{mode === "edit" ? "Edit Sales Request" : "Create Sales Request"}</h2>
           <div className="flex items-center gap-2">
             <Button variant={showPreview ? "secondary" : "outline"} onClick={() => setShowPreview((v) => !v)}>
               {showPreview ? "Back to Edit" : "Preview"}
@@ -600,7 +726,7 @@ const SalesRequestModal: React.FC<{
                 options={["Customer", "Premier Energies"]}
               />
 
-              <File label="QAP Type attachment" onChange={setQapTypeFile} />
+              <File label="QAP Type attachment (optional)" onChange={setQapTypeFile} />
 
               <Select
                 label="Primary Technical Document - Primary BOM"
@@ -610,7 +736,9 @@ const SalesRequestModal: React.FC<{
                 options={["yes", "no"]}
               />
 
-              {state.primaryBom === "yes" && <File label="Primary BOM attachment" onChange={setPrimaryBomFile} />}
+              {state.primaryBom === "yes" && (
+                <File label="Primary BOM attachment (optional)" onChange={setPrimaryBomFile} />
+              )}
 
               <Select
                 label="Inline Inspection"
@@ -673,11 +801,11 @@ const SalesRequestModal: React.FC<{
               {/* Multi file attachments with titles */}
               <div className="md:col-span-2">
                 <div className="flex items-center justify-between mb-2">
-                  <label className="font-medium">Any Other Attachments</label>
+                  <label className="font-medium">Any Other Attachments (optional)</label>
                   <Button type="button" variant="outline" onClick={addOtherFile}>+ Add</Button>
                 </div>
                 {otherFiles.length === 0 ? (
-                  <div className="text-sm text-gray-500">None added.</div>
+                  <div className="text-sm text-gray-500">None.</div>
                 ) : (
                   <div className="space-y-3">
                     {otherFiles.map((o, idx) => (
@@ -860,7 +988,7 @@ const SalesRequestModal: React.FC<{
             <div className="p-4 border-t flex items-center justify-end gap-3">
               <Button variant="outline" onClick={onClose}>Cancel</Button>
               <Button disabled={!canSubmit || creating} onClick={submit} className="bg-blue-600 hover:bg-blue-700">
-                {creating ? "Saving…" : "Create"}
+                {creating ? (mode === "edit" ? "Saving…" : "Saving…") : (mode === "edit" ? "Save Changes" : "Create")}
               </Button>
             </div>
           </>
@@ -955,7 +1083,7 @@ const SalesRequestModal: React.FC<{
             <div className="border-t pt-4 flex items-center justify-end gap-3">
               <Button variant="outline" onClick={() => setShowPreview(false)}>Back to Edit</Button>
               <Button disabled={!canSubmit || creating} onClick={submit} className="bg-blue-600 hover:bg-blue-700">
-                {creating ? "Saving…" : "Create"}
+                {creating ? (mode === "edit" ? "Saving…" : "Saving…") : (mode === "edit" ? "Save Changes" : "Create")}
               </Button>
             </div>
           </div>
@@ -964,6 +1092,270 @@ const SalesRequestModal: React.FC<{
     </div>
   );
 };
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/*  View modal with BOM + full change history                                */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+const ViewSalesRequestModal: React.FC<{
+  id: string;
+  onClose: () => void;
+  onEdit: (data: SalesRequest) => void;
+}> = ({ id, onClose, onEdit }) => {
+  const [data, setData] = useState<SalesRequest | null>(null);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setLoading(true);
+      try {
+        const [r1, r2] = await Promise.all([
+          fetch(`${API}/api/sales-requests/${id}`, { credentials: "include" }),
+          fetch(`${API}/api/sales-requests/${id}/history`, { credentials: "include" }),
+        ]);
+        if (!r1.ok) throw new Error(await r1.text());
+        if (!r2.ok) throw new Error(await r2.text());
+        const d = (await r1.json()) as SalesRequest;
+        const h = (await r2.json()) as HistoryItem[];
+        if (!mounted) return;
+        setData(d);
+        // sort newest first
+        setHistory(h.sort((a, b) => new Date(b.changedAt).getTime() - new Date(a.changedAt).getTime()));
+      } catch (e: any) {
+        if (!mounted) return;
+        setError(String(e?.message || e || "Failed to fetch"));
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [id]);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+      <div className="bg-white rounded-lg shadow-xl max-h-[92vh] w-full max-w-6xl overflow-auto">
+        <div className="p-4 border-b flex items-center justify-between sticky top-0 bg-white z-10">
+          <h2 className="text-lg font-semibold">Sales Request</h2>
+          <div className="flex items-center gap-2">
+            {data && (
+              <Button
+                variant="secondary"
+                onClick={() => onEdit(data)}
+              >
+                Edit
+              </Button>
+            )}
+            <Button variant="ghost" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        </div>
+
+        <div className="p-4 space-y-6">
+          {loading ? (
+            <div>Loading…</div>
+          ) : error ? (
+            <div className="text-red-600">{error}</div>
+          ) : data ? (
+            <>
+              <Card>
+                <CardHeader><CardTitle>Details</CardTitle></CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                    <PreviewRow label="Customer Name" value={data.customerName} />
+                    <PreviewRow label="New Customer?" value={data.isNewCustomer} />
+                    <PreviewRow label="Manufacturing Plant" value={data.moduleManufacturingPlant.toUpperCase()} />
+                    <PreviewRow label="Order Type" value={data.moduleOrderType.toUpperCase()} />
+                    <PreviewRow label="Cell Type" value={data.cellType} />
+                    <PreviewRow label="Wattage Binning" value={fmtNum(data.wattageBinning)} />
+                    <PreviewRow label="RFQ Qty (MW)" value={fmtNum(data.rfqOrderQtyMW)} />
+                    <PreviewRow label="Premier Bidded Qty (MW)" value={data.premierBiddedOrderQtyMW ?? "-"} />
+                    <PreviewRow label="Delivery Timeline" value={`${data.deliveryStartDate} → ${data.deliveryEndDate}`} />
+                    <PreviewRow label="Project Location" value={data.projectLocation} />
+                    <PreviewRow label="Cable Length" value={fmtNum(data.cableLengthRequired)} />
+                    <PreviewRow label="QAP Type" value={data.qapType} />
+                    <PreviewRow label="Primary BOM?" value={data.primaryBom.toUpperCase()} />
+                    <PreviewRow label="Inline Inspection?" value={data.inlineInspection.toUpperCase()} />
+                    <PreviewRow label="Cell Procured By" value={data.cellProcuredBy} />
+                    <PreviewRow label="Agreed CTM" value={fmtDec(data.agreedCTM)} />
+                    <PreviewRow label="Factory Audit Date" value={data.factoryAuditTentativeDate || "-"} />
+                    <PreviewRow label="X Pitch (mm)" value={data.xPitchMm ?? "-"} />
+                    <PreviewRow label="Tracker @790/1400" value={data.trackerDetails ?? "-"} />
+                    <PreviewRow label="Priority" value={data.priority} />
+                    <PreviewRow label="Created By" value={data.createdBy} />
+                    <PreviewRow label="Created At" value={new Date(data.createdAt).toLocaleString()} />
+                    <div className="md:col-span-3">
+                      <div className="text-sm text-gray-700">
+                        <span className="font-medium">Remarks:</span> {data.remarks || "-"}
+                      </div>
+                    </div>
+                    {data.qapTypeAttachmentUrl && (
+                      <div className="md:col-span-3">
+                        <a
+                          className="text-blue-600 underline"
+                          href={data.qapTypeAttachmentUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          View QAP Type Attachment
+                        </a>
+                      </div>
+                    )}
+                    {data.primaryBomAttachmentUrl && (
+                      <div className="md:col-span-3">
+                        <a
+                          className="text-blue-600 underline"
+                          href={data.primaryBomAttachmentUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          View Primary BOM Attachment
+                        </a>
+                      </div>
+                    )}
+                    {!!data.otherAttachments?.length && (
+                      <div className="md:col-span-3">
+                        <div className="font-medium">Other Attachments</div>
+                        <ul className="list-disc pl-5 space-y-1">
+                          {data.otherAttachments.map((a, i) => (
+                            <li key={i}>
+                              <a className="text-blue-600 underline" target="_blank" rel="noreferrer" href={a.url}>
+                                {a.title || `Attachment ${i + 1}`}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader><CardTitle>BOM</CardTitle></CardHeader>
+                <CardContent className="space-y-4">
+                  {data.bom ? (
+                    <>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                        <PreviewRow label="Vendor (lock-in)" value={data.bom.vendorName} />
+                        <PreviewRow label="RFID Location (lock-in)" value={data.bom.rfidLocation} />
+                        <PreviewRow label="Technology Proposed" value={data.bom.technologyProposed} />
+                        <PreviewRow label="Vendor Address" value={data.bom.vendorAddress || "-"} />
+                        <PreviewRow label="Document Ref" value={data.bom.documentRef} />
+                        <PreviewRow label="Module Wattage (WP)" value={fmtNum(data.bom.moduleWattageWp)} />
+                        <PreviewRow label="Module Dimensions" value={data.bom.moduleDimensionsOption} />
+                        <PreviewRow label="Module Model Number" value={data.bom.moduleModelNumber} />
+                      </div>
+                      {!!data.bom.components?.length ? (
+                        <div className="space-y-6">
+                          {data.bom.components.map((c, idx) => (
+                            <div key={`${c.name}-${idx}`} className="overflow-auto">
+                              <div className="font-medium mb-2">{c.name}</div>
+                              <table className="min-w-full text-sm border">
+                                <thead className="bg-gray-50 text-left">
+                                  <tr>
+                                    <Th>Part No / Type / Model</Th>
+                                    <Th>Sub-vendor / Manufacturer</Th>
+                                    <Th>Specification</Th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y">
+                                  {c.rows.map((r, i) => (
+                                    <tr key={i} className="align-top">
+                                      <Td>{r.model || "-"}</Td>
+                                      <Td>{r.subVendor || "-"}</Td>
+                                      <Td><div className="whitespace-pre-wrap">{r.spec || "—"}</div></Td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-gray-500">No BOM components.</div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-sm text-gray-500">No BOM available.</div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader><CardTitle>Change History</CardTitle></CardHeader>
+                <CardContent className="space-y-4">
+                  {history.length === 0 ? (
+                    <div className="text-sm text-gray-500">No edits yet.</div>
+                  ) : (
+                    <div className="space-y-4">
+                      {history.map((h) => (
+                        <div key={h.id} className="border rounded">
+                          <div className="px-3 py-2 bg-gray-50 text-sm flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <span className="font-medium capitalize">{h.action}</span>{" "}
+                              by <span className="font-medium">{h.changedBy}</span>
+                            </div>
+                            <div className="text-gray-600">{new Date(h.changedAt).toLocaleString()}</div>
+                          </div>
+                          <div className="p-3">
+                            {!h.changes || h.changes.length === 0 ? (
+                              <div className="text-sm text-gray-500">No field-level changes recorded.</div>
+                            ) : (
+                              <div className="overflow-auto">
+                                <table className="min-w-full text-sm border">
+                                  <thead className="bg-gray-50 text-left">
+                                    <tr>
+                                      <Th>Field</Th>
+                                      <Th>Before</Th>
+                                      <Th>After</Th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y">
+                                    {h.changes.map((c, i) => (
+                                      <tr key={i}>
+                                        <Td className="font-medium">{c.field}</Td>
+                                        <Td className="max-w-[24rem] truncate" title={stringifyForView(c.before)}>
+                                          {stringifyForView(c.before)}
+                                        </Td>
+                                        <Td className="max-w-[24rem] truncate" title={stringifyForView(c.after)}>
+                                          {stringifyForView(c.after)}
+                                        </Td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+function stringifyForView(v: any) {
+  if (v === null || v === undefined) return "-";
+  if (typeof v === "string") return v;
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
 
 /* ────────────────────────────────────────────────────────────────────────── */
 /*  Small field + preview components                                         */

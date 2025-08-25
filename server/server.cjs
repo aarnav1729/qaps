@@ -162,6 +162,74 @@ async function initMssql() {
         [user]    NVARCHAR(50)    NULL,
         timestamp DATETIME2       NOT NULL
       );
+
+      ------------------------------------------------
+-- SalesRequests (master)
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SalesRequests')
+CREATE TABLE SalesRequests (
+  id                          UNIQUEIDENTIFIER DEFAULT NEWID() PRIMARY KEY,
+  customerName                NVARCHAR(200)   NOT NULL,
+  isNewCustomer               NVARCHAR(3)     NOT NULL,      -- 'yes' | 'no'
+  moduleManufacturingPlant    NVARCHAR(10)    NOT NULL,      -- 'p2' | 'p4' | 'p5' | 'p6'
+  moduleOrderType             NVARCHAR(10)    NOT NULL,      -- 'm10' | 'g12r' | 'g12'
+  cellType                    NVARCHAR(10)    NOT NULL,      -- 'DCR' | 'NDCR'
+  wattageBinning              INT             NOT NULL,
+  rfqOrderQtyMW               INT             NOT NULL,
+  premierBiddedOrderQtyMW     INT             NULL,
+  deliveryStartDate           DATE            NOT NULL,
+  deliveryEndDate             DATE            NOT NULL,
+  projectLocation             NVARCHAR(200)   NOT NULL,
+  cableLengthRequired         INT             NOT NULL,
+  qapType                     NVARCHAR(50)    NOT NULL,      -- 'Customer' | 'Premier Energies'
+
+  qapTypeAttachmentName       NVARCHAR(200)   NULL,
+  qapTypeAttachmentUrl        NVARCHAR(500)   NULL,
+
+  primaryBom                  NVARCHAR(3)     NOT NULL,      -- 'yes' | 'no'
+  primaryBomAttachmentName    NVARCHAR(200)   NULL,
+  primaryBomAttachmentUrl     NVARCHAR(500)   NULL,
+
+  inlineInspection            NVARCHAR(3)     NOT NULL,      -- 'yes' | 'no'
+  cellProcuredBy              NVARCHAR(20)    NOT NULL,      -- 'Customer' | 'Premier Energies'
+  agreedCTM                   DECIMAL(18,8)   NOT NULL,
+  factoryAuditTentativeDate   DATE            NULL,
+  xPitchMm                    INT             NULL,
+  trackerDetails              INT             NULL,
+  priority                    NVARCHAR(10)    NOT NULL,      -- 'high' | 'low'
+  remarks                     NVARCHAR(MAX)   NULL,
+
+  createdBy                   NVARCHAR(50)    NOT NULL,
+  createdAt                   DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
+
+  -- store BOM JSON as text (SQL Server JSON functions can still query it)
+  bom                         NVARCHAR(MAX)   NULL
+);
+
+------------------------------------------------
+-- SalesRequestFiles (child)
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SalesRequestFiles')
+CREATE TABLE SalesRequestFiles (
+  id             INT IDENTITY(1,1) PRIMARY KEY,
+  salesRequestId UNIQUEIDENTIFIER NOT NULL
+      CONSTRAINT FK_SRF_SR FOREIGN KEY REFERENCES SalesRequests(id) ON DELETE CASCADE,
+  title          NVARCHAR(200)   NULL,
+  fileName       NVARCHAR(200)   NOT NULL,
+  url            NVARCHAR(500)   NOT NULL
+);
+
+------------------------------------------------
+-- SalesRequestHistory (audit trail)
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SalesRequestHistory')
+CREATE TABLE SalesRequestHistory (
+  id             INT IDENTITY(1,1) PRIMARY KEY,
+  salesRequestId UNIQUEIDENTIFIER NOT NULL
+      CONSTRAINT FK_SRH_SR FOREIGN KEY REFERENCES SalesRequests(id) ON DELETE CASCADE,
+  action         NVARCHAR(20)    NOT NULL,  -- 'create' | 'update' | 'delete'
+  changedBy      NVARCHAR(50)    NOT NULL,
+  changedAt      DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
+  changes        NVARCHAR(MAX)   NULL       -- JSON array of { field, before, after }
+);
+
     `);
 
     console.log("✅ MSSQL schema ensured");
@@ -190,7 +258,11 @@ function authenticateToken(req, res, next) {
     req.cookies.token || (req.headers.authorization || "").split(" ")[1];
   if (!token) return res.sendStatus(401);
   jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return res.sendStatus(403);
+    if (err) {
+      // stale/invalid token → clear it and force re-login path
+      res.clearCookie("token");
+      return res.sendStatus(401);
+    }
     req.user = user;
     next();
   });
@@ -233,7 +305,6 @@ app.use((req, res, next) => {
   res.sendFile(indexHtml);
 });
 
-
 // multer setup
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadDir),
@@ -244,6 +315,7 @@ const storage = multer.diskStorage({
     cb(null, name);
   },
 });
+
 const upload = multer({
   storage,
   limits: { fileSize: 100 * 1024 * 1024 }, // 10MB
@@ -284,11 +356,15 @@ app.post(
     };
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
+    // In dev on localhost, don’t use Secure (self-signed certs) and relax SameSite
+    const isLocalhost =
+      req.hostname === "localhost" || req.hostname === "127.0.0.1";
+    const inProd = process.env.NODE_ENV === "production" && !isLocalhost;
     res
       .cookie("token", token, {
         httpOnly: true,
-        sameSite: "strict",
-        secure: process.env.NODE_ENV === "production",
+        sameSite: inProd ? "strict" : "lax",
+        secure: inProd, // avoids Chrome dropping cookies on self-signed localhost
       })
       .json({ user: payload });
   }
@@ -304,14 +380,8 @@ app.post("/api/logout", (req, res) => {
 app.get("/api/me", authenticateToken, (req, res) => {
   res.json({ user: req.user });
 });
-// ──────────────────────────────────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ─────────────────────────────────────────────────────────────────────────────
 //   ───   U S E R S   (A D M I N  O N L Y)   ─────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
-
 app.get(
   "/api/users",
   authenticateToken,
@@ -470,7 +540,6 @@ app.delete(
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─── LIST QAPs ───────────────────────────────────────────────────────────────
-// server.cjs (replace your existing GET /api/qaps)
 app.get("/api/qaps", authenticateToken, async (req, res) => {
   const { status, plant } = req.query;
   const filters = [];
@@ -1059,14 +1128,6 @@ app.delete(
 // ─────────────────────────────────────────────────────────────────────────────
 //   ───   L E V E L   R E V I E W   E N D P O I N T S   ────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
-
-// body: { level, role?, comments: { [itemIndex]: string }, respondedAt? }
-// ─── LEVEL RESPONSE ENDPOINT ────────────────────────────────────────────────
-// body: { level, role?, comments: { [itemIndex]: string } }
-// server.cjs (or server.js)
-
-// ─── LEVEL RESPONSE ENDPOINT ────────────────────────────────────────────────
-// ─── LEVEL RESPONSE ENDPOINT ────────────────────────────────────────────────
 app.post(
   "/api/qaps/:id/responses",
   [
@@ -1276,8 +1337,6 @@ app.post(
 );
 
 // final comments (requestor)
-// in server/server.js (or .cjs), replace your existing POST /api/qaps/:id/final-comments handler with this:
-
 app.post(
   "/api/qaps/:id/final-comments",
   authenticateToken,
@@ -1368,8 +1427,6 @@ app.post(
 );
 
 // approve / reject (plant-head)
-// in server.cjs (or server.js), after your existing imports & middleware…
-
 // ─── APPROVE QAP ─────────────────────────────────────────────────────────────
 app.post(
   "/api/qaps/:id/approve",
@@ -1532,6 +1589,813 @@ app.post(
     // in real life you’d persist to a `SpecTemplates` table
     // for now, just echo back
     res.status(201).json(req.body);
+  }
+);
+
+// Build a public URL for uploaded files (re-uses your existing /uploads static)
+const PUBLIC_APP_URL = process.env.APP_URL || "https://localhost:11443";
+const fileUrl = (fileName) => `${PUBLIC_APP_URL}/uploads/${fileName}`;
+
+const intOrNull = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+const decOrZero = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+const yesNo = (v) => (v === "yes" ? "yes" : v === "no" ? "no" : "no");
+const pick = (o, keys) =>
+  keys.reduce(
+    (acc, k) => (o[k] !== undefined ? ((acc[k] = o[k]), acc) : acc),
+    {}
+  );
+
+
+// ──────// Build a comparable snapshot used for diffing in history
+function snapshotForHistory(row, otherFilesList) {
+  // Only include fields we care about displaying in history
+  return {
+    customerName: row.customerName,
+    isNewCustomer: row.isNewCustomer,
+    moduleManufacturingPlant: row.moduleManufacturingPlant,
+    moduleOrderType: row.moduleOrderType,
+    cellType: row.cellType,
+    wattageBinning: row.wattageBinning,
+    rfqOrderQtyMW: row.rfqOrderQtyMW,
+    premierBiddedOrderQtyMW: row.premierBiddedOrderQtyMW ?? null,
+    deliveryStartDate: row.deliveryStartDate?.toISOString?.().slice(0,10) ?? row.deliveryStartDate ?? null,
+    deliveryEndDate: row.deliveryEndDate?.toISOString?.().slice(0,10) ?? row.deliveryEndDate ?? null,
+    projectLocation: row.projectLocation,
+    cableLengthRequired: row.cableLengthRequired,
+    qapType: row.qapType,
+    qapTypeAttachmentName: row.qapTypeAttachmentName ?? null,
+    qapTypeAttachmentUrl: row.qapTypeAttachmentUrl ?? null,
+    primaryBom: row.primaryBom,
+    primaryBomAttachmentName: row.primaryBomAttachmentName ?? null,
+    primaryBomAttachmentUrl: row.primaryBomAttachmentUrl ?? null,
+    inlineInspection: row.inlineInspection,
+    cellProcuredBy: row.cellProcuredBy,
+    agreedCTM: Number(row.agreedCTM),
+    factoryAuditTentativeDate: row.factoryAuditTentativeDate
+      ? (row.factoryAuditTentativeDate.toISOString?.().slice(0,10) ?? row.factoryAuditTentativeDate)
+      : null,
+    xPitchMm: row.xPitchMm ?? null,
+    trackerDetails: row.trackerDetails ?? null,
+    priority: row.priority,
+    remarks: row.remarks ?? null,
+    bom: (() => {
+      try { return row.bom ? JSON.parse(row.bom) : null; } catch { return row.bom || null; }
+    })(),
+    otherAttachments: (otherFilesList || []).map(f => ({
+      id: f.id,
+      title: f.title || null,
+      fileName: f.fileName,
+      url: f.url,
+    })),
+  };
+}
+
+// Deep-ish equality via JSON
+function isEqual(a, b) {
+  try { return JSON.stringify(a) === JSON.stringify(b); } catch { return String(a) === String(b); }
+}
+//   S A L E S   R E Q U E S T S   C R U D
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Field names expected from your React FormData:
+const salesRequestUpload = upload.fields([
+  { name: "qapTypeAttachment", maxCount: 1 },
+  { name: "primaryBomAttachment", maxCount: 1 },
+  { name: "otherAttachments", maxCount: 50 }, // multiple additional files
+]);
+
+// Map a DB row + its child files to the API shape your UI expects
+function inflateSalesRequestRow(row, filesMap) {
+  const files = filesMap ? filesMap[row.id] || [] : [];
+  return {
+    id: row.id,
+    customerName: row.customerName,
+    isNewCustomer: row.isNewCustomer,
+    moduleManufacturingPlant: row.moduleManufacturingPlant,
+    moduleOrderType: row.moduleOrderType,
+    cellType: row.cellType,
+    wattageBinning: row.wattageBinning,
+    rfqOrderQtyMW: row.rfqOrderQtyMW,
+    premierBiddedOrderQtyMW: row.premierBiddedOrderQtyMW,
+    deliveryStartDate:
+      row.deliveryStartDate?.toISOString?.().slice(0, 10) ??
+      row.deliveryStartDate,
+    deliveryEndDate:
+      row.deliveryEndDate?.toISOString?.().slice(0, 10) ?? row.deliveryEndDate,
+    projectLocation: row.projectLocation,
+    cableLengthRequired: row.cableLengthRequired,
+    qapType: row.qapType,
+    qapTypeAttachmentUrl: row.qapTypeAttachmentUrl,
+    primaryBom: row.primaryBom,
+    primaryBomAttachmentUrl: row.primaryBomAttachmentUrl,
+    inlineInspection: row.inlineInspection,
+    cellProcuredBy: row.cellProcuredBy,
+    agreedCTM: Number(row.agreedCTM),
+    factoryAuditTentativeDate: row.factoryAuditTentativeDate
+      ? row.factoryAuditTentativeDate.toISOString?.().slice(0, 10) ??
+        row.factoryAuditTentativeDate
+      : null,
+    xPitchMm: row.xPitchMm,
+    trackerDetails: row.trackerDetails,
+    priority: row.priority,
+    remarks: row.remarks,
+    otherAttachments: files.map((f) => ({
+      title: f.title || null,
+      url: f.url,
+    })),
+    createdBy: row.createdBy,
+    createdAt: row.createdAt, // Express will serialize as ISO
+    bom: (() => {
+      try {
+        return row.bom ? JSON.parse(row.bom) : undefined;
+      } catch {
+        return undefined;
+      }
+    })(),
+  };
+}
+
+// LIST all
+app.get("/api/sales-requests", authenticateToken, async (req, res) => {
+  try {
+    let masters = [];
+    await tryMssql(async (db) => {
+      if (db === mssqlPool) {
+        masters = (
+          await mssqlPool
+            .request()
+            .query("SELECT * FROM SalesRequests ORDER BY createdAt DESC")
+        ).recordset;
+      }
+    });
+
+    if (!masters.length) return res.json([]);
+
+    const ids = masters.map((m) => m.id);
+    let files = [];
+    await tryMssql(async (db) => {
+      if (db === mssqlPool) {
+        let r = mssqlPool.request();
+        const inClause = ids.map((_, i) => `@id${i}`).join(",");
+        ids.forEach(
+          (id, i) => (r = r.input(`id${i}`, sql.UniqueIdentifier, id))
+        );
+        files = (
+          await r.query(
+            `SELECT * FROM SalesRequestFiles WHERE salesRequestId IN (${inClause}) ORDER BY id`
+          )
+        ).recordset;
+      }
+    });
+    const filesMap = files.reduce((acc, f) => {
+      (acc[f.salesRequestId] ||= []).push(f);
+      return acc;
+    }, {});
+
+    res.json(masters.map((row) => inflateSalesRequestRow(row, filesMap)));
+  } catch (e) {
+    console.error("GET /api/sales-requests error:", e);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// GET one
+app.get(
+  "/api/sales-requests/:id",
+  authenticateToken,
+  param("id").isUUID(),
+  handleValidation,
+  async (req, res) => {
+    const { id } = req.params;
+    try {
+      let row;
+      await tryMssql(async (db) => {
+        if (db === mssqlPool) {
+          row = (
+            await mssqlPool
+              .request()
+              .input("id", sql.UniqueIdentifier, id)
+              .query("SELECT * FROM SalesRequests WHERE id=@id")
+          ).recordset[0];
+        }
+      });
+      if (!row) return res.status(404).json({ message: "Not found" });
+
+      let files = [];
+      await tryMssql(async (db) => {
+        if (db === mssqlPool) {
+          files = (
+            await mssqlPool
+              .request()
+              .input("id", sql.UniqueIdentifier, id)
+              .query(
+                "SELECT * FROM SalesRequestFiles WHERE salesRequestId=@id ORDER BY id"
+              )
+          ).recordset;
+        }
+      });
+      const filesMap = { [id]: files };
+      res.json(inflateSalesRequestRow(row, filesMap));
+    } catch (e) {
+      console.error("GET /api/sales-requests/:id error:", e);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+
+// CREATE
+app.post(
+  "/api/sales-requests",
+  authenticateToken,
+  salesRequestUpload,
+  async (req, res) => {
+    const f = req.body; // multipart fields arrive as strings
+
+    // files
+    const qapTypeFile = (req.files?.qapTypeAttachment || [])[0];
+    const primaryBomFile = (req.files?.primaryBomAttachment || [])[0];
+    const otherFiles = req.files?.otherAttachments || [];
+    let otherTitles = [];
+    try {
+      otherTitles = JSON.parse(f.otherAttachmentTitles || "[]");
+      if (!Array.isArray(otherTitles)) otherTitles = [];
+    } catch {
+      otherTitles = [];
+    }
+
+    const newId = require("crypto").randomUUID();
+    const now = new Date();
+    const createdBy = req.user?.username || f.createdBy || "sales";
+
+    try {
+      await tryMssql(async (db) => {
+        if (db !== mssqlPool) return;
+
+        // master insert
+        const rq = mssqlPool
+          .request()
+          .input("id", sql.UniqueIdentifier, newId)
+          .input("customerName", sql.NVarChar, f.customerName?.trim() || "")
+          .input("isNewCustomer", sql.NVarChar, yesNo(f.isNewCustomer))
+          .input(
+            "moduleManufacturingPlant",
+            sql.NVarChar,
+            (f.moduleManufacturingPlant || "").toLowerCase()
+          )
+          .input(
+            "moduleOrderType",
+            sql.NVarChar,
+            (f.moduleOrderType || "").toLowerCase()
+          )
+          .input("cellType", sql.NVarChar, f.cellType || "DCR")
+          .input("wattageBinning", sql.Int, intOrNull(f.wattageBinning) ?? 0)
+          .input("rfqOrderQtyMW", sql.Int, intOrNull(f.rfqOrderQtyMW) ?? 0)
+          .input(
+            "premierBiddedOrderQtyMW",
+            sql.Int,
+            intOrNull(f.premierBiddedOrderQtyMW)
+          )
+          .input("deliveryStartDate", sql.Date, f.deliveryStartDate)
+          .input("deliveryEndDate", sql.Date, f.deliveryEndDate)
+          .input(
+            "projectLocation",
+            sql.NVarChar,
+            f.projectLocation?.trim() || ""
+          )
+          .input(
+            "cableLengthRequired",
+            sql.Int,
+            intOrNull(f.cableLengthRequired) ?? 0
+          )
+          .input("qapType", sql.NVarChar, f.qapType || "Customer")
+          .input(
+            "qapTypeAttachmentName",
+            sql.NVarChar,
+            qapTypeFile?.filename || null
+          )
+          .input(
+            "qapTypeAttachmentUrl",
+            sql.NVarChar,
+            qapTypeFile ? fileUrl(qapTypeFile.filename) : null
+          )
+          .input("primaryBom", sql.NVarChar, yesNo(f.primaryBom))
+          .input(
+            "primaryBomAttachmentName",
+            sql.NVarChar,
+            primaryBomFile?.filename || null
+          )
+          .input(
+            "primaryBomAttachmentUrl",
+            sql.NVarChar,
+            primaryBomFile ? fileUrl(primaryBomFile.filename) : null
+          )
+          .input("inlineInspection", sql.NVarChar, yesNo(f.inlineInspection))
+          .input("cellProcuredBy", sql.NVarChar, f.cellProcuredBy || "Customer")
+          .input("agreedCTM", sql.Decimal(18, 8), decOrZero(f.agreedCTM))
+          .input(
+            "factoryAuditTentativeDate",
+            sql.Date,
+            f.factoryAuditTentativeDate || null
+          )
+          .input("xPitchMm", sql.Int, intOrNull(f.xPitchMm))
+          .input("trackerDetails", sql.Int, intOrNull(f.trackerDetails))
+          .input("priority", sql.NVarChar, f.priority || "low")
+          .input("remarks", sql.NVarChar, f.remarks || null)
+          .input("createdBy", sql.NVarChar, createdBy)
+          .input("createdAt", sql.DateTime2, now)
+          .input("bom", sql.NVarChar, f.bom || null);
+
+        await rq.query(`
+          INSERT INTO SalesRequests (
+            id, customerName, isNewCustomer, moduleManufacturingPlant,
+            moduleOrderType, cellType, wattageBinning, rfqOrderQtyMW,
+            premierBiddedOrderQtyMW, deliveryStartDate, deliveryEndDate,
+            projectLocation, cableLengthRequired, qapType,
+            qapTypeAttachmentName, qapTypeAttachmentUrl,
+            primaryBom, primaryBomAttachmentName, primaryBomAttachmentUrl,
+            inlineInspection, cellProcuredBy, agreedCTM, factoryAuditTentativeDate,
+            xPitchMm, trackerDetails, priority, remarks, createdBy, createdAt, bom
+          )
+          VALUES (
+            @id, @customerName, @isNewCustomer, @moduleManufacturingPlant,
+            @moduleOrderType, @cellType, @wattageBinning, @rfqOrderQtyMW,
+            @premierBiddedOrderQtyMW, @deliveryStartDate, @deliveryEndDate,
+            @projectLocation, @cableLengthRequired, @qapType,
+            @qapTypeAttachmentName, @qapTypeAttachmentUrl,
+            @primaryBom, @primaryBomAttachmentName, @primaryBomAttachmentUrl,
+            @inlineInspection, @cellProcuredBy, @agreedCTM, @factoryAuditTentativeDate,
+            @xPitchMm, @trackerDetails, @priority, @remarks, @createdBy, @createdAt, @bom
+          );
+        `);
+
+        // child files (otherAttachments)
+        if (otherFiles.length) {
+          for (let i = 0; i < otherFiles.length; i++) {
+            const ffile = otherFiles[i];
+            const title = (otherTitles[i] || "").trim();
+            await mssqlPool
+              .request()
+              .input("srid", sql.UniqueIdentifier, newId)
+              .input("title", sql.NVarChar, title || null)
+              .input("fn", sql.NVarChar, ffile.filename)
+              .input("url", sql.NVarChar, fileUrl(ffile.filename)).query(`
+                INSERT INTO SalesRequestFiles (salesRequestId, title, fileName, url)
+                VALUES (@srid, @title, @fn, @url);
+              `);
+          }
+        }
+      });
+
+      // return the created entity
+      const row = (
+        await mssqlPool
+          .request()
+          .input("id", sql.UniqueIdentifier, newId)
+          .query("SELECT * FROM SalesRequests WHERE id=@id")
+      ).recordset[0];
+
+      const files = (
+        await mssqlPool
+          .request()
+          .input("id", sql.UniqueIdentifier, newId)
+          .query(
+            "SELECT * FROM SalesRequestFiles WHERE salesRequestId=@id ORDER BY id"
+          )
+      ).recordset;
+
+      res.status(201).json(inflateSalesRequestRow(row, { [newId]: files }));
+    } catch (e) {
+      console.error("POST /api/sales-requests error:", e);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+
+// UPDATE (multipart: replace single attachments if sent; append other files; update fields if provided)
+// Optional flags:
+//   removeQapTypeAttachment=true|1
+//   removePrimaryBomAttachment=true|1
+//   removeOtherAttachmentIds=[1,2,3]   (IDs from SalesRequestFiles.id)
+app.put(
+  "/api/sales-requests/:id",
+  authenticateToken,
+  param("id").isUUID(),
+  handleValidation,
+  salesRequestUpload,
+  async (req, res) => {
+    const { id } = req.params;
+    const f = req.body;
+
+    // incoming files
+    const qapTypeFile = (req.files?.qapTypeAttachment || [])[0];
+    const primaryBomFile = (req.files?.primaryBomAttachment || [])[0];
+    const otherFiles = req.files?.otherAttachments || [];
+    let otherTitles = [];
+    try {
+      otherTitles = JSON.parse(f.otherAttachmentTitles || "[]");
+      if (!Array.isArray(otherTitles)) otherTitles = [];
+    } catch {
+      otherTitles = [];
+    }
+
+    // removal flags
+    const removeQap =
+      f.removeQapTypeAttachment === "true" || f.removeQapTypeAttachment === "1";
+    const removePrimary =
+      f.removePrimaryBomAttachment === "true" ||
+      f.removePrimaryBomAttachment === "1";
+    let removeOtherIds = [];
+    try {
+      const tmp = JSON.parse(f.removeOtherAttachmentIds || "[]");
+      if (Array.isArray(tmp))
+        removeOtherIds = tmp.filter((x) => Number.isInteger(x));
+    } catch {}
+
+    try {
+      // fetch current row for cleaning files if removed/replaced
+      const cur = (
+        await mssqlPool
+          .request()
+          .input("id", sql.UniqueIdentifier, id)
+          .query("SELECT * FROM SalesRequests WHERE id=@id")
+      ).recordset[0];
+      if (!cur) return res.status(404).json({ message: "Not found" });
+
+      const fields = [];
+      const reqt = mssqlPool.request().input("id", sql.UniqueIdentifier, id);
+
+      // Basic updatable fields (only apply if provided)
+      const candidates = pick(f, [
+        "customerName",
+        "isNewCustomer",
+        "moduleManufacturingPlant",
+        "moduleOrderType",
+        "cellType",
+        "wattageBinning",
+        "rfqOrderQtyMW",
+        "premierBiddedOrderQtyMW",
+        "deliveryStartDate",
+        "deliveryEndDate",
+        "projectLocation",
+        "cableLengthRequired",
+        "qapType",
+        "primaryBom",
+        "inlineInspection",
+        "cellProcuredBy",
+        "agreedCTM",
+        "factoryAuditTentativeDate",
+        "xPitchMm",
+        "trackerDetails",
+        "priority",
+        "remarks",
+        "bom",
+      ]);
+
+      // normalize & bind
+      if (candidates.customerName !== undefined) {
+        fields.push("customerName=@customerName");
+        reqt.input(
+          "customerName",
+          sql.NVarChar,
+          candidates.customerName.trim()
+        );
+      }
+      if (candidates.isNewCustomer !== undefined) {
+        fields.push("isNewCustomer=@isNewCustomer");
+        reqt.input(
+          "isNewCustomer",
+          sql.NVarChar,
+          yesNo(candidates.isNewCustomer)
+        );
+      }
+      if (candidates.moduleManufacturingPlant !== undefined) {
+        fields.push("moduleManufacturingPlant=@moduleManufacturingPlant");
+        reqt.input(
+          "moduleManufacturingPlant",
+          sql.NVarChar,
+          candidates.moduleManufacturingPlant.toLowerCase()
+        );
+      }
+      if (candidates.moduleOrderType !== undefined) {
+        fields.push("moduleOrderType=@moduleOrderType");
+        reqt.input(
+          "moduleOrderType",
+          sql.NVarChar,
+          candidates.moduleOrderType.toLowerCase()
+        );
+      }
+      if (candidates.cellType !== undefined) {
+        fields.push("cellType=@cellType");
+        reqt.input("cellType", sql.NVarChar, candidates.cellType);
+      }
+      if (candidates.wattageBinning !== undefined) {
+        fields.push("wattageBinning=@wattageBinning");
+        reqt.input(
+          "wattageBinning",
+          sql.Int,
+          intOrNull(candidates.wattageBinning) ?? 0
+        );
+      }
+      if (candidates.rfqOrderQtyMW !== undefined) {
+        fields.push("rfqOrderQtyMW=@rfqOrderQtyMW");
+        reqt.input(
+          "rfqOrderQtyMW",
+          sql.Int,
+          intOrNull(candidates.rfqOrderQtyMW) ?? 0
+        );
+      }
+      if (candidates.premierBiddedOrderQtyMW !== undefined) {
+        fields.push("premierBiddedOrderQtyMW=@premierBiddedOrderQtyMW");
+        reqt.input(
+          "premierBiddedOrderQtyMW",
+          sql.Int,
+          intOrNull(candidates.premierBiddedOrderQtyMW)
+        );
+      }
+      if (candidates.deliveryStartDate !== undefined) {
+        fields.push("deliveryStartDate=@deliveryStartDate");
+        reqt.input(
+          "deliveryStartDate",
+          sql.Date,
+          candidates.deliveryStartDate || null
+        );
+      }
+      if (candidates.deliveryEndDate !== undefined) {
+        fields.push("deliveryEndDate=@deliveryEndDate");
+        reqt.input(
+          "deliveryEndDate",
+          sql.Date,
+          candidates.deliveryEndDate || null
+        );
+      }
+      if (candidates.projectLocation !== undefined) {
+        fields.push("projectLocation=@projectLocation");
+        reqt.input(
+          "projectLocation",
+          sql.NVarChar,
+          candidates.projectLocation.trim()
+        );
+      }
+      if (candidates.cableLengthRequired !== undefined) {
+        fields.push("cableLengthRequired=@cableLengthRequired");
+        reqt.input(
+          "cableLengthRequired",
+          sql.Int,
+          intOrNull(candidates.cableLengthRequired) ?? 0
+        );
+      }
+      if (candidates.qapType !== undefined) {
+        fields.push("qapType=@qapType");
+        reqt.input("qapType", sql.NVarChar, candidates.qapType);
+      }
+      if (candidates.primaryBom !== undefined) {
+        fields.push("primaryBom=@primaryBom");
+        reqt.input("primaryBom", sql.NVarChar, yesNo(candidates.primaryBom));
+      }
+      if (candidates.inlineInspection !== undefined) {
+        fields.push("inlineInspection=@inlineInspection");
+        reqt.input(
+          "inlineInspection",
+          sql.NVarChar,
+          yesNo(candidates.inlineInspection)
+        );
+      }
+      if (candidates.cellProcuredBy !== undefined) {
+        fields.push("cellProcuredBy=@cellProcuredBy");
+        reqt.input("cellProcuredBy", sql.NVarChar, candidates.cellProcuredBy);
+      }
+      if (candidates.agreedCTM !== undefined) {
+        fields.push("agreedCTM=@agreedCTM");
+        reqt.input(
+          "agreedCTM",
+          sql.Decimal(18, 8),
+          decOrZero(candidates.agreedCTM)
+        );
+      }
+      if (candidates.factoryAuditTentativeDate !== undefined) {
+        fields.push("factoryAuditTentativeDate=@factoryAuditTentativeDate");
+        reqt.input(
+          "factoryAuditTentativeDate",
+          sql.Date,
+          candidates.factoryAuditTentativeDate || null
+        );
+      }
+      if (candidates.xPitchMm !== undefined) {
+        fields.push("xPitchMm=@xPitchMm");
+        reqt.input("xPitchMm", sql.Int, intOrNull(candidates.xPitchMm));
+      }
+      if (candidates.trackerDetails !== undefined) {
+        fields.push("trackerDetails=@trackerDetails");
+        reqt.input(
+          "trackerDetails",
+          sql.Int,
+          intOrNull(candidates.trackerDetails)
+        );
+      }
+      if (candidates.priority !== undefined) {
+        fields.push("priority=@priority");
+        reqt.input("priority", sql.NVarChar, candidates.priority);
+      }
+      if (candidates.remarks !== undefined) {
+        fields.push("remarks=@remarks");
+        reqt.input("remarks", sql.NVarChar, candidates.remarks || null);
+      }
+      if (candidates.bom !== undefined) {
+        fields.push("bom=@bom");
+        reqt.input("bom", sql.NVarChar, candidates.bom || null);
+      }
+
+      // attachment field updates
+      if (removeQap) {
+        fields.push("qapTypeAttachmentName=NULL", "qapTypeAttachmentUrl=NULL");
+        if (cur.qapTypeAttachmentName) {
+          fs.unlink(path.join(uploadDir, cur.qapTypeAttachmentName), () => {});
+        }
+      }
+      if (removePrimary) {
+        fields.push(
+          "primaryBomAttachmentName=NULL",
+          "primaryBomAttachmentUrl=NULL"
+        );
+        if (cur.primaryBomAttachmentName) {
+          fs.unlink(
+            path.join(uploadDir, cur.primaryBomAttachmentName),
+            () => {}
+          );
+        }
+      }
+      if (qapTypeFile) {
+        fields.push(
+          "qapTypeAttachmentName=@qapTypeAttachmentName",
+          "qapTypeAttachmentUrl=@qapTypeAttachmentUrl"
+        );
+        reqt.input("qapTypeAttachmentName", sql.NVarChar, qapTypeFile.filename);
+        reqt.input(
+          "qapTypeAttachmentUrl",
+          sql.NVarChar,
+          fileUrl(qapTypeFile.filename)
+        );
+        if (cur.qapTypeAttachmentName)
+          fs.unlink(path.join(uploadDir, cur.qapTypeAttachmentName), () => {});
+      }
+      if (primaryBomFile) {
+        fields.push(
+          "primaryBomAttachmentName=@primaryBomAttachmentName",
+          "primaryBomAttachmentUrl=@primaryBomAttachmentUrl"
+        );
+        reqt.input(
+          "primaryBomAttachmentName",
+          sql.NVarChar,
+          primaryBomFile.filename
+        );
+        reqt.input(
+          "primaryBomAttachmentUrl",
+          sql.NVarChar,
+          fileUrl(primaryBomFile.filename)
+        );
+        if (cur.primaryBomAttachmentName)
+          fs.unlink(
+            path.join(uploadDir, cur.primaryBomAttachmentName),
+            () => {}
+          );
+      }
+
+      if (!fields.length && !otherFiles.length && !removeOtherIds.length) {
+        return res.status(400).json({ message: "Nothing to update" });
+      }
+
+      // update master
+      if (fields.length) {
+        await reqt.query(
+          `UPDATE SalesRequests SET ${fields.join(
+            ","
+          )}, createdAt=createdAt WHERE id=@id`
+        );
+      }
+
+      // remove selected other files (by id)
+      if (removeOtherIds.length) {
+        const existing = (
+          await mssqlPool
+            .request()
+            .input("id", sql.UniqueIdentifier, id)
+            .query(
+              "SELECT id,fileName FROM SalesRequestFiles WHERE salesRequestId=@id"
+            )
+        ).recordset;
+        const toRemove = existing.filter((r) => removeOtherIds.includes(r.id));
+        if (toRemove.length) {
+          const inClause = toRemove.map((_, i) => `@rid${i}`).join(",");
+          let delReq = mssqlPool.request();
+          toRemove.forEach(
+            (r, i) => (delReq = delReq.input(`rid${i}`, sql.Int, r.id))
+          );
+          await delReq.query(
+            `DELETE FROM SalesRequestFiles WHERE id IN (${inClause})`
+          );
+          toRemove.forEach((r) =>
+            fs.unlink(path.join(uploadDir, r.fileName), () => {})
+          );
+        }
+      }
+
+      // append new other files
+      for (let i = 0; i < otherFiles.length; i++) {
+        const ff = otherFiles[i];
+        const title = (otherTitles[i] || "").trim();
+        await mssqlPool
+          .request()
+          .input("srid", sql.UniqueIdentifier, id)
+          .input("title", sql.NVarChar, title || null)
+          .input("fn", sql.NVarChar, ff.filename)
+          .input("url", sql.NVarChar, fileUrl(ff.filename))
+          .query(
+            "INSERT INTO SalesRequestFiles (salesRequestId, title, fileName, url) VALUES (@srid, @title, @fn, @url)"
+          );
+      }
+
+      // return updated
+      const row = (
+        await mssqlPool
+          .request()
+          .input("id", sql.UniqueIdentifier, id)
+          .query("SELECT * FROM SalesRequests WHERE id=@id")
+      ).recordset[0];
+      const files = (
+        await mssqlPool
+          .request()
+          .input("id", sql.UniqueIdentifier, id)
+          .query(
+            "SELECT * FROM SalesRequestFiles WHERE salesRequestId=@id ORDER BY id"
+          )
+      ).recordset;
+      res.json(inflateSalesRequestRow(row, { [id]: files }));
+    } catch (e) {
+      console.error("PUT /api/sales-requests/:id error:", e);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+
+// DELETE
+app.delete(
+  "/api/sales-requests/:id",
+  authenticateToken,
+  param("id").isUUID(),
+  handleValidation,
+  async (req, res) => {
+    const { id } = req.params;
+    try {
+      // fetch filenames to remove from disk
+      const current = (
+        await mssqlPool
+          .request()
+          .input("id", sql.UniqueIdentifier, id)
+          .query("SELECT * FROM SalesRequests WHERE id=@id")
+      ).recordset[0];
+      if (!current) return res.status(404).json({ message: "Not found" });
+
+      const childFiles = (
+        await mssqlPool
+          .request()
+          .input("id", sql.UniqueIdentifier, id)
+          .query(
+            "SELECT fileName FROM SalesRequestFiles WHERE salesRequestId=@id"
+          )
+      ).recordset;
+
+      // delete DB rows (child table has ON DELETE CASCADE)
+      await mssqlPool
+        .request()
+        .input("id", sql.UniqueIdentifier, id)
+        .query("DELETE FROM SalesRequests WHERE id=@id");
+
+      // delete physical files (best-effort)
+      if (current.qapTypeAttachmentName)
+        fs.unlink(
+          path.join(uploadDir, current.qapTypeAttachmentName),
+          () => {}
+        );
+      if (current.primaryBomAttachmentName)
+        fs.unlink(
+          path.join(uploadDir, current.primaryBomAttachmentName),
+          () => {}
+        );
+      childFiles.forEach((f) =>
+        fs.unlink(path.join(uploadDir, f.fileName), () => {})
+      );
+
+      res.json({ message: "Sales Request deleted" });
+    } catch (e) {
+      console.error("DELETE /api/sales-requests/:id error:", e);
+      res.status(500).json({ message: "Server error" });
+    }
   }
 );
 
