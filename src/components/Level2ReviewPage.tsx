@@ -39,6 +39,67 @@ interface Level2ReviewPageProps {
   ) => void;
 }
 
+/* ───────────────────────────────────────────────────────────── */
+/* Local lightweight types just for rendering the BOM tab        */
+/* (We avoid importing from the Sales page and keep it optional) */
+/* ───────────────────────────────────────────────────────────── */
+type YesNo = "yes" | "no";
+type SalesRequestLite = {
+  id: string;
+  projectCode?: string;
+  customerName: string;
+  isNewCustomer: YesNo;
+  moduleManufacturingPlant: string;
+  moduleOrderType: string;
+  cellType: string;
+  wattageBinning: number;
+  rfqOrderQtyMW: number;
+  premierBiddedOrderQtyMW?: number | null;
+  deliveryStartDate: string;
+  deliveryEndDate: string;
+  projectLocation: string;
+  cableLengthRequired: number;
+  qapType: "Customer" | "Premier Energies";
+  qapTypeAttachmentUrl?: string | null;
+  primaryBom: YesNo;
+  primaryBomAttachmentUrl?: string | null;
+  inlineInspection: YesNo;
+  cellProcuredBy: "Customer" | "Premier Energies";
+  agreedCTM: number;
+  factoryAuditTentativeDate?: string | null;
+  xPitchMm?: number | null;
+  trackerDetails?: number | null;
+  priority: "high" | "low";
+  remarks?: string | null;
+  otherAttachments?: { title: string; url: string }[];
+  createdBy: string;
+  createdAt: string;
+  bom?: {
+    vendorName: string;
+    rfidLocation: string;
+    technologyProposed: string;
+    vendorAddress?: string;
+    documentRef: string;
+    moduleWattageWp: number;
+    moduleDimensionsOption: string;
+    moduleModelNumber: string;
+    components?: {
+      name: string;
+      rows: { model: string; subVendor?: string | null; spec?: string | null }[];
+    }[];
+  } | null;
+};
+
+const FieldRow: React.FC<{ label: string; value: React.ReactNode }> = ({
+  label,
+  value,
+}) => (
+  <div className="flex flex-col">
+    <span className="text-gray-500">{label}</span>
+    <span className="font-medium text-gray-900">{value ?? "-"}</span>
+  </div>
+);
+
 const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
   qapData,
   onNext,
@@ -97,11 +158,18 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
     onNext(qapId, user?.role || "", responses[qapId] || {});
   };
 
+  const fmtNum = (n?: number | null) =>
+    n === null || n === undefined ? "-" : Number(n).toLocaleString();
+  const fmtDec = (n?: number | null) =>
+    n === null || n === undefined
+      ? "-"
+      : Number(n).toLocaleString(undefined, { maximumFractionDigits: 4 });
+
   /* ───────────────────────── render ───────────────────────── */
   return (
     <div className="container mx-auto px-4 py-6">
       <h1 className="text-3xl font-bold mb-4">
-        Level 2 Review –{" "}
+        Level 2 Review –{" "}
         {user?.role
           ? user.role.charAt(0).toUpperCase() + user.role.slice(1)
           : ""}
@@ -147,6 +215,10 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
 
           const isOpen = expanded[qap.id] || false;
 
+          // Try to pluck a linked Sales Request (optional)
+          const salesRequest: SalesRequestLite | undefined =
+            (qap as any)?.salesRequest;
+
           return (
             <Collapsible
               key={qap.id}
@@ -182,7 +254,7 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                             {qap.plant.toUpperCase()}
                           </Badge>
                           <Badge variant="outline">{qap.productType}</Badge>
-                          <Badge>{qap.orderQuantity} MW</Badge>
+                          <Badge>{qap.orderQuantity} MW</Badge>
                         </div>
                       </div>
                     </div>
@@ -212,6 +284,7 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                         <TabsTrigger value="visual">
                           Visual/EL ({qap.specs.visual.length})
                         </TabsTrigger>
+                        <TabsTrigger value="bom">BOM</TabsTrigger>
                       </TabsList>
 
                       {/* MQP TAB */}
@@ -222,7 +295,7 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                               <tr className="bg-gray-100">
                                 <th className="p-2 border">S.No</th>
                                 <th className="p-2 border">Criteria</th>
-                                <th className="p-2 border">Sub‑Criteria</th>
+                                <th className="p-2 border">Sub-Criteria</th>
                                 <th className="p-2 border">Premier Spec</th>
                                 <th className="p-2 border">Customer Spec</th>
                                 <th className="p-2 border">Match</th>
@@ -295,7 +368,7 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                               <tr className="bg-gray-100">
                                 <th className="p-2 border">S.No</th>
                                 <th className="p-2 border">Criteria</th>
-                                <th className="p-2 border">Sub‑Criteria</th>
+                                <th className="p-2 border">Sub-Criteria</th>
                                 <th className="p-2 border">Limits</th>
                                 <th className="p-2 border">Customer Spec</th>
                                 <th className="p-2 border">Match</th>
@@ -360,6 +433,306 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                             </tbody>
                           </table>
                         </div>
+                      </TabsContent>
+
+                      {/* BOM TAB */}
+                      <TabsContent value="bom">
+                        {!salesRequest ? (
+                          <div className="text-sm text-gray-600">
+                            No linked Sales Request/BOM found on this QAP.
+                          </div>
+                        ) : (
+                          <div className="space-y-6">
+                            <Card>
+                              <CardHeader>
+                                <CardTitle>Sales Request Summary</CardTitle>
+                              </CardHeader>
+                              <CardContent>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                                  <FieldRow
+                                    label="Customer Name"
+                                    value={salesRequest.customerName}
+                                  />
+                                  <FieldRow
+                                    label="Project Code"
+                                    value={salesRequest.projectCode || "-"}
+                                  />
+                                  <FieldRow
+                                    label="New Customer?"
+                                    value={salesRequest.isNewCustomer}
+                                  />
+                                  <FieldRow
+                                    label="Manufacturing Plant"
+                                    value={salesRequest.moduleManufacturingPlant?.toUpperCase()}
+                                  />
+                                  <FieldRow
+                                    label="Order Type"
+                                    value={salesRequest.moduleOrderType?.toUpperCase()}
+                                  />
+                                  <FieldRow
+                                    label="Cell Type"
+                                    value={salesRequest.cellType}
+                                  />
+                                  <FieldRow
+                                    label="Wattage Binning"
+                                    value={fmtNum(salesRequest.wattageBinning)}
+                                  />
+                                  <FieldRow
+                                    label="RFQ Qty (MW)"
+                                    value={fmtNum(salesRequest.rfqOrderQtyMW)}
+                                  />
+                                  <FieldRow
+                                    label="Premier Bidded Qty (MW)"
+                                    value={
+                                      salesRequest.premierBiddedOrderQtyMW ?? "-"
+                                    }
+                                  />
+                                  <FieldRow
+                                    label="Delivery Timeline"
+                                    value={`${salesRequest.deliveryStartDate} → ${salesRequest.deliveryEndDate}`}
+                                  />
+                                  <FieldRow
+                                    label="Project Location"
+                                    value={salesRequest.projectLocation}
+                                  />
+                                  <FieldRow
+                                    label="Cable Length"
+                                    value={fmtNum(
+                                      salesRequest.cableLengthRequired
+                                    )}
+                                  />
+                                  <FieldRow
+                                    label="QAP Type"
+                                    value={salesRequest.qapType}
+                                  />
+                                  <FieldRow
+                                    label="Primary BOM?"
+                                    value={salesRequest.primaryBom?.toUpperCase()}
+                                  />
+                                  <FieldRow
+                                    label="Inline Inspection?"
+                                    value={salesRequest.inlineInspection?.toUpperCase()}
+                                  />
+                                  <FieldRow
+                                    label="Cell Procured By"
+                                    value={salesRequest.cellProcuredBy}
+                                  />
+                                  <FieldRow
+                                    label="Agreed CTM"
+                                    value={fmtDec(salesRequest.agreedCTM)}
+                                  />
+                                  <FieldRow
+                                    label="Factory Audit Date"
+                                    value={
+                                      salesRequest.factoryAuditTentativeDate ||
+                                      "-"
+                                    }
+                                  />
+                                  <FieldRow
+                                    label="X Pitch (mm)"
+                                    value={
+                                      salesRequest.xPitchMm ?? "-"
+                                    }
+                                  />
+                                  <FieldRow
+                                    label="Tracker @790/1400"
+                                    value={
+                                      salesRequest.trackerDetails ?? "-"
+                                    }
+                                  />
+                                  <FieldRow
+                                    label="Priority"
+                                    value={salesRequest.priority}
+                                  />
+                                  <FieldRow
+                                    label="Created By"
+                                    value={salesRequest.createdBy}
+                                  />
+                                  <FieldRow
+                                    label="Created At"
+                                    value={new Date(
+                                      salesRequest.createdAt
+                                    ).toLocaleString()}
+                                  />
+                                  <div className="md:col-span-3">
+                                    <div className="text-sm text-gray-700">
+                                      <span className="font-medium">
+                                        Remarks:
+                                      </span>{" "}
+                                      {salesRequest.remarks || "-"}
+                                    </div>
+                                  </div>
+
+                                  {/* Attachments */}
+                                  {salesRequest.qapTypeAttachmentUrl && (
+                                    <div className="md:col-span-3">
+                                      <a
+                                        className="text-blue-600 underline"
+                                        href={salesRequest.qapTypeAttachmentUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                      >
+                                        View QAP Type Attachment
+                                      </a>
+                                    </div>
+                                  )}
+                                  {salesRequest.primaryBomAttachmentUrl && (
+                                    <div className="md:col-span-3">
+                                      <a
+                                        className="text-blue-600 underline"
+                                        href={
+                                          salesRequest.primaryBomAttachmentUrl
+                                        }
+                                        target="_blank"
+                                        rel="noreferrer"
+                                      >
+                                        View Primary BOM Attachment
+                                      </a>
+                                    </div>
+                                  )}
+                                  {!!salesRequest.otherAttachments?.length && (
+                                    <div className="md:col-span-3">
+                                      <div className="font-medium">
+                                        Other Attachments
+                                      </div>
+                                      <ul className="list-disc pl-5 space-y-1">
+                                        {salesRequest.otherAttachments.map(
+                                          (a, i) => (
+                                            <li key={i}>
+                                              <a
+                                                className="text-blue-600 underline"
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                href={a.url}
+                                              >
+                                                {a.title ||
+                                                  `Attachment ${i + 1}`}
+                                              </a>
+                                            </li>
+                                          )
+                                        )}
+                                      </ul>
+                                    </div>
+                                  )}
+                                </div>
+                              </CardContent>
+                            </Card>
+
+                            <Card>
+                              <CardHeader>
+                                <CardTitle>BOM</CardTitle>
+                              </CardHeader>
+                              <CardContent className="space-y-4">
+                                {!salesRequest.bom ? (
+                                  <div className="text-sm text-gray-500">
+                                    No BOM available.
+                                  </div>
+                                ) : (
+                                  <>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                                      <FieldRow
+                                        label="Vendor (lock-in)"
+                                        value={salesRequest.bom.vendorName}
+                                      />
+                                      <FieldRow
+                                        label="RFID Location (lock-in)"
+                                        value={salesRequest.bom.rfidLocation}
+                                      />
+                                      <FieldRow
+                                        label="Technology Proposed"
+                                        value={
+                                          salesRequest.bom.technologyProposed
+                                        }
+                                      />
+                                      <FieldRow
+                                        label="Vendor Address"
+                                        value={
+                                          salesRequest.bom.vendorAddress || "-"
+                                        }
+                                      />
+                                      <FieldRow
+                                        label="Document Ref"
+                                        value={salesRequest.bom.documentRef}
+                                      />
+                                      <FieldRow
+                                        label="Module Wattage (WP)"
+                                        value={fmtNum(
+                                          salesRequest.bom.moduleWattageWp
+                                        )}
+                                      />
+                                      <FieldRow
+                                        label="Module Dimensions"
+                                        value={
+                                          salesRequest.bom
+                                            .moduleDimensionsOption
+                                        }
+                                      />
+                                      <FieldRow
+                                        label="Module Model Number"
+                                        value={
+                                          salesRequest.bom.moduleModelNumber
+                                        }
+                                      />
+                                    </div>
+
+                                    {!!salesRequest.bom.components?.length ? (
+                                      <div className="space-y-6">
+                                        {salesRequest.bom.components.map(
+                                          (c, idx) => (
+                                            <div
+                                              key={`${c.name}-${idx}`}
+                                              className="overflow-auto"
+                                            >
+                                              <div className="font-medium mb-2">
+                                                {c.name}
+                                              </div>
+                                              <table className="min-w-full text-sm border">
+                                                <thead className="bg-gray-50 text-left">
+                                                  <tr>
+                                                    <th className="px-3 py-2 font-medium text-gray-700 whitespace-nowrap">
+                                                      Part No / Type / Model
+                                                    </th>
+                                                    <th className="px-3 py-2 font-medium text-gray-700 whitespace-nowrap">
+                                                      Sub-vendor / Manufacturer
+                                                    </th>
+                                                    <th className="px-3 py-2 font-medium text-gray-700 whitespace-nowrap">
+                                                      Specification
+                                                    </th>
+                                                  </tr>
+                                                </thead>
+                                                <tbody className="divide-y">
+                                                  {c.rows.map((r, i) => (
+                                                    <tr key={i} className="align-top">
+                                                      <td className="px-3 py-2 whitespace-nowrap">
+                                                        {r.model || "-"}
+                                                      </td>
+                                                      <td className="px-3 py-2 whitespace-nowrap">
+                                                        {r.subVendor || "-"}
+                                                      </td>
+                                                      <td className="px-3 py-2">
+                                                        <div className="whitespace-pre-wrap">
+                                                          {r.spec || "—"}
+                                                        </div>
+                                                      </td>
+                                                    </tr>
+                                                  ))}
+                                                </tbody>
+                                              </table>
+                                            </div>
+                                          )
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <div className="text-sm text-gray-500">
+                                        No BOM components.
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </CardContent>
+                            </Card>
+                          </div>
+                        )}
                       </TabsContent>
                     </Tabs>
 

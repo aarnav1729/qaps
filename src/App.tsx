@@ -309,11 +309,15 @@ const AppContent: React.FC = () => {
           <Route
             path="/"
             element={
-              <Index
-                qapData={qapData}
-                onSave={handleSaveQAP}
-                onDelete={handleDeleteQAP}
-              />
+              user?.role === "sales" ? (
+                <Navigate to="/sales" replace />
+              ) : (
+                <Index
+                  qapData={qapData}
+                  onSave={handleSaveQAP}
+                  onDelete={handleDeleteQAP}
+                />
+              )
             }
           />
           <Route

@@ -1,5 +1,4 @@
-// server/server.js
-
+// required modules
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
@@ -8,18 +7,13 @@ const sql = require("mssql");
 const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
 const { body, param, validationResult } = require("express-validator");
-
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const https = require("https");
-
 const app = express();
 
-/* ------------------------------------------------------------------ */
-/* Middleware                                                         */
-/* ------------------------------------------------------------------ */
-
+// middleware
 app.use(
   cors({
     origin: true, // reflect request origin, no patterns / regex
@@ -33,9 +27,7 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use(cookieParser());
 app.use(compression());
 
-/* ------------------------------------------------------------------ */
-/* Database Configs                                                   */
-/* ------------------------------------------------------------------ */
+// db connection config
 const mssqlConfig = {
   user: process.env.MSSQL_USER || "SPOT_USER",
   password: process.env.MSSQL_PASSWORD || "Marvik#72@",
@@ -51,9 +43,7 @@ const mssqlConfig = {
 
 let mssqlPool;
 
-/* ------------------------------------------------------------------ */
-/* Ensure MSSQL Schema                                                */
-/* ------------------------------------------------------------------ */
+// project schema
 async function initMssql() {
   try {
     mssqlPool = await sql.connect(mssqlConfig);
@@ -238,17 +228,13 @@ CREATE TABLE SalesRequestHistory (
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* Initialize both DBs                                                */
-/* ------------------------------------------------------------------ */
+// call + connect init
 async function initDatabases() {
   await initMssql();
 }
 initDatabases();
 
-// ─────────────────────────────────────────────────────────────────────────────
-//   J W T   A U T H   M I D D L E W A R E
-// ─────────────────────────────────────────────────────────────────────────────
+// session management via JWT in httpOnly cookie
 const JWT_SECRET =
   process.env.JWT_SECRET || "please_change_me_to_a_strong_secret";
 const JWT_EXPIRES_IN = "2h";
@@ -274,15 +260,11 @@ function authorizeRole(...allowed) {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//   H E L P E R :  M S S Q L  W /  M Y S Q L  F A L L B A C K
-// ─────────────────────────────────────────────────────────────────────────────
+// helper for db fallback options
 async function tryMssql(fn) {
   return await fn(mssqlPool);
 }
-// ─────────────────────────────────────────────────────────────────────────────
-//   V A L I D A T I O N  E R R O R  H A N D L E R
-// ─────────────────────────────────────────────────────────────────────────────
+// helper for express-validator
 function handleValidation(req, res, next) {
   const err = validationResult(req);
   if (!err.isEmpty()) return res.status(400).json({ errors: err.array() });
@@ -321,7 +303,6 @@ const upload = multer({
   limits: { fileSize: 100 * 1024 * 1024 }, // 10MB
 });
 
-// ─── AUTH ENDPOINTS ──────────────────────────────────────────────────────────
 // POST /api/login → sets { token } cookie + returns user payload
 app.post(
   "/api/login",
@@ -381,7 +362,7 @@ app.get("/api/me", authenticateToken, (req, res) => {
   res.json({ user: req.user });
 });
 
-//   ───   U S E R S   (A D M I N  O N L Y)   ─────────────────────────────────
+// GET /api/users (admin only) → list all users
 app.get(
   "/api/users",
   authenticateToken,
@@ -405,6 +386,7 @@ app.get(
   }
 );
 
+// POST /api/users (admin only) → create user
 app.post(
   "/api/users",
   [
@@ -450,6 +432,7 @@ app.post(
   }
 );
 
+// PUT /api/users/:id (admin only) → update user (password, role, plant)
 app.put(
   "/api/users/:id",
   [
@@ -510,6 +493,7 @@ app.put(
   }
 );
 
+// DELETE /api/users/:id (admin only) → delete user
 app.delete(
   "/api/users/:id",
   authenticateToken,
@@ -535,11 +519,7 @@ app.delete(
   }
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
-//   ───   Q A P   C R U D   ───────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ─── LIST QAPs ───────────────────────────────────────────────────────────────
+// GET /api/qaps → list all QAPs (with optional filters)  [UPDATED: embeds salesRequest]
 app.get("/api/qaps", authenticateToken, async (req, res) => {
   const { status, plant } = req.query;
   const filters = [];
@@ -598,7 +578,61 @@ app.get("/api/qaps", authenticateToken, async (req, res) => {
       }
     });
 
-    // 3) group by qapId
+    // 3) SALES REQUESTS: fetch & inflate all referenced SRs and attach per QAP
+    let srById = {};
+    const srIds = Array.from(
+      new Set(
+        masters
+          .map((m) => m.salesRequestId)
+          .filter((x) => x && String(x).length > 0)
+      )
+    );
+
+    if (srIds.length) {
+      let srMasters = [];
+      let srFiles = [];
+      await tryMssql(async (db) => {
+        if (db === mssqlPool) {
+          // masters
+          {
+            const inClause = srIds.map((_, i) => `@sid${i}`).join(",");
+            let rq = mssqlPool.request();
+            srIds.forEach(
+              (id, i) => (rq = rq.input(`sid${i}`, sql.UniqueIdentifier, id))
+            );
+            srMasters = (
+              await rq.query(
+                `SELECT * FROM SalesRequests WHERE id IN (${inClause})`
+              )
+            ).recordset;
+          }
+          // files
+          if (srMasters.length) {
+            const inClause = srIds.map((_, i) => `@fid${i}`).join(",");
+            let rf = mssqlPool.request();
+            srIds.forEach(
+              (id, i) => (rf = rf.input(`fid${i}`, sql.UniqueIdentifier, id))
+            );
+            srFiles = (
+              await rf.query(
+                `SELECT * FROM SalesRequestFiles WHERE salesRequestId IN (${inClause}) ORDER BY id`
+              )
+            ).recordset;
+          }
+        }
+      });
+
+      const filesMap = srFiles.reduce((acc, f) => {
+        (acc[f.salesRequestId] ||= []).push(f);
+        return acc;
+      }, {});
+      srById = srMasters.reduce((acc, row) => {
+        acc[row.id] = inflateSalesRequestRow(row, filesMap);
+        return acc;
+      }, {});
+    }
+
+    // 4) group by qapId
     const groupBy = (arr, keyFn) =>
       arr.reduce((acc, x) => {
         const k = keyFn(x);
@@ -609,7 +643,7 @@ app.get("/api/qaps", authenticateToken, async (req, res) => {
     const visMap = groupBy(allVis, (r) => r.qapId);
     const respMap = groupBy(allResp, (r) => r.qapId);
 
-    // 4) assemble final result
+    // 5) assemble final result (embed salesRequest)
     const result = masters.map((m) => ({
       ...m,
 
@@ -619,7 +653,7 @@ app.get("/api/qaps", authenticateToken, async (req, res) => {
         visual: visMap[m.id] || [],
       },
 
-      // ── level‑responses as level → role → details ───────────────
+      // ── level-responses as level → role → details ───────────────
       levelResponses: (respMap[m.id] || []).reduce((o, r) => {
         o[r.level] = o[r.level] || {};
         o[r.level][r.role] = {
@@ -631,11 +665,17 @@ app.get("/api/qaps", authenticateToken, async (req, res) => {
         return o;
       }, {}),
 
-      // ── convenience: parsed per‑item final comments ─────────────
+      // ── convenience: parsed per-item final comments ─────────────
       finalCommentsPerItem:
         m.finalComments && m.finalComments.trim().startsWith("{")
           ? JSON.parse(m.finalComments)
           : {},
+
+      // ── new: embed the linked Sales Request (if any) ────────────
+      salesRequest:
+        m.salesRequestId && srById[m.salesRequestId]
+          ? srById[m.salesRequestId]
+          : undefined,
     }));
 
     res.json(result);
@@ -645,7 +685,8 @@ app.get("/api/qaps", authenticateToken, async (req, res) => {
   }
 });
 
-// ─── GET QAPs “for review” (Level 2) ─────────────────────────────────────────
+// GET /api/qaps/for-review → list QAPs with unmatched items for this user’s role
+// GET /api/qaps/for-review → list QAPs with unmatched items for this user’s role  [UPDATED: embeds salesRequest]
 app.get("/api/qaps/for-review", authenticateToken, async (req, res) => {
   const userRole = req.user.role;
   const userPlants = (req.user.plant || "")
@@ -673,7 +714,7 @@ app.get("/api/qaps/for-review", authenticateToken, async (req, res) => {
 
     const ids = masters.map((m) => m.id);
 
-    // 3) Bulk‑fetch specs & responses
+    // 3) Bulk-fetch specs & responses
     let allMqp, allVis, allResp;
     await tryMssql(async (db) => {
       if (db === mssqlPool) {
@@ -700,7 +741,59 @@ app.get("/api/qaps/for-review", authenticateToken, async (req, res) => {
       }
     });
 
-    // 4) Group by qapId
+    // 4) SALES REQUESTS for these masters
+    let srById = {};
+    const srIds = Array.from(
+      new Set(
+        masters
+          .map((m) => m.salesRequestId)
+          .filter((x) => x && String(x).length > 0)
+      )
+    );
+    if (srIds.length) {
+      let srMasters = [];
+      let srFiles = [];
+      await tryMssql(async (db) => {
+        if (db === mssqlPool) {
+          // masters
+          {
+            const inClause = srIds.map((_, i) => `@sid${i}`).join(",");
+            let rq = mssqlPool.request();
+            srIds.forEach(
+              (id, i) => (rq = rq.input(`sid${i}`, sql.UniqueIdentifier, id))
+            );
+            srMasters = (
+              await rq.query(
+                `SELECT * FROM SalesRequests WHERE id IN (${inClause})`
+              )
+            ).recordset;
+          }
+          // files
+          if (srMasters.length) {
+            const inClause = srIds.map((_, i) => `@fid${i}`).join(",");
+            let rf = mssqlPool.request();
+            srIds.forEach(
+              (id, i) => (rf = rf.input(`fid${i}`, sql.UniqueIdentifier, id))
+            );
+            srFiles = (
+              await rf.query(
+                `SELECT * FROM SalesRequestFiles WHERE salesRequestId IN (${inClause}) ORDER BY id`
+              )
+            ).recordset;
+          }
+        }
+      });
+      const filesMap = srFiles.reduce((acc, f) => {
+        (acc[f.salesRequestId] ||= []).push(f);
+        return acc;
+      }, {});
+      srById = srMasters.reduce((acc, row) => {
+        acc[row.id] = inflateSalesRequestRow(row, filesMap);
+        return acc;
+      }, {});
+    }
+
+    // 5) Group by qapId
     const groupBy = (arr, key) =>
       arr.reduce((acc, x) => {
         (acc[x[key]] = acc[x[key]] || []).push(x);
@@ -710,7 +803,7 @@ app.get("/api/qaps/for-review", authenticateToken, async (req, res) => {
     const visMap = groupBy(allVis, "qapId");
     const respMap = groupBy(allResp, "qapId");
 
-    // 5) Assemble + filter out any QAP with NO unmatched items for this role
+    // 6) Assemble + filter out any QAP with NO unmatched items for this role
     const reviewable = masters
       .map((m) => {
         const specs = [...(mqpMap[m.id] || []), ...(visMap[m.id] || [])];
@@ -732,6 +825,11 @@ app.get("/api/qaps/for-review", authenticateToken, async (req, res) => {
             visual: visMap[m.id] || [],
           },
           levelResponses: lrsp,
+          // embed SR for the UI BOM tab
+          salesRequest:
+            m.salesRequestId && srById[m.salesRequestId]
+              ? srById[m.salesRequestId]
+              : undefined,
         };
       })
       .filter((qap) =>
@@ -753,7 +851,7 @@ app.get("/api/qaps/for-review", authenticateToken, async (req, res) => {
   }
 });
 
-// ─── GET A SINGLE QAP ────────────────────────────────────────────────────────
+// GET /api/qaps/:id → get full details of a QAP  [UPDATED: embeds salesRequest]
 app.get(
   "/api/qaps/:id",
   authenticateToken,
@@ -822,11 +920,42 @@ app.get(
         }
       });
 
+      // Sales Request (optional embed)
+      let embeddedSalesRequest;
+      if (master.salesRequestId) {
+        let srRow, srFiles;
+        await tryMssql(async (db) => {
+          if (db === mssqlPool) {
+            srRow = (
+              await mssqlPool
+                .request()
+                .input("sid", sql.UniqueIdentifier, master.salesRequestId)
+                .query("SELECT * FROM SalesRequests WHERE id=@sid")
+            ).recordset[0];
+            if (srRow) {
+              srFiles = (
+                await mssqlPool
+                  .request()
+                  .input("sid", sql.UniqueIdentifier, master.salesRequestId)
+                  .query(
+                    "SELECT * FROM SalesRequestFiles WHERE salesRequestId=@sid ORDER BY id"
+                  )
+              ).recordset;
+            }
+          }
+        });
+        if (srRow) {
+          const filesMap = { [srRow.id]: srFiles || [] };
+          embeddedSalesRequest = inflateSalesRequestRow(srRow, filesMap);
+        }
+      }
+
       res.json({
         ...master,
         specs: { mqp, visual },
         levelResponses: resp,
         timeline: tl,
+        salesRequest: embeddedSalesRequest,
       });
     } catch (e) {
       console.error("GET /api/qaps/:id error:", e);
@@ -835,25 +964,28 @@ app.get(
   }
 );
 
-// ─── CREATE A QAP ────────────────────────────────────────────────────────────
+// POST /api/qaps → create a new QAP  [UPDATED: accepts salesRequestId]
 app.post(
   "/api/qaps",
   [
     authenticateToken,
     body("customerName").isString(),
     body("projectName").isString(),
+    body("projectCode").optional().isString(),
     body("orderQuantity").isInt({ gt: 0 }),
     body("productType").isString(),
     body("plant").isString(),
     body("status").isString(),
     body("currentLevel").isInt({ min: 1, max: 5 }),
     body("specs").isObject(),
+    body("salesRequestId").optional().isUUID(), // <── NEW
     handleValidation,
   ],
   async (req, res) => {
     const {
       customerName,
       projectName,
+      projectCode,
       orderQuantity,
       productType,
       plant,
@@ -861,10 +993,22 @@ app.post(
       submittedBy,
       currentLevel,
       specs,
+      salesRequestId, // <── NEW
     } = req.body;
     const newId = require("crypto").randomUUID();
 
     try {
+      // validate the SR id if provided
+      if (salesRequestId) {
+        const vr = await mssqlPool
+          .request()
+          .input("sid", sql.UniqueIdentifier, salesRequestId)
+          .query("SELECT id FROM SalesRequests WHERE id=@sid");
+        if (!vr.recordset.length) {
+          return res.status(400).json({ message: "Invalid salesRequestId" });
+        }
+      }
+
       await tryMssql(async (db) => {
         if (db === mssqlPool) {
           // MSSQL master insert
@@ -873,21 +1017,27 @@ app.post(
             .input("id", sql.UniqueIdentifier, newId)
             .input("c", sql.NVarChar, customerName)
             .input("p", sql.NVarChar, projectName)
+            .input("pc", sql.NVarChar, projectCode || null)
             .input("o", sql.Int, orderQuantity)
             .input("pt", sql.NVarChar, productType)
             .input("pl", sql.NVarChar, plant)
             .input("s", sql.NVarChar, status)
             .input("sb", sql.NVarChar, submittedBy || null)
-            .input("cl", sql.Int, currentLevel).query(`
+            .input("cl", sql.Int, currentLevel)
+            .input(
+              "srid",
+              sql.UniqueIdentifier,
+              salesRequestId ? salesRequestId : null
+            ).query(`
               INSERT INTO QAPs (
                 id, customerName, projectName, orderQuantity,
                 productType, plant, status, submittedBy, submittedAt,
-                currentLevel, createdAt, lastModifiedAt
+                currentLevel, createdAt, lastModifiedAt, salesRequestId
               )
               VALUES (
                 @id,@c,@p,@o,
                 @pt,@pl,@s,@sb,SYSUTCDATETIME(),
-                @cl,SYSUTCDATETIME(),SYSUTCDATETIME()
+                @cl,SYSUTCDATETIME(),SYSUTCDATETIME(),@srid
               );
             `);
 
@@ -950,7 +1100,7 @@ app.post(
   }
 );
 
-// ─── UPDATE A QAP ────────────────────────────────────────────────────────────
+// PUT /api/qaps/:id → update a QAP (master fields + full specs replace)  [UPDATED: supports salesRequestId]
 app.put(
   "/api/qaps/:id",
   [
@@ -959,12 +1109,14 @@ app.put(
     // only validate fields you actually support
     body("customerName").optional().isString(),
     body("projectName").optional().isString(),
+    body("projectCode").optional().isString(),
     body("orderQuantity").optional().isInt({ gt: 0 }),
     body("productType").optional().isString(),
     body("plant").optional().isString(),
     body("status").optional().isString(),
     body("currentLevel").optional().isInt({ min: 1, max: 5 }),
     body("specs").optional().isObject(),
+    body("salesRequestId").optional({ nullable: true }).isUUID(), // <── NEW
     handleValidation,
   ],
   async (req, res) => {
@@ -974,6 +1126,7 @@ app.put(
     const fields = [
       "customerName",
       "projectName",
+      "projectCode",
       "orderQuantity",
       "productType",
       "plant",
@@ -988,11 +1141,31 @@ app.put(
       "approver",
       "approvedAt",
       "feedback",
+      "salesRequestId", // <── NEW
     ];
     const updates = [];
     const inputs = {};
 
+    // Handle salesRequestId normalization & validation
+    if ("salesRequestId" in req.body) {
+      const raw = req.body.salesRequestId;
+      const normalized = raw === null || raw === "" ? null : String(raw).trim();
+      if (normalized) {
+        // validate SR existence
+        const v = await mssqlPool
+          .request()
+          .input("sid", sql.UniqueIdentifier, normalized)
+          .query("SELECT id FROM SalesRequests WHERE id=@sid");
+        if (!v.recordset.length) {
+          return res.status(400).json({ message: "Invalid salesRequestId" });
+        }
+      }
+      updates.push("salesRequestId=@salesRequestId");
+      inputs.salesRequestId = normalized;
+    }
+
     for (const f of fields) {
+      if (f === "salesRequestId") continue; // already handled above
       if (req.body[f] !== undefined) {
         updates.push(`${f}=@${f}`);
         inputs[f] = req.body[f];
@@ -1011,12 +1184,13 @@ app.put(
         for (const clause of updates) {
           const key = clause.match(/^(\w+)/)[1];
           const val = inputs[key];
-          const type =
-            typeof val === "number"
-              ? sql.Int
-              : key.endsWith("At")
-              ? sql.DateTime2
-              : sql.NVarChar;
+          // proper SQL types per column
+          let type;
+          if (key === "orderQuantity") type = sql.Int;
+          else if (key.endsWith("At")) type = sql.DateTime2;
+          else if (key === "salesRequestId")
+            type = sql.UniqueIdentifier; // <── NEW
+          else type = sql.NVarChar;
           r = r.input(key, type, val);
         }
         await r.query(`
@@ -1025,7 +1199,7 @@ app.put(
           WHERE id=@id;
         `);
 
-        // 2) If specs were sent, delete old and re‑insert
+        // 2) If specs were sent, delete old and re-insert
         if (req.body.specs) {
           await mssqlPool.request().input("id", sql.UniqueIdentifier, id)
             .query(`
@@ -1037,7 +1211,7 @@ app.put(
           const normalize = (v) =>
             Array.isArray(v) ? v.join(",") : typeof v === "string" ? v : null;
 
-          // re‑insert MQP specs
+          // re-insert MQP specs
           for (const sp of req.body.specs.mqp || []) {
             const rb = normalize(sp.reviewBy);
             await mssqlPool
@@ -1063,7 +1237,7 @@ app.put(
               `);
           }
 
-          // re‑insert Visual specs
+          // re-insert Visual specs
           for (const sp of req.body.specs.visual || []) {
             const rb = normalize(sp.reviewBy);
             await mssqlPool
@@ -1096,7 +1270,7 @@ app.put(
   }
 );
 
-// ─── DELETE A QAP ────────────────────────────────────────────────────────────
+// DELETE /api/qaps/:id → delete a QAP and all its specs, responses, timeline
 app.delete(
   "/api/qaps/:id",
   authenticateToken,
@@ -1125,9 +1299,7 @@ app.delete(
   }
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
-//   ───   L E V E L   R E V I E W   E N D P O I N T S   ────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/qaps/:id/responses → add/update a level response
 app.post(
   "/api/qaps/:id/responses",
   [
@@ -1336,7 +1508,7 @@ app.post(
   }
 );
 
-// final comments (requestor)
+// POST /api/qaps/:id/final-comments → add final comments + optional attachment, advance to Level 5
 app.post(
   "/api/qaps/:id/final-comments",
   authenticateToken,
@@ -1426,8 +1598,7 @@ app.post(
   }
 );
 
-// approve / reject (plant-head)
-// ─── APPROVE QAP ─────────────────────────────────────────────────────────────
+// POST /api/qaps/:id/approve → approve a QAP (Plant‑head only)
 app.post(
   "/api/qaps/:id/approve",
   authenticateToken,
@@ -1485,7 +1656,7 @@ app.post(
   }
 );
 
-// ─── REJECT QAP ──────────────────────────────────────────────────────────────
+// POST /api/qaps/:id/reject → reject a QAP (Plant‑head only)
 app.post(
   "/api/qaps/:id/reject",
   authenticateToken,
@@ -1541,9 +1712,7 @@ app.post(
   }
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
-//   ───   S H A R E    ( E M A I L     Q A P  L I N K )   ──────────────────
-// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/qaps/:id/share → share a QAP link via email
 app.post(
   "/api/qaps/:id/share",
   authenticateToken,
@@ -1568,15 +1737,14 @@ app.post(
   }
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
-//   ───   S P E C ‑ T E M P L A T E S    ──────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/spec-templates → list available spec templates
 app.get("/api/spec-templates", authenticateToken, async (req, res) => {
   // simply combine your in‑memory arrays
   const { qapSpecifications } = require("../src/data/qapSpecification");
   res.json(qapSpecifications);
 });
 
+// POST /api/spec-templates → create a new spec template (admin only)
 app.post(
   "/api/spec-templates",
   authenticateToken,
@@ -1592,30 +1760,37 @@ app.post(
   }
 );
 
-// Build a public URL for uploaded files (re-uses your existing /uploads static)
+// helper for file URLs under sales-requests
 const PUBLIC_APP_URL = process.env.APP_URL || "https://localhost:11443";
 const fileUrl = (fileName) => `${PUBLIC_APP_URL}/uploads/${fileName}`;
 
+// helper to parse numbers from form data
 const intOrNull = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 };
+
+// helper to parse decimal numbers from form data
 const decOrZero = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 };
+
+// helper to parse yes/no from form data
 const yesNo = (v) => (v === "yes" ? "yes" : v === "no" ? "no" : "no");
+
+// helper to pick only certain keys from an object
 const pick = (o, keys) =>
   keys.reduce(
     (acc, k) => (o[k] !== undefined ? ((acc[k] = o[k]), acc) : acc),
     {}
   );
 
-
-// ──────// Build a comparable snapshot used for diffing in history
+// function to create a snapshot of fields from sales-requests for history
 function snapshotForHistory(row, otherFilesList) {
   // Only include fields we care about displaying in history
   return {
+    projectCode: row.projectCode ?? null,
     customerName: row.customerName,
     isNewCustomer: row.isNewCustomer,
     moduleManufacturingPlant: row.moduleManufacturingPlant,
@@ -1624,8 +1799,14 @@ function snapshotForHistory(row, otherFilesList) {
     wattageBinning: row.wattageBinning,
     rfqOrderQtyMW: row.rfqOrderQtyMW,
     premierBiddedOrderQtyMW: row.premierBiddedOrderQtyMW ?? null,
-    deliveryStartDate: row.deliveryStartDate?.toISOString?.().slice(0,10) ?? row.deliveryStartDate ?? null,
-    deliveryEndDate: row.deliveryEndDate?.toISOString?.().slice(0,10) ?? row.deliveryEndDate ?? null,
+    deliveryStartDate:
+      row.deliveryStartDate?.toISOString?.().slice(0, 10) ??
+      row.deliveryStartDate ??
+      null,
+    deliveryEndDate:
+      row.deliveryEndDate?.toISOString?.().slice(0, 10) ??
+      row.deliveryEndDate ??
+      null,
     projectLocation: row.projectLocation,
     cableLengthRequired: row.cableLengthRequired,
     qapType: row.qapType,
@@ -1638,16 +1819,21 @@ function snapshotForHistory(row, otherFilesList) {
     cellProcuredBy: row.cellProcuredBy,
     agreedCTM: Number(row.agreedCTM),
     factoryAuditTentativeDate: row.factoryAuditTentativeDate
-      ? (row.factoryAuditTentativeDate.toISOString?.().slice(0,10) ?? row.factoryAuditTentativeDate)
+      ? row.factoryAuditTentativeDate.toISOString?.().slice(0, 10) ??
+        row.factoryAuditTentativeDate
       : null,
     xPitchMm: row.xPitchMm ?? null,
     trackerDetails: row.trackerDetails ?? null,
     priority: row.priority,
     remarks: row.remarks ?? null,
     bom: (() => {
-      try { return row.bom ? JSON.parse(row.bom) : null; } catch { return row.bom || null; }
+      try {
+        return row.bom ? JSON.parse(row.bom) : null;
+      } catch {
+        return row.bom || null;
+      }
     })(),
-    otherAttachments: (otherFilesList || []).map(f => ({
+    otherAttachments: (otherFilesList || []).map((f) => ({
       id: f.id,
       title: f.title || null,
       fileName: f.fileName,
@@ -1656,25 +1842,50 @@ function snapshotForHistory(row, otherFilesList) {
   };
 }
 
-// Deep-ish equality via JSON
+// function to do deep equality check of two values
 function isEqual(a, b) {
-  try { return JSON.stringify(a) === JSON.stringify(b); } catch { return String(a) === String(b); }
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return String(a) === String(b);
+  }
 }
-//   S A L E S   R E Q U E S T S   C R U D
-// ─────────────────────────────────────────────────────────────────────────────
 
-// Field names expected from your React FormData:
+// function to generate a project code
+function makeProjectCode({
+  customerName,
+  rfqOrderQtyMW,
+  projectLocation,
+  date = new Date(),
+}) {
+  const slug = (s) =>
+    String(s || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9-]/g, "");
+  const yyyy = date.getUTCFullYear();
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+  const qty = Number(rfqOrderQtyMW || 0);
+  return `${slug(customerName)}_${qty}MW_${slug(
+    projectLocation
+  )}_${yyyy}${mm}${dd}`.slice(0, 50);
+}
+
+// helper multer middleware to handle multiple file fields
 const salesRequestUpload = upload.fields([
   { name: "qapTypeAttachment", maxCount: 1 },
   { name: "primaryBomAttachment", maxCount: 1 },
   { name: "otherAttachments", maxCount: 50 }, // multiple additional files
 ]);
 
-// Map a DB row + its child files to the API shape your UI expects
+// function to inflate a sales request row from DB + associated files into API response
 function inflateSalesRequestRow(row, filesMap) {
   const files = filesMap ? filesMap[row.id] || [] : [];
   return {
     id: row.id,
+    projectCode: row.projectCode,
     customerName: row.customerName,
     isNewCustomer: row.isNewCustomer,
     moduleManufacturingPlant: row.moduleManufacturingPlant,
@@ -1721,17 +1932,21 @@ function inflateSalesRequestRow(row, filesMap) {
   };
 }
 
-// LIST all
+// GET /api/sales-requests → list all sales requests
 app.get("/api/sales-requests", authenticateToken, async (req, res) => {
   try {
+    const { projectCode } = req.query || {};
     let masters = [];
     await tryMssql(async (db) => {
       if (db === mssqlPool) {
-        masters = (
-          await mssqlPool
-            .request()
-            .query("SELECT * FROM SalesRequests ORDER BY createdAt DESC")
-        ).recordset;
+        let rq = mssqlPool.request();
+        let sqlText = "SELECT * FROM SalesRequests";
+        if (projectCode) {
+          rq = rq.input("pc", sql.NVarChar, String(projectCode));
+          sqlText += " WHERE projectCode=@pc";
+        }
+        sqlText += " ORDER BY createdAt DESC";
+        masters = (await rq.query(sqlText)).recordset;
       }
     });
 
@@ -1765,7 +1980,7 @@ app.get("/api/sales-requests", authenticateToken, async (req, res) => {
   }
 });
 
-// GET one
+// GET /api/sales-requests/:id → get a specific sales request by ID
 app.get(
   "/api/sales-requests/:id",
   authenticateToken,
@@ -1809,7 +2024,7 @@ app.get(
   }
 );
 
-// CREATE
+// POST /api/sales-requests → create a new sales request
 app.post(
   "/api/sales-requests",
   authenticateToken,
@@ -1817,10 +2032,12 @@ app.post(
   async (req, res) => {
     const f = req.body; // multipart fields arrive as strings
 
-    // files
+    // uploaded files
     const qapTypeFile = (req.files?.qapTypeAttachment || [])[0];
     const primaryBomFile = (req.files?.primaryBomAttachment || [])[0];
     const otherFiles = req.files?.otherAttachments || [];
+
+    // optional titles for "otherAttachments"
     let otherTitles = [];
     try {
       otherTitles = JSON.parse(f.otherAttachmentTitles || "[]");
@@ -1832,136 +2049,139 @@ app.post(
     const newId = require("crypto").randomUUID();
     const now = new Date();
     const createdBy = req.user?.username || f.createdBy || "sales";
+    const actor = req.user?.username || createdBy; // who to log in history
 
+    const code = makeProjectCode({
+      customerName: f.customerName,
+      rfqOrderQtyMW: f.rfqOrderQtyMW,
+      projectLocation: f.projectLocation,
+      date: now,
+    });
+
+    const tx = new sql.Transaction(mssqlPool);
     try {
-      await tryMssql(async (db) => {
-        if (db !== mssqlPool) return;
+      await tx.begin();
 
-        // master insert
-        const rq = mssqlPool
-          .request()
-          .input("id", sql.UniqueIdentifier, newId)
-          .input("customerName", sql.NVarChar, f.customerName?.trim() || "")
-          .input("isNewCustomer", sql.NVarChar, yesNo(f.isNewCustomer))
-          .input(
-            "moduleManufacturingPlant",
-            sql.NVarChar,
-            (f.moduleManufacturingPlant || "").toLowerCase()
-          )
-          .input(
-            "moduleOrderType",
-            sql.NVarChar,
-            (f.moduleOrderType || "").toLowerCase()
-          )
-          .input("cellType", sql.NVarChar, f.cellType || "DCR")
-          .input("wattageBinning", sql.Int, intOrNull(f.wattageBinning) ?? 0)
-          .input("rfqOrderQtyMW", sql.Int, intOrNull(f.rfqOrderQtyMW) ?? 0)
-          .input(
-            "premierBiddedOrderQtyMW",
-            sql.Int,
-            intOrNull(f.premierBiddedOrderQtyMW)
-          )
-          .input("deliveryStartDate", sql.Date, f.deliveryStartDate)
-          .input("deliveryEndDate", sql.Date, f.deliveryEndDate)
-          .input(
-            "projectLocation",
-            sql.NVarChar,
-            f.projectLocation?.trim() || ""
-          )
-          .input(
-            "cableLengthRequired",
-            sql.Int,
-            intOrNull(f.cableLengthRequired) ?? 0
-          )
-          .input("qapType", sql.NVarChar, f.qapType || "Customer")
-          .input(
-            "qapTypeAttachmentName",
-            sql.NVarChar,
-            qapTypeFile?.filename || null
-          )
-          .input(
-            "qapTypeAttachmentUrl",
-            sql.NVarChar,
-            qapTypeFile ? fileUrl(qapTypeFile.filename) : null
-          )
-          .input("primaryBom", sql.NVarChar, yesNo(f.primaryBom))
-          .input(
-            "primaryBomAttachmentName",
-            sql.NVarChar,
-            primaryBomFile?.filename || null
-          )
-          .input(
-            "primaryBomAttachmentUrl",
-            sql.NVarChar,
-            primaryBomFile ? fileUrl(primaryBomFile.filename) : null
-          )
-          .input("inlineInspection", sql.NVarChar, yesNo(f.inlineInspection))
-          .input("cellProcuredBy", sql.NVarChar, f.cellProcuredBy || "Customer")
-          .input("agreedCTM", sql.Decimal(18, 8), decOrZero(f.agreedCTM))
-          .input(
-            "factoryAuditTentativeDate",
-            sql.Date,
-            f.factoryAuditTentativeDate || null
-          )
-          .input("xPitchMm", sql.Int, intOrNull(f.xPitchMm))
-          .input("trackerDetails", sql.Int, intOrNull(f.trackerDetails))
-          .input("priority", sql.NVarChar, f.priority || "low")
-          .input("remarks", sql.NVarChar, f.remarks || null)
-          .input("createdBy", sql.NVarChar, createdBy)
-          .input("createdAt", sql.DateTime2, now)
-          .input("bom", sql.NVarChar, f.bom || null);
+      // 1) insert master
+      const rq = tx
+        .request()
+        .input("id", sql.UniqueIdentifier, newId)
+        .input("customerName", sql.NVarChar, f.customerName?.trim() || "")
+        .input("isNewCustomer", sql.NVarChar, yesNo(f.isNewCustomer))
+        .input(
+          "moduleManufacturingPlant",
+          sql.NVarChar,
+          (f.moduleManufacturingPlant || "").toLowerCase()
+        )
+        .input(
+          "moduleOrderType",
+          sql.NVarChar,
+          (f.moduleOrderType || "").toLowerCase()
+        )
+        .input("cellType", sql.NVarChar, f.cellType || "DCR")
+        .input("wattageBinning", sql.Int, intOrNull(f.wattageBinning) ?? 0)
+        .input("rfqOrderQtyMW", sql.Int, intOrNull(f.rfqOrderQtyMW) ?? 0)
+        .input(
+          "premierBiddedOrderQtyMW",
+          sql.Int,
+          intOrNull(f.premierBiddedOrderQtyMW)
+        )
+        .input("deliveryStartDate", sql.Date, f.deliveryStartDate)
+        .input("deliveryEndDate", sql.Date, f.deliveryEndDate)
+        .input("projectLocation", sql.NVarChar, f.projectLocation?.trim() || "")
+        .input(
+          "cableLengthRequired",
+          sql.Int,
+          intOrNull(f.cableLengthRequired) ?? 0
+        )
+        .input("qapType", sql.NVarChar, f.qapType || "Customer")
+        .input(
+          "qapTypeAttachmentName",
+          sql.NVarChar,
+          qapTypeFile?.filename || null
+        )
+        .input(
+          "qapTypeAttachmentUrl",
+          sql.NVarChar,
+          qapTypeFile ? fileUrl(qapTypeFile.filename) : null
+        )
+        .input("primaryBom", sql.NVarChar, yesNo(f.primaryBom))
+        .input(
+          "primaryBomAttachmentName",
+          sql.NVarChar,
+          primaryBomFile?.filename || null
+        )
+        .input(
+          "primaryBomAttachmentUrl",
+          sql.NVarChar,
+          primaryBomFile ? fileUrl(primaryBomFile.filename) : null
+        )
+        .input("inlineInspection", sql.NVarChar, yesNo(f.inlineInspection))
+        .input("cellProcuredBy", sql.NVarChar, f.cellProcuredBy || "Customer")
+        .input("agreedCTM", sql.Decimal(18, 8), decOrZero(f.agreedCTM))
+        .input(
+          "factoryAuditTentativeDate",
+          sql.Date,
+          f.factoryAuditTentativeDate || null
+        )
+        .input("xPitchMm", sql.Int, intOrNull(f.xPitchMm))
+        .input("trackerDetails", sql.Int, intOrNull(f.trackerDetails))
+        .input("priority", sql.NVarChar, f.priority || "low")
+        .input("remarks", sql.NVarChar, f.remarks || null)
+        .input("createdBy", sql.NVarChar, createdBy)
+        .input("createdAt", sql.DateTime2, now)
+        .input("projectCode", sql.NVarChar, code)
+        .input("bom", sql.NVarChar, f.bom || null);
 
-        await rq.query(`
-          INSERT INTO SalesRequests (
-            id, customerName, isNewCustomer, moduleManufacturingPlant,
-            moduleOrderType, cellType, wattageBinning, rfqOrderQtyMW,
-            premierBiddedOrderQtyMW, deliveryStartDate, deliveryEndDate,
-            projectLocation, cableLengthRequired, qapType,
-            qapTypeAttachmentName, qapTypeAttachmentUrl,
-            primaryBom, primaryBomAttachmentName, primaryBomAttachmentUrl,
-            inlineInspection, cellProcuredBy, agreedCTM, factoryAuditTentativeDate,
-            xPitchMm, trackerDetails, priority, remarks, createdBy, createdAt, bom
-          )
-          VALUES (
-            @id, @customerName, @isNewCustomer, @moduleManufacturingPlant,
-            @moduleOrderType, @cellType, @wattageBinning, @rfqOrderQtyMW,
-            @premierBiddedOrderQtyMW, @deliveryStartDate, @deliveryEndDate,
-            @projectLocation, @cableLengthRequired, @qapType,
-            @qapTypeAttachmentName, @qapTypeAttachmentUrl,
-            @primaryBom, @primaryBomAttachmentName, @primaryBomAttachmentUrl,
-            @inlineInspection, @cellProcuredBy, @agreedCTM, @factoryAuditTentativeDate,
-            @xPitchMm, @trackerDetails, @priority, @remarks, @createdBy, @createdAt, @bom
-          );
-        `);
+      await rq.query(`
+        INSERT INTO SalesRequests (
+          id, customerName, isNewCustomer, moduleManufacturingPlant,
+          moduleOrderType, cellType, wattageBinning, rfqOrderQtyMW,
+          premierBiddedOrderQtyMW, deliveryStartDate, deliveryEndDate,
+          projectLocation, cableLengthRequired, qapType,
+          qapTypeAttachmentName, qapTypeAttachmentUrl,
+          primaryBom, primaryBomAttachmentName, primaryBomAttachmentUrl,
+          inlineInspection, cellProcuredBy, agreedCTM, factoryAuditTentativeDate,
+          xPitchMm, trackerDetails, priority, remarks, createdBy, createdAt, bom, projectCode
+        )
+        VALUES (
+          @id, @customerName, @isNewCustomer, @moduleManufacturingPlant,
+          @moduleOrderType, @cellType, @wattageBinning, @rfqOrderQtyMW,
+          @premierBiddedOrderQtyMW, @deliveryStartDate, @deliveryEndDate,
+          @projectLocation, @cableLengthRequired, @qapType,
+          @qapTypeAttachmentName, @qapTypeAttachmentUrl,
+          @primaryBom, @primaryBomAttachmentName, @primaryBomAttachmentUrl,
+          @inlineInspection, @cellProcuredBy, @agreedCTM, @factoryAuditTentativeDate,
+          @xPitchMm, @trackerDetails, @priority, @remarks, @createdBy, @createdAt, @bom, @projectCode
+        );
+      `);
 
-        // child files (otherAttachments)
-        if (otherFiles.length) {
-          for (let i = 0; i < otherFiles.length; i++) {
-            const ffile = otherFiles[i];
-            const title = (otherTitles[i] || "").trim();
-            await mssqlPool
-              .request()
-              .input("srid", sql.UniqueIdentifier, newId)
-              .input("title", sql.NVarChar, title || null)
-              .input("fn", sql.NVarChar, ffile.filename)
-              .input("url", sql.NVarChar, fileUrl(ffile.filename)).query(`
-                INSERT INTO SalesRequestFiles (salesRequestId, title, fileName, url)
-                VALUES (@srid, @title, @fn, @url);
-              `);
-          }
+      // 2) insert child files (otherAttachments)
+      if (otherFiles.length) {
+        for (let i = 0; i < otherFiles.length; i++) {
+          const ffile = otherFiles[i];
+          const title = (otherTitles[i] || "").trim();
+          await tx
+            .request()
+            .input("srid", sql.UniqueIdentifier, newId)
+            .input("title", sql.NVarChar, title || null)
+            .input("fn", sql.NVarChar, ffile.filename)
+            .input("url", sql.NVarChar, fileUrl(ffile.filename)).query(`
+              INSERT INTO SalesRequestFiles (salesRequestId, title, fileName, url)
+              VALUES (@srid, @title, @fn, @url);
+            `);
         }
-      });
+      }
 
-      // return the created entity
+      // 3) fetch fresh row + files and write history
       const row = (
-        await mssqlPool
+        await tx
           .request()
           .input("id", sql.UniqueIdentifier, newId)
           .query("SELECT * FROM SalesRequests WHERE id=@id")
       ).recordset[0];
-
       const files = (
-        await mssqlPool
+        await tx
           .request()
           .input("id", sql.UniqueIdentifier, newId)
           .query(
@@ -1969,19 +2189,40 @@ app.post(
           )
       ).recordset;
 
-      res.status(201).json(inflateSalesRequestRow(row, { [newId]: files }));
+      const afterSnap = snapshotForHistory(row, files);
+      const changes = Object.keys(afterSnap).map((k) => ({
+        field: k,
+        before: null,
+        after: afterSnap[k],
+      }));
+
+      await tx
+        .request()
+        .input("sid", sql.UniqueIdentifier, newId)
+        .input("act", sql.NVarChar, "create")
+        .input("by", sql.NVarChar, actor)
+        .input("chg", sql.NVarChar, JSON.stringify(changes)).query(`
+          INSERT INTO SalesRequestHistory (salesRequestId, action, changedBy, changes)
+          VALUES (@sid, @act, @by, @chg);
+        `);
+
+      await tx.commit();
+
+      // respond with the created entity
+      return res
+        .status(201)
+        .json(inflateSalesRequestRow(row, { [newId]: files }));
     } catch (e) {
+      try {
+        await tx.rollback();
+      } catch {}
       console.error("POST /api/sales-requests error:", e);
-      res.status(500).json({ message: "Server error" });
+      return res.status(500).json({ message: "Server error" });
     }
   }
 );
 
-// UPDATE (multipart: replace single attachments if sent; append other files; update fields if provided)
-// Optional flags:
-//   removeQapTypeAttachment=true|1
-//   removePrimaryBomAttachment=true|1
-//   removeOtherAttachmentIds=[1,2,3]   (IDs from SalesRequestFiles.id)
+// PUT /api/sales-requests/:id → update an existing sales request
 app.put(
   "/api/sales-requests/:id",
   authenticateToken,
@@ -2017,20 +2258,40 @@ app.put(
         removeOtherIds = tmp.filter((x) => Number.isInteger(x));
     } catch {}
 
+    const actor = req.user?.username || "sales";
+    const tx = new sql.Transaction(mssqlPool);
+
+    // we will delete physical files only AFTER commit succeeds
+    const filesToUnlink = [];
+
     try {
-      // fetch current row for cleaning files if removed/replaced
-      const cur = (
-        await mssqlPool
+      await tx.begin();
+
+      // A) current row + files (BEFORE snapshot)
+      const beforeRow = (
+        await tx
           .request()
           .input("id", sql.UniqueIdentifier, id)
           .query("SELECT * FROM SalesRequests WHERE id=@id")
       ).recordset[0];
-      if (!cur) return res.status(404).json({ message: "Not found" });
+      if (!beforeRow) {
+        await tx.rollback();
+        return res.status(404).json({ message: "Not found" });
+      }
+      const beforeFiles = (
+        await tx
+          .request()
+          .input("id", sql.UniqueIdentifier, id)
+          .query(
+            "SELECT * FROM SalesRequestFiles WHERE salesRequestId=@id ORDER BY id"
+          )
+      ).recordset;
+      const beforeSnap = snapshotForHistory(beforeRow, beforeFiles);
 
+      // B) build master UPDATE
       const fields = [];
-      const reqt = mssqlPool.request().input("id", sql.UniqueIdentifier, id);
+      let reqt = tx.request().input("id", sql.UniqueIdentifier, id);
 
-      // Basic updatable fields (only apply if provided)
       const candidates = pick(f, [
         "customerName",
         "isNewCustomer",
@@ -2057,10 +2318,9 @@ app.put(
         "bom",
       ]);
 
-      // normalize & bind
       if (candidates.customerName !== undefined) {
         fields.push("customerName=@customerName");
-        reqt.input(
+        reqt = reqt.input(
           "customerName",
           sql.NVarChar,
           candidates.customerName.trim()
@@ -2068,7 +2328,7 @@ app.put(
       }
       if (candidates.isNewCustomer !== undefined) {
         fields.push("isNewCustomer=@isNewCustomer");
-        reqt.input(
+        reqt = reqt.input(
           "isNewCustomer",
           sql.NVarChar,
           yesNo(candidates.isNewCustomer)
@@ -2076,7 +2336,7 @@ app.put(
       }
       if (candidates.moduleManufacturingPlant !== undefined) {
         fields.push("moduleManufacturingPlant=@moduleManufacturingPlant");
-        reqt.input(
+        reqt = reqt.input(
           "moduleManufacturingPlant",
           sql.NVarChar,
           candidates.moduleManufacturingPlant.toLowerCase()
@@ -2084,7 +2344,7 @@ app.put(
       }
       if (candidates.moduleOrderType !== undefined) {
         fields.push("moduleOrderType=@moduleOrderType");
-        reqt.input(
+        reqt = reqt.input(
           "moduleOrderType",
           sql.NVarChar,
           candidates.moduleOrderType.toLowerCase()
@@ -2092,11 +2352,11 @@ app.put(
       }
       if (candidates.cellType !== undefined) {
         fields.push("cellType=@cellType");
-        reqt.input("cellType", sql.NVarChar, candidates.cellType);
+        reqt = reqt.input("cellType", sql.NVarChar, candidates.cellType);
       }
       if (candidates.wattageBinning !== undefined) {
         fields.push("wattageBinning=@wattageBinning");
-        reqt.input(
+        reqt = reqt.input(
           "wattageBinning",
           sql.Int,
           intOrNull(candidates.wattageBinning) ?? 0
@@ -2104,7 +2364,7 @@ app.put(
       }
       if (candidates.rfqOrderQtyMW !== undefined) {
         fields.push("rfqOrderQtyMW=@rfqOrderQtyMW");
-        reqt.input(
+        reqt = reqt.input(
           "rfqOrderQtyMW",
           sql.Int,
           intOrNull(candidates.rfqOrderQtyMW) ?? 0
@@ -2112,7 +2372,7 @@ app.put(
       }
       if (candidates.premierBiddedOrderQtyMW !== undefined) {
         fields.push("premierBiddedOrderQtyMW=@premierBiddedOrderQtyMW");
-        reqt.input(
+        reqt = reqt.input(
           "premierBiddedOrderQtyMW",
           sql.Int,
           intOrNull(candidates.premierBiddedOrderQtyMW)
@@ -2120,7 +2380,7 @@ app.put(
       }
       if (candidates.deliveryStartDate !== undefined) {
         fields.push("deliveryStartDate=@deliveryStartDate");
-        reqt.input(
+        reqt = reqt.input(
           "deliveryStartDate",
           sql.Date,
           candidates.deliveryStartDate || null
@@ -2128,7 +2388,7 @@ app.put(
       }
       if (candidates.deliveryEndDate !== undefined) {
         fields.push("deliveryEndDate=@deliveryEndDate");
-        reqt.input(
+        reqt = reqt.input(
           "deliveryEndDate",
           sql.Date,
           candidates.deliveryEndDate || null
@@ -2136,7 +2396,7 @@ app.put(
       }
       if (candidates.projectLocation !== undefined) {
         fields.push("projectLocation=@projectLocation");
-        reqt.input(
+        reqt = reqt.input(
           "projectLocation",
           sql.NVarChar,
           candidates.projectLocation.trim()
@@ -2144,7 +2404,7 @@ app.put(
       }
       if (candidates.cableLengthRequired !== undefined) {
         fields.push("cableLengthRequired=@cableLengthRequired");
-        reqt.input(
+        reqt = reqt.input(
           "cableLengthRequired",
           sql.Int,
           intOrNull(candidates.cableLengthRequired) ?? 0
@@ -2152,15 +2412,19 @@ app.put(
       }
       if (candidates.qapType !== undefined) {
         fields.push("qapType=@qapType");
-        reqt.input("qapType", sql.NVarChar, candidates.qapType);
+        reqt = reqt.input("qapType", sql.NVarChar, candidates.qapType);
       }
       if (candidates.primaryBom !== undefined) {
         fields.push("primaryBom=@primaryBom");
-        reqt.input("primaryBom", sql.NVarChar, yesNo(candidates.primaryBom));
+        reqt = reqt.input(
+          "primaryBom",
+          sql.NVarChar,
+          yesNo(candidates.primaryBom)
+        );
       }
       if (candidates.inlineInspection !== undefined) {
         fields.push("inlineInspection=@inlineInspection");
-        reqt.input(
+        reqt = reqt.input(
           "inlineInspection",
           sql.NVarChar,
           yesNo(candidates.inlineInspection)
@@ -2168,11 +2432,15 @@ app.put(
       }
       if (candidates.cellProcuredBy !== undefined) {
         fields.push("cellProcuredBy=@cellProcuredBy");
-        reqt.input("cellProcuredBy", sql.NVarChar, candidates.cellProcuredBy);
+        reqt = reqt.input(
+          "cellProcuredBy",
+          sql.NVarChar,
+          candidates.cellProcuredBy
+        );
       }
       if (candidates.agreedCTM !== undefined) {
         fields.push("agreedCTM=@agreedCTM");
-        reqt.input(
+        reqt = reqt.input(
           "agreedCTM",
           sql.Decimal(18, 8),
           decOrZero(candidates.agreedCTM)
@@ -2180,7 +2448,7 @@ app.put(
       }
       if (candidates.factoryAuditTentativeDate !== undefined) {
         fields.push("factoryAuditTentativeDate=@factoryAuditTentativeDate");
-        reqt.input(
+        reqt = reqt.input(
           "factoryAuditTentativeDate",
           sql.Date,
           candidates.factoryAuditTentativeDate || null
@@ -2188,11 +2456,11 @@ app.put(
       }
       if (candidates.xPitchMm !== undefined) {
         fields.push("xPitchMm=@xPitchMm");
-        reqt.input("xPitchMm", sql.Int, intOrNull(candidates.xPitchMm));
+        reqt = reqt.input("xPitchMm", sql.Int, intOrNull(candidates.xPitchMm));
       }
       if (candidates.trackerDetails !== undefined) {
         fields.push("trackerDetails=@trackerDetails");
-        reqt.input(
+        reqt = reqt.input(
           "trackerDetails",
           sql.Int,
           intOrNull(candidates.trackerDetails)
@@ -2200,77 +2468,96 @@ app.put(
       }
       if (candidates.priority !== undefined) {
         fields.push("priority=@priority");
-        reqt.input("priority", sql.NVarChar, candidates.priority);
+        reqt = reqt.input("priority", sql.NVarChar, candidates.priority);
       }
       if (candidates.remarks !== undefined) {
         fields.push("remarks=@remarks");
-        reqt.input("remarks", sql.NVarChar, candidates.remarks || null);
+        reqt = reqt.input("remarks", sql.NVarChar, candidates.remarks || null);
       }
       if (candidates.bom !== undefined) {
         fields.push("bom=@bom");
-        reqt.input("bom", sql.NVarChar, candidates.bom || null);
+        reqt = reqt.input("bom", sql.NVarChar, candidates.bom || null);
       }
 
-      // attachment field updates
+      // ── projectCode: recompute when key inputs change ───────────────────────
+      const nameChanged = candidates.customerName !== undefined;
+      const qtyChanged = candidates.rfqOrderQtyMW !== undefined;
+      const locChanged = candidates.projectLocation !== undefined;
+
+      if (nameChanged || qtyChanged || locChanged) {
+        const effective = {
+          customerName:
+            candidates.customerName !== undefined
+              ? String(candidates.customerName)
+              : beforeRow.customerName,
+          rfqOrderQtyMW:
+            candidates.rfqOrderQtyMW !== undefined
+              ? candidates.rfqOrderQtyMW
+              : beforeRow.rfqOrderQtyMW,
+          projectLocation:
+            candidates.projectLocation !== undefined
+              ? String(candidates.projectLocation)
+              : beforeRow.projectLocation,
+        };
+        const newCode = makeProjectCode({ ...effective, date: new Date() });
+        fields.push("projectCode=@projectCode");
+        reqt = reqt.input("projectCode", sql.NVarChar, newCode);
+      }
+
+      // attachment field changes
       if (removeQap) {
         fields.push("qapTypeAttachmentName=NULL", "qapTypeAttachmentUrl=NULL");
-        if (cur.qapTypeAttachmentName) {
-          fs.unlink(path.join(uploadDir, cur.qapTypeAttachmentName), () => {});
-        }
+        if (beforeRow.qapTypeAttachmentName)
+          filesToUnlink.push(beforeRow.qapTypeAttachmentName);
       }
       if (removePrimary) {
         fields.push(
           "primaryBomAttachmentName=NULL",
           "primaryBomAttachmentUrl=NULL"
         );
-        if (cur.primaryBomAttachmentName) {
-          fs.unlink(
-            path.join(uploadDir, cur.primaryBomAttachmentName),
-            () => {}
-          );
-        }
+        if (beforeRow.primaryBomAttachmentName)
+          filesToUnlink.push(beforeRow.primaryBomAttachmentName);
       }
       if (qapTypeFile) {
         fields.push(
           "qapTypeAttachmentName=@qapTypeAttachmentName",
           "qapTypeAttachmentUrl=@qapTypeAttachmentUrl"
         );
-        reqt.input("qapTypeAttachmentName", sql.NVarChar, qapTypeFile.filename);
-        reqt.input(
-          "qapTypeAttachmentUrl",
-          sql.NVarChar,
-          fileUrl(qapTypeFile.filename)
-        );
-        if (cur.qapTypeAttachmentName)
-          fs.unlink(path.join(uploadDir, cur.qapTypeAttachmentName), () => {});
+        reqt = reqt
+          .input("qapTypeAttachmentName", sql.NVarChar, qapTypeFile.filename)
+          .input(
+            "qapTypeAttachmentUrl",
+            sql.NVarChar,
+            fileUrl(qapTypeFile.filename)
+          );
+        if (beforeRow.qapTypeAttachmentName)
+          filesToUnlink.push(beforeRow.qapTypeAttachmentName);
       }
       if (primaryBomFile) {
         fields.push(
           "primaryBomAttachmentName=@primaryBomAttachmentName",
           "primaryBomAttachmentUrl=@primaryBomAttachmentUrl"
         );
-        reqt.input(
-          "primaryBomAttachmentName",
-          sql.NVarChar,
-          primaryBomFile.filename
-        );
-        reqt.input(
-          "primaryBomAttachmentUrl",
-          sql.NVarChar,
-          fileUrl(primaryBomFile.filename)
-        );
-        if (cur.primaryBomAttachmentName)
-          fs.unlink(
-            path.join(uploadDir, cur.primaryBomAttachmentName),
-            () => {}
+        reqt = reqt
+          .input(
+            "primaryBomAttachmentName",
+            sql.NVarChar,
+            primaryBomFile.filename
+          )
+          .input(
+            "primaryBomAttachmentUrl",
+            sql.NVarChar,
+            fileUrl(primaryBomFile.filename)
           );
+        if (beforeRow.primaryBomAttachmentName)
+          filesToUnlink.push(beforeRow.primaryBomAttachmentName);
       }
 
       if (!fields.length && !otherFiles.length && !removeOtherIds.length) {
+        await tx.rollback();
         return res.status(400).json({ message: "Nothing to update" });
       }
 
-      // update master
       if (fields.length) {
         await reqt.query(
           `UPDATE SalesRequests SET ${fields.join(
@@ -2279,10 +2566,10 @@ app.put(
         );
       }
 
-      // remove selected other files (by id)
+      // C) remove selected other files (by id)
       if (removeOtherIds.length) {
         const existing = (
-          await mssqlPool
+          await tx
             .request()
             .input("id", sql.UniqueIdentifier, id)
             .query(
@@ -2292,24 +2579,22 @@ app.put(
         const toRemove = existing.filter((r) => removeOtherIds.includes(r.id));
         if (toRemove.length) {
           const inClause = toRemove.map((_, i) => `@rid${i}`).join(",");
-          let delReq = mssqlPool.request();
+          let delReq = tx.request();
           toRemove.forEach(
             (r, i) => (delReq = delReq.input(`rid${i}`, sql.Int, r.id))
           );
           await delReq.query(
             `DELETE FROM SalesRequestFiles WHERE id IN (${inClause})`
           );
-          toRemove.forEach((r) =>
-            fs.unlink(path.join(uploadDir, r.fileName), () => {})
-          );
+          toRemove.forEach((r) => filesToUnlink.push(r.fileName));
         }
       }
 
-      // append new other files
+      // D) append new other files
       for (let i = 0; i < otherFiles.length; i++) {
         const ff = otherFiles[i];
         const title = (otherTitles[i] || "").trim();
-        await mssqlPool
+        await tx
           .request()
           .input("srid", sql.UniqueIdentifier, id)
           .input("title", sql.NVarChar, title || null)
@@ -2320,30 +2605,69 @@ app.put(
           );
       }
 
-      // return updated
-      const row = (
-        await mssqlPool
+      // E) AFTER snapshot + history
+      const afterRow = (
+        await tx
           .request()
           .input("id", sql.UniqueIdentifier, id)
           .query("SELECT * FROM SalesRequests WHERE id=@id")
       ).recordset[0];
-      const files = (
-        await mssqlPool
+      const afterFiles = (
+        await tx
           .request()
           .input("id", sql.UniqueIdentifier, id)
           .query(
             "SELECT * FROM SalesRequestFiles WHERE salesRequestId=@id ORDER BY id"
           )
       ).recordset;
-      res.json(inflateSalesRequestRow(row, { [id]: files }));
+
+      const afterSnap = snapshotForHistory(afterRow, afterFiles);
+      const allKeys = Array.from(
+        new Set([...Object.keys(beforeSnap), ...Object.keys(afterSnap)])
+      );
+      const changes = allKeys.reduce((arr, k) => {
+        if (!isEqual(beforeSnap[k], afterSnap[k])) {
+          arr.push({
+            field: k,
+            before: beforeSnap[k] ?? null,
+            after: afterSnap[k] ?? null,
+          });
+        }
+        return arr;
+      }, []);
+
+      if (changes.length) {
+        await tx
+          .request()
+          .input("sid", sql.UniqueIdentifier, id)
+          .input("act", sql.NVarChar, "update")
+          .input("by", sql.NVarChar, actor)
+          .input("chg", sql.NVarChar, JSON.stringify(changes)).query(`
+            INSERT INTO SalesRequestHistory (salesRequestId, action, changedBy, changes)
+            VALUES (@sid, @act, @by, @chg);
+          `);
+      }
+
+      await tx.commit();
+
+      // F) only now delete physical files (best-effort)
+      filesToUnlink.forEach((fn) =>
+        fs.unlink(path.join(uploadDir, fn), () => {})
+      );
+
+      // respond
+      return res.json(inflateSalesRequestRow(afterRow, { [id]: afterFiles }));
     } catch (e) {
+      try {
+        await tx.rollback();
+      } catch {}
       console.error("PUT /api/sales-requests/:id error:", e);
-      res.status(500).json({ message: "Server error" });
+      return res.status(500).json({ message: "Server error" });
     }
   }
 );
 
-// DELETE
+// DELETE /api/sales-requests/:id → delete a sales request
 app.delete(
   "/api/sales-requests/:id",
   authenticateToken,
@@ -2399,21 +2723,74 @@ app.delete(
   }
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
-//   ───   S T A R T   S E R V E R   ─────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────────
-/* ----------------------------------------------------------
- * HTTPS boot – same port for FE & API
- * -------------------------------------------------------- */
+// GET /api/sales-requests/:id/history → get change history for a sales request
+app.get(
+  "/api/sales-requests/:id/history",
+  authenticateToken,
+  param("id").isUUID(),
+  handleValidation,
+  async (req, res) => {
+    const { id } = req.params;
+    try {
+      const rows = (
+        await mssqlPool
+          .request()
+          .input("id", sql.UniqueIdentifier, id)
+          .query(
+            "SELECT id, salesRequestId, action, changedBy, changedAt, changes FROM SalesRequestHistory WHERE salesRequestId=@id ORDER BY changedAt DESC, id DESC"
+          )
+      ).recordset;
+
+      const parsed = rows.map((r) => ({
+        id: r.id,
+        salesRequestId: r.salesRequestId,
+        action: r.action,
+        changedBy: r.changedBy,
+        changedAt: r.changedAt,
+        changes: (() => {
+          try {
+            return r.changes ? JSON.parse(r.changes) : [];
+          } catch {
+            return [];
+          }
+        })(),
+      }));
+
+      res.json(parsed);
+    } catch (e) {
+      console.error("GET /api/sales-requests/:id/history error:", e);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+
+// GET /api/project-codes  (distinct non-empty codes for dropdown)
+app.get("/api/project-codes", authenticateToken, async (_req, res) => {
+  try {
+    const { recordset } = await mssqlPool
+      .request()
+      .query(
+        "SELECT DISTINCT projectCode FROM SalesRequests WHERE projectCode IS NOT NULL AND projectCode <> '' ORDER BY projectCode"
+      );
+    res.json(recordset.map((r) => r.projectCode));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// certificates for HTTPS
 const httpsOptions = {
   key: fs.readFileSync(path.join(__dirname, "certs", "mydomain.key")),
   cert: fs.readFileSync(path.join(__dirname, "certs", "d466aacf3db3f299.crt")),
   ca: fs.readFileSync(path.join(__dirname, "certs", "gd_bundle-g2-g1.crt")),
 };
 
+// environment
 const PORT = Number(process.env.PORT) || 11443;
 const HOST = process.env.HOST || "0.0.0.0";
 
+// start server
 async function start() {
   try {
     await initDatabases();

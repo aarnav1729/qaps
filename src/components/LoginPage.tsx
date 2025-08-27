@@ -26,6 +26,10 @@ const LoginPage: React.FC = () => {
 
   const demoUsers = [
     {
+      category: "Sales",
+      users: [{ username: "sales", password: "sales", role: "Sales" }],
+    },
+    {
       category: "Level 1 - Requestors",
       users: [
         { username: "praful", password: "praful", role: "Requestor" },

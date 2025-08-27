@@ -22,6 +22,67 @@ import {
 import { QAPFormData, QAPSpecification } from "@/types/qap";
 import { useAuth } from "@/contexts/AuthContext";
 
+/* ───────────────────────────────────────────────────────────── */
+/* Local lightweight types just for rendering the BOM tab        */
+/* (Keeps this page decoupled from Sales types/modules)          */
+/* ───────────────────────────────────────────────────────────── */
+type YesNo = "yes" | "no";
+type SalesRequestLite = {
+  id: string;
+  projectCode?: string;
+  customerName: string;
+  isNewCustomer: YesNo;
+  moduleManufacturingPlant: string;
+  moduleOrderType: string;
+  cellType: string;
+  wattageBinning: number;
+  rfqOrderQtyMW: number;
+  premierBiddedOrderQtyMW?: number | null;
+  deliveryStartDate: string;
+  deliveryEndDate: string;
+  projectLocation: string;
+  cableLengthRequired: number;
+  qapType: "Customer" | "Premier Energies";
+  qapTypeAttachmentUrl?: string | null;
+  primaryBom: YesNo;
+  primaryBomAttachmentUrl?: string | null;
+  inlineInspection: YesNo;
+  cellProcuredBy: "Customer" | "Premier Energies";
+  agreedCTM: number;
+  factoryAuditTentativeDate?: string | null;
+  xPitchMm?: number | null;
+  trackerDetails?: number | null;
+  priority: "high" | "low";
+  remarks?: string | null;
+  otherAttachments?: { title: string; url: string }[];
+  createdBy: string;
+  createdAt: string;
+  bom?: {
+    vendorName: string;
+    rfidLocation: string;
+    technologyProposed: string;
+    vendorAddress?: string;
+    documentRef: string;
+    moduleWattageWp: number;
+    moduleDimensionsOption: string;
+    moduleModelNumber: string;
+    components?: {
+      name: string;
+      rows: { model: string; subVendor?: string | null; spec?: string | null }[];
+    }[];
+  } | null;
+};
+
+const FieldRow: React.FC<{ label: string; value: React.ReactNode }> = ({
+  label,
+  value,
+}) => (
+  <div className="flex flex-col">
+    <span className="text-gray-500">{label}</span>
+    <span className="font-medium text-gray-900">{value ?? "-"}</span>
+  </div>
+);
+
 /* ─────────────────────────────────────────────── */
 /* props                                           */
 /* ─────────────────────────────────────────────── */
@@ -29,7 +90,7 @@ interface FinalCommentsPageProps {
   qapData: QAPFormData[];
   onSubmitFinalComments: (
     id: string,
-    comments: Record<number, string>,
+    comments: Record<number, string> | string, // allow stringified payload too
     attachment?: File
   ) => Promise<void>;
 }
@@ -56,6 +117,14 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
     {}
   );
   const [submitting, setSubmitting] = useState<Record<string, boolean>>({});
+
+  /* helpers */
+  const fmtNum = (n?: number | null) =>
+    n === null || n === undefined ? "-" : Number(n).toLocaleString();
+  const fmtDec = (n?: number | null) =>
+    n === null || n === undefined
+      ? "-"
+      : Number(n).toLocaleString(undefined, { maximumFractionDigits: 4 });
 
   /* ───────── reviewable list ───────── */
   const reviewable = useMemo(() => {
@@ -90,13 +159,13 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
 
   const handleFileChange = (qapId: string, file: File | null) => {
     if (file && file.size > 10 * 1024 * 1024) {
-      alert("File size must be < 10 MB");
+      alert("File size must be < 10 MB");
       return;
     }
     setAttachments((p) => ({ ...p, [qapId]: file }));
   };
 
-  /** All unmatched specs require a non‑empty comment */
+  /** All unmatched specs require a non-empty comment */
   const readyToSubmit = (qapId: string, unmatched: QAPSpecification[]) => {
     if (unmatched.length === 0) return true; // nothing mandatory
     const c = comments[qapId] || {};
@@ -112,7 +181,7 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
       return;
     }
 
-    // only send non‑empty comments
+    // only send non-empty comments
     const payload = Object.fromEntries(
       Object.entries(comments[qapId] || {}).filter(
         ([, v]) => v.trim().length > 0
@@ -123,7 +192,7 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
     try {
       await onSubmitFinalComments(
         qapId,
-        JSON.stringify(payload), // <-- stringify before FormData.append
+        JSON.stringify(payload), // stringify for FormData usage upstream
         attachments[qapId]
       );
       // collapse & clear local state
@@ -174,7 +243,7 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
         </div>
       ) : (
         reviewable.map((qap) => {
-          /* filter specs for rowFilter */
+          /* filter specs for current table view */
           const specs = qap.allSpecs.filter((s) =>
             rowFilter === "all"
               ? true
@@ -182,7 +251,9 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
               ? s.match === "yes"
               : s.match === "no"
           );
-          const unmatched = specs.filter((s) => s.match === "no");
+
+          /* IMPORTANT: unmatched across *all* specs for validation */
+          const unmatchedAll = qap.allSpecs.filter((s) => s.match === "no");
 
           /* prior comments */
           const L2 = qap.levelResponses?.[2] || {};
@@ -192,6 +263,9 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
           const l4Roles = Object.keys(L4);
 
           const isOpen = expanded[qap.id] || false;
+
+          // Optional embedded Sales Request (server embeds this on /api/qaps)
+          const salesRequest: SalesRequestLite | undefined = (qap as any)?.salesRequest;
 
           return (
             <Collapsible
@@ -226,7 +300,7 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                             {qap.plant.toUpperCase()}
                           </Badge>
                           <Badge variant="outline">{qap.productType}</Badge>
-                          <Badge>{qap.orderQuantity} MW</Badge>
+                          <Badge>{qap.orderQuantity} MW</Badge>
                         </div>
                       </div>
                     </div>
@@ -247,6 +321,7 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                         <TabsTrigger value="visual">
                           Visual ({qap.specs.visual.length})
                         </TabsTrigger>
+                        <TabsTrigger value="bom">BOM</TabsTrigger>
                       </TabsList>
 
                       {/* MQP TAB */}
@@ -257,18 +332,18 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                               <tr className="bg-gray-100">
                                 <th className="p-2 border">S.No</th>
                                 <th className="p-2 border">Criteria</th>
-                                <th className="p-2 border">Sub‑Criteria</th>
+                                <th className="p-2 border">Sub-Criteria</th>
                                 <th className="p-2 border">Premier Spec</th>
                                 <th className="p-2 border">Customer Spec</th>
-                                <th className="p-2 border">Prod L2</th>
-                                <th className="p-2 border">Qual L2</th>
-                                <th className="p-2 border">Tech L2</th>
+                                <th className="p-2 border">Prod L2</th>
+                                <th className="p-2 border">Qual L2</th>
+                                <th className="p-2 border">Tech L2</th>
                                 {l3Roles.map((r) => (
                                   <th
                                     key={`mqp-l3-h-${r}`}
                                     className="p-2 border capitalize"
                                   >
-                                    {r} L3
+                                    {r} L3
                                   </th>
                                 ))}
                                 {l4Roles.map((r) => (
@@ -276,7 +351,7 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                                     key={`mqp-l4-h-${r}`}
                                     className="p-2 border capitalize"
                                   >
-                                    {r} L4
+                                    {r} L4
                                   </th>
                                 ))}
                                 <th className="p-2 border">Final Comment</th>
@@ -359,18 +434,18 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                               <tr className="bg-gray-100">
                                 <th className="p-2 border">S.No</th>
                                 <th className="p-2 border">Criteria</th>
-                                <th className="p-2 border">Sub‑Criteria</th>
+                                <th className="p-2 border">Sub-Criteria</th>
                                 <th className="p-2 border">Limits</th>
                                 <th className="p-2 border">Customer Spec</th>
-                                <th className="p-2 border">Prod L2</th>
-                                <th className="p-2 border">Qual L2</th>
-                                <th className="p-2 border">Tech L2</th>
+                                <th className="p-2 border">Prod L2</th>
+                                <th className="p-2 border">Qual L2</th>
+                                <th className="p-2 border">Tech L2</th>
                                 {l3Roles.map((r) => (
                                   <th
                                     key={`vis-l3-h-${r}`}
                                     className="p-2 border capitalize"
                                   >
-                                    {r} L3
+                                    {r} L3
                                   </th>
                                 ))}
                                 {l4Roles.map((r) => (
@@ -378,7 +453,7 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                                     key={`vis-l4-h-${r}`}
                                     className="p-2 border capitalize"
                                   >
-                                    {r} L4
+                                    {r} L4
                                   </th>
                                 ))}
                                 <th className="p-2 border">Final Comment</th>
@@ -454,12 +529,308 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                           </table>
                         </div>
                       </TabsContent>
+
+                      {/* BOM TAB */}
+                      <TabsContent value="bom">
+                        {!salesRequest ? (
+                          <div className="text-sm text-gray-600">
+                            No linked Sales Request/BOM found on this QAP.
+                          </div>
+                        ) : (
+                          <div className="space-y-6">
+                            <Card>
+                              <CardHeader>
+                                <CardTitle>Sales Request Summary</CardTitle>
+                              </CardHeader>
+                              <CardContent>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                                  <FieldRow
+                                    label="Customer Name"
+                                    value={salesRequest.customerName}
+                                  />
+                                  <FieldRow
+                                    label="Project Code"
+                                    value={salesRequest.projectCode || "-"}
+                                  />
+                                  <FieldRow
+                                    label="New Customer?"
+                                    value={salesRequest.isNewCustomer}
+                                  />
+                                  <FieldRow
+                                    label="Manufacturing Plant"
+                                    value={salesRequest.moduleManufacturingPlant?.toUpperCase()}
+                                  />
+                                  <FieldRow
+                                    label="Order Type"
+                                    value={salesRequest.moduleOrderType?.toUpperCase()}
+                                  />
+                                  <FieldRow
+                                    label="Cell Type"
+                                    value={salesRequest.cellType}
+                                  />
+                                  <FieldRow
+                                    label="Wattage Binning"
+                                    value={fmtNum(salesRequest.wattageBinning)}
+                                  />
+                                  <FieldRow
+                                    label="RFQ Qty (MW)"
+                                    value={fmtNum(salesRequest.rfqOrderQtyMW)}
+                                  />
+                                  <FieldRow
+                                    label="Premier Bidded Qty (MW)"
+                                    value={
+                                      salesRequest.premierBiddedOrderQtyMW ?? "-"
+                                    }
+                                  />
+                                  <FieldRow
+                                    label="Delivery Timeline"
+                                    value={`${salesRequest.deliveryStartDate} → ${salesRequest.deliveryEndDate}`}
+                                  />
+                                  <FieldRow
+                                    label="Project Location"
+                                    value={salesRequest.projectLocation}
+                                  />
+                                  <FieldRow
+                                    label="Cable Length"
+                                    value={fmtNum(
+                                      salesRequest.cableLengthRequired
+                                    )}
+                                  />
+                                  <FieldRow
+                                    label="QAP Type"
+                                    value={salesRequest.qapType}
+                                  />
+                                  <FieldRow
+                                    label="Primary BOM?"
+                                    value={salesRequest.primaryBom?.toUpperCase()}
+                                  />
+                                  <FieldRow
+                                    label="Inline Inspection?"
+                                    value={salesRequest.inlineInspection?.toUpperCase()}
+                                  />
+                                  <FieldRow
+                                    label="Cell Procured By"
+                                    value={salesRequest.cellProcuredBy}
+                                  />
+                                  <FieldRow
+                                    label="Agreed CTM"
+                                    value={fmtDec(salesRequest.agreedCTM)}
+                                  />
+                                  <FieldRow
+                                    label="Factory Audit Date"
+                                    value={
+                                      salesRequest.factoryAuditTentativeDate ||
+                                      "-"
+                                    }
+                                  />
+                                  <FieldRow
+                                    label="X Pitch (mm)"
+                                    value={salesRequest.xPitchMm ?? "-"}
+                                  />
+                                  <FieldRow
+                                    label="Tracker @790/1400"
+                                    value={salesRequest.trackerDetails ?? "-"}
+                                  />
+                                  <FieldRow
+                                    label="Priority"
+                                    value={salesRequest.priority}
+                                  />
+                                  <FieldRow
+                                    label="Created By"
+                                    value={salesRequest.createdBy}
+                                  />
+                                  <FieldRow
+                                    label="Created At"
+                                    value={new Date(
+                                      salesRequest.createdAt
+                                    ).toLocaleString()}
+                                  />
+                                  <div className="md:col-span-3">
+                                    <div className="text-sm text-gray-700">
+                                      <span className="font-medium">
+                                        Remarks:
+                                      </span>{" "}
+                                      {salesRequest.remarks || "-"}
+                                    </div>
+                                  </div>
+
+                                  {/* Attachments */}
+                                  {salesRequest.qapTypeAttachmentUrl && (
+                                    <div className="md:col-span-3">
+                                      <a
+                                        className="text-blue-600 underline"
+                                        href={salesRequest.qapTypeAttachmentUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                      >
+                                        View QAP Type Attachment
+                                      </a>
+                                    </div>
+                                  )}
+                                  {salesRequest.primaryBomAttachmentUrl && (
+                                    <div className="md:col-span-3">
+                                      <a
+                                        className="text-blue-600 underline"
+                                        href={
+                                          salesRequest.primaryBomAttachmentUrl
+                                        }
+                                        target="_blank"
+                                        rel="noreferrer"
+                                      >
+                                        View Primary BOM Attachment
+                                      </a>
+                                    </div>
+                                  )}
+                                  {!!salesRequest.otherAttachments?.length && (
+                                    <div className="md:col-span-3">
+                                      <div className="font-medium">
+                                        Other Attachments
+                                      </div>
+                                      <ul className="list-disc pl-5 space-y-1">
+                                        {salesRequest.otherAttachments.map(
+                                          (a, i) => (
+                                            <li key={i}>
+                                              <a
+                                                className="text-blue-600 underline"
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                href={a.url}
+                                              >
+                                                {a.title ||
+                                                  `Attachment ${i + 1}`}
+                                              </a>
+                                            </li>
+                                          )
+                                        )}
+                                      </ul>
+                                    </div>
+                                  )}
+                                </div>
+                              </CardContent>
+                            </Card>
+
+                            <Card>
+                              <CardHeader>
+                                <CardTitle>BOM</CardTitle>
+                              </CardHeader>
+                              <CardContent className="space-y-4">
+                                {!salesRequest.bom ? (
+                                  <div className="text-sm text-gray-500">
+                                    No BOM available.
+                                  </div>
+                                ) : (
+                                  <>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                                      <FieldRow
+                                        label="Vendor (lock-in)"
+                                        value={salesRequest.bom.vendorName}
+                                      />
+                                      <FieldRow
+                                        label="RFID Location (lock-in)"
+                                        value={salesRequest.bom.rfidLocation}
+                                      />
+                                      <FieldRow
+                                        label="Technology Proposed"
+                                        value={
+                                          salesRequest.bom.technologyProposed
+                                        }
+                                      />
+                                      <FieldRow
+                                        label="Vendor Address"
+                                        value={
+                                          salesRequest.bom.vendorAddress || "-"
+                                        }
+                                      />
+                                      <FieldRow
+                                        label="Document Ref"
+                                        value={salesRequest.bom.documentRef}
+                                      />
+                                      <FieldRow
+                                        label="Module Wattage (WP)"
+                                        value={fmtNum(
+                                          salesRequest.bom.moduleWattageWp
+                                        )}
+                                      />
+                                      <FieldRow
+                                        label="Module Dimensions"
+                                        value={
+                                          salesRequest.bom
+                                            .moduleDimensionsOption
+                                        }
+                                      />
+                                      <FieldRow
+                                        label="Module Model Number"
+                                        value={
+                                          salesRequest.bom.moduleModelNumber
+                                        }
+                                      />
+                                    </div>
+
+                                    {!!salesRequest.bom.components?.length ? (
+                                      <div className="space-y-6">
+                                        {salesRequest.bom.components.map(
+                                          (c, idx) => (
+                                            <div
+                                              key={`${c.name}-${idx}`}
+                                              className="overflow-auto"
+                                            >
+                                              <div className="font-medium mb-2">
+                                                {c.name}
+                                              </div>
+                                              <table className="min-w-full text-sm border">
+                                                <thead className="bg-gray-50 text-left">
+                                                  <tr>
+                                                    <th className="px-3 py-2 font-medium text-gray-700 whitespace-nowrap">
+                                                      Part No / Type / Model
+                                                    </th>
+                                                    <th className="px-3 py-2 font-medium text-gray-700 whitespace-nowrap">
+                                                      Sub-vendor / Manufacturer
+                                                    </th>
+                                                    <th className="px-3 py-2 font-medium text-gray-700 whitespace-nowrap">
+                                                      Specification
+                                                    </th>
+                                                  </tr>
+                                                </thead>
+                                                <tbody className="divide-y">
+                                                  {c.rows.map((r, i) => (
+                                                    <tr key={i} className="align-top">
+                                                      <td className="px-3 py-2 whitespace-nowrap">
+                                                        {r.model || "-"}
+                                                      </td>
+                                                      <td className="px-3 py-2 whitespace-nowrap">
+                                                        {r.subVendor || "-"}
+                                                      </td>
+                                                      <td className="px-3 py-2">
+                                                        <div className="whitespace-pre-wrap">
+                                                          {r.spec || "—"}
+                                                        </div>
+                                                      </td>
+                                                    </tr>
+                                                  ))}
+                                                </tbody>
+                                              </table>
+                                            </div>
+                                          )
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <div className="text-sm text-gray-500">
+                                        No BOM components.
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </CardContent>
+                            </Card>
+                          </div>
+                        )}
+                      </TabsContent>
                     </Tabs>
 
                     {/* attachment */}
                     <div className="mt-4 space-y-2">
                       <label className="text-sm font-medium text-gray-600">
-                        Optional Attachment (max 10 MB)
+                        Optional Attachment (max 10 MB)
                       </label>
                       <div className="flex items-center gap-2">
                         <Input
@@ -497,8 +868,7 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                       <Button
                         onClick={() => submit(qap.id)}
                         disabled={
-                          submitting[qap.id] ||
-                          !readyToSubmit(qap.id, unmatched)
+                          submitting[qap.id] || !readyToSubmit(qap.id, unmatchedAll)
                         }
                         className="bg-green-600 hover:bg-green-700"
                       >

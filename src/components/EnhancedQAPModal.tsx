@@ -26,6 +26,9 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { Save, Send } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
+import { set } from "date-fns";
+
+const API = window.location.origin;
 
 interface EnhancedQAPModalProps {
   isOpen: boolean;
@@ -35,6 +38,49 @@ interface EnhancedQAPModalProps {
   editingQAP?: QAPFormData | null;
   canEdit?: boolean;
 }
+
+// ⬇️ ADD: lightweight Sales Request shape (only fields we read)
+type SalesRequestLite = {
+  id: string;
+  projectCode: string;
+  customerName: string;
+  moduleManufacturingPlant: string; // 'p2' | 'p5' | 'p6'
+  moduleOrderType: "m10" | "g12r" | "g12";
+  rfqOrderQtyMW: number;
+  projectLocation: string;
+  cellType?: "DCR" | "NDCR";
+  qapType?: "Customer" | "Premier Energies";
+  deliveryStartDate?: string;
+  deliveryEndDate?: string;
+  priority?: "high" | "low";
+  remarks?: string | null;
+  createdBy?: string;
+  createdAt?: string; // ISO
+  bom?: BomPayload | null;
+};
+
+type BomRow = {
+  model: string;
+  subVendor?: string | null;
+  spec?: string | null;
+};
+
+type BomComponent = {
+  name: string; // keep it simple; matches your BOM_MASTER keys as strings
+  rows: BomRow[];
+};
+
+type BomPayload = {
+  vendorName: string;
+  rfidLocation: string;
+  technologyProposed: string; // 'M10' | 'G12R' | 'G12' in practice
+  vendorAddress?: string;
+  documentRef?: string;
+  moduleWattageWp?: number;
+  moduleDimensionsOption?: string;
+  moduleModelNumber?: string;
+  components: BomComponent[];
+};
 
 const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
   isOpen,
@@ -56,184 +102,13 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
   const [mqpData, setMqpData] = useState<QAPSpecification[]>([]);
   const [visualElData, setVisualElData] = useState<QAPSpecification[]>([]);
 
-  const customerOptions = ["Premier Energies Limited",
-    "Solex Energy  Ltd.",
-    "Solex Energy  Ltd.",
-    "Solex Energy  Ltd.",
-    "Solex Energy  Ltd.",
-    "Sova Solar Limited",
-    "Sparkman Infra Advisors (India) Pri",
-    "Sparkman Infra Advisors (India) Pri",
-    "SPDCL - Southern Power Distribution",
-    "Sreeji Steel Industries",
-    "Sri Balaji Solar Energies",
-    "SRI CHARAN INFRA",
-    "Sri Lakshmi Venkateswara Infratech",
-    "Srikara Energy Solutions Pvt Ltd",
-    "SSNR Power Private Limited",
-    "Star Baba Agro Fuels",
-    "STARFIELD RENEWABLES PRIVATE LIMITE",
-    "SUBLIME SOLUTIONS",
-    "Sujan Solar Constructions",
-    "Sun Rays Green Power Solutions",
-    "Sunali International",
-    "SUNDIGO SOLAR SOLUTIONS PRIVATE LIM",
-    "SunWorks Energy Pvt Ltd",
-    "Sure Energy Systems Pvt Ltd",
-    "Sure Energy Systems Pvt Ltd",
-    "SVK SOLAR TECH PRIVATE LIMITED",
-    "Swastik Enterprises",
-    "System Level Solution(India) Pvt Lt",
-    "Talwar Auto Garages Privatevt Limit",
-    "Tata Power Solar Systems Limited",
-    "Tata Power Solar Systems Limited",
-    "Tata Power Solar Systems Limited",
-    "Technofast Learning Home Pvt.Ltd.",
-    "The Deputy Director Agriculture - V",
-    "The Deputy Director Agriculture- KU",
-    "The Deputy Director Agriculture-UPN",
-    "THE WOLT TECHNIQUES",
-    "Transcon Industries",
-    "Jupiter International Limited",
-    "Larsen & Toubro Limited, Constructi",
-    "Premier Lords Pvt Ltd",
-    "Saimeg Infrastructure Pvt Ltd",
-    "Havells India limited",
-    "Axitec Energy India Pvt Ltd",
-    "TS REDCO  LTD",
-    "TS-Southern Power Distribution Comp",
-    "UNISCAN POWER SYSTEMS",
-    "Unisolar Power Private Limited",
-    "UPNEDA - Uttar Pradesh New and Rene",
-    "Uttar Gujarat VIJ Company Ltd",
-    "Vamana Energy Pvt Ltd",
-    "Varanasi Vikas Pradhikaran",
-    "Vensol (Bidar) Energy Pvt Ltd",
-    "VK Solar Solutions",
-    "VULCAN ENERGY SYSTEMS",
-    "Waaree Energies Ltd",
-    "Water tech engineers",
-    "Vensol (Nirna) Energy Pvt Ltd",
-    "Sri Chamundeshwari Enterprises",
-    "Svarog Global Power",
-    "Abhishek Solar Industries pvt Ltd",
-    "Basti Akshay Urja Shop",
-    "Akshay Urja Solar Shop",
-    "Mavyatho Ventures Pvt Ltd",
-    "BLUEBIRD SOLAR PRIVATE LIMITED",
-    "SHAKTI IRRIGATION INDIA LIMITED",
-    "THE NEW INDIA ASSURANCE CO LIMITED",
-    "Sri Venkateswara Creations",
-    "Sherzad Byramji",
-    "Riddhi Siddhi Metals",
-    "Daya Nidhi Mishra",
-    "NOVUS GREEN ENERGY SYSTEMS LIMITED",
-    "BAYER CROP SCIENCE LTD",
-    "SOLGEN GREENTECH LLP",
-    "ZEE METALS",
-    "ASUM ENERGY IN",
-    "ZUVA ENGINEERING PRIVATE LIMITED",
-    "Ram Ratan",
-    "RAAJRATNA VENTURES LIMITED",
-    "TOPSUN ENERGY LIMITED",
-    "GRAND SOLUTION",
-    "OXONE INFRATECH PRIVATE LIMITED",
-    "Airport Authority Of India-Guwahati",
-    "Airports Authority Of India Allahab",
-    "AKR Constructions Solar Pvt Ltd",
-    "Bharat Petroleum Corporation Limite",
-    "Bluestone Developers",
-    "Brightstone Developers Private Limi",
-    "K V R Consturctions",
-    "Kanva Diagnostic Services Pvt Ltd",
-    "New Era Enviro Ventures",
-    "NLC India Limited",
-    "PCS Premier Energy Private Limited",
-    "Saimeg Infrastructure Private Limit",
-    "SN Electric & Automation Private Li",
-    "Sudhakar Infratech Pvt Ltd",
-    "Swastika Enterprices",
-    "Vensol(Bidar)Energy Private Limited",
-    "Vigneswara Electrical",
-    "Vinsol (Hubli) Energy Private Limit",
-    "ZUVA ENGINEERING PRIVATE LIMITED",
-    "BENTEN DEVELOPERS PRIVATE LIMITED",
-    "Dynamize solar private limited",
-    "ALECTRONA ENERGY PRIVATE LIMITED",
-    "CRESTASOLAR SOLUTIONS PRIVATE LIMIT",
-    "Anuj Service",
-    "ARIHANT SOLAR ENERGY",
-    "Jula Mallikharjun",
-    "Sandeep UP Service",
-    "ICON SOLAREN POWER TECHNOLOGIES",
-    "PV POWER TECHNOLOGIES PRIVATE LIMIT",
-    "Pramod UP Service",
-    "Renovar Energy Pvt Limited",
-    "PREMIER PHOTOVOLTAIC GAJWEL PRIVATE",
-    "Premier Photovoltic Zaheerabad Pvt",
-    "PACE INDIA",
-    "Viraj Energies and Developers",
-    "PRINCE INDUSTRIES",
-    "Panasonic Life Solutions India Priv",
-    "Munna Kumar",
-    "TRUE POWER LIMITED",
-    "True Power Limited",
-    "PTN STONES PRIVATE LIMITED",
-    "COCHIN SOLAR TECH",
-    "COCHIN SOLAR TECH",
-    "MYTRAH ENERGY INDIA PRIVATE LIMITED",
-    "Rotomag Motors & Controls Pvt Ltd.",
-    "Alok Kantilal Surana",
-    "LUMINOUS POWER TECHNOLOGIES",
-    "Luminous Power Technologies",
-    "LUMINOUS POWER TECHNOLOGIES",
-    "3S Solutions",
-    "INSOLATION ENERGY LIMITED",
-    "INSOLATION ENERGY LIMITED",
-    "Luminous Power Technologies",
-    "Luminous Power Technologies",
-    "PIXON GREEN ENERGY PRIVATE LIMITED",
-    "ICICI BANK LTD",
-    "ML Securities & Finance Private Lim",
-    "SADBHAV FUTURETECH PRIVATE LIMITED",
-    "SHAKTI IRRIGATION INDIA LIMITED",
-    "SHAKTI PUMPS INDIA LIMITED",
-    "SHAKTI PUMPS INDIA LIMITED",
-    "SHAKTI PUMPS INDIA LIMITED",
-    "SHAKTI PUMPS INDIA LIMITED",
-    "Communications & Systems Engineerin",
-    "SHAKTI PUMPS INDIA LIMITED",
-    "SHAKTI PUMPS INDIA LIMITED",
-    "SHAKTI PUMPS INDIA LIMITED",
-    "SHAKTI PUMPS INDIA LIMITED",
-    "Suntek Energy Systems",
-    "ROTOMAG MOTORS & CONTROLS. PVT. LTD",
-    "SHAKTI PUMPS INDIA LIMITED",
-    "M/s. Verma Auto Electric Works",
-    "Panasonic Life Solutions India Pvt.",
-    "M/S, MATRI SHREE TECHNO INDUSTRIES",
-    "Panasonic Life Solutions India Pvt.",
-    "Mr. Awadesh Kuma,",
-    "TATA Power Solar Systems Pvt. Ltd,",
-    "SPIN KRAFT VENTURES PVT LTD",
-    "JAYSIS GREEN ENERGY INFRA PRIVATE L",
-    "ARTHA ENERGY RESOURCES LLP",
-    "Suninfra Solar Private Limited",
-    "SPIN KRAFT VENTURES PVT LTD",
-    "TCM",
-    "Nira Corporation",
-    "M/s. SWICH",
-    "EVENT GREEN POWER PVT LTD",
-    "M/s. Nira Corporation",
-    "M/s. NSR MILLS",
-    "M/s. Sarjan Realities Private Limit",
-    "Hindustan Unilver",
-    "Panasonic Life Solutions India Pvt.",
-    "M/s. Premier Energies Limited",
-    "M/s. Premier Energies Limited",
+  const [linkedSR, setLinkedSR] = useState<SalesRequestLite | null>(null);
+  const [loadingSR, setLoadingSR] = useState(false);
+
+  const customerOptions = [
+    "Premier Energies Limited",
     "Shakti  Pumps (India) Limited",
-    "Shakti  Pumps (India) Limited",
-    "Shakti  Pumps (India) Limited",];
+  ];
 
   const productOptions = [
     "Dual Glass M10 Perc",
@@ -242,7 +117,94 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
     "Dual Glass G12 Topcon",
     "M10 Transparent Perc",
   ];
-  const plantOptions = ["p2", "p4", "p5"];
+  const plantOptions = ["p2", "p5", "p6"];
+
+  const [projectCode, setProjectCode] = useState("");
+  const [projectCodeOptions, setProjectCodeOptions] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    (async () => {
+      try {
+        const r = await fetch(`${API}/api/project-codes`, {
+          credentials: "include",
+        });
+        const codes = r.ok ? await r.json() : [];
+        setProjectCodeOptions(codes);
+      } catch {
+        setProjectCodeOptions([]);
+      }
+    })();
+  }, [isOpen]);
+
+  function onPickProjectCode(code: string) {
+    setProjectCode(code);
+    // expected: customer_rfqMW_location_YYYYMMDD
+    const [customer] = code.split("_");
+    setCustomerName(customer.replace(/-/g, " "));
+    // ⬇️ load linked Sales Request and prefill
+    loadSalesRequestFor(code);
+  }
+
+  // ⬇️ ADD: derive product type from SR's order type (keeps existing options)
+  function deriveProductTypeFromSR(sr: SalesRequestLite): string {
+    const map: Record<string, string> = {
+      m10: "Dual Glass M10 Topcon",
+      g12r: "Dual Glass G12R Topcon",
+      g12: "Dual Glass G12 Topcon",
+    };
+    return map[(sr.moduleOrderType || "").toLowerCase()] || "";
+  }
+
+  // ⬇️ ADD: client-side fetch of SR by project code (safe fallbacks)
+  async function loadSalesRequestFor(code: string) {
+    try {
+      setLoadingSR(true);
+      // try filtered endpoint if present
+      let sr: SalesRequestLite | null = null;
+      let r = await fetch(
+        `${API}/api/sales-requests?projectCode=${encodeURIComponent(code)}`,
+        { credentials: "include" }
+      ).catch(() => null as any);
+
+      if (r && r.ok) {
+        const data = await r.json();
+        sr = Array.isArray(data)
+          ? data.find((x: any) => x.projectCode === code) ?? null
+          : data && data.projectCode
+          ? (data as SalesRequestLite)
+          : null;
+      }
+
+      // fallback: load all and filter on client
+      if (!sr) {
+        const r2 = await fetch(`${API}/api/sales-requests`, {
+          credentials: "include",
+        }).catch(() => null as any);
+        if (r2 && r2.ok) {
+          const arr = (await r2.json()) as SalesRequestLite[];
+          sr = arr.find((x) => x.projectCode === code) || null;
+        }
+      }
+
+      setLinkedSR(sr || null);
+
+      // Prefill QAP fields (non-destructive; user can still edit)
+      if (sr) {
+        setPlant((sr.moduleManufacturingPlant || "").toLowerCase());
+        setOrderQuantity(Number(sr.rfqOrderQtyMW || 0));
+        // If project name empty, use project location as a decent default
+        setProjectName((prev) =>
+          prev?.trim() ? prev : sr.projectLocation || code
+        );
+        const inferred = deriveProductTypeFromSR(sr);
+        if (inferred) setProductType(inferred);
+        if (sr.customerName) setCustomerName(sr.customerName);
+      }
+    } finally {
+      setLoadingSR(false);
+    }
+  }
 
   useEffect(() => {
     if (isOpen) {
@@ -269,6 +231,13 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
       }
     }
   }, [isOpen, editingQAP, nextSno]);
+
+  useEffect(() => {
+    if (isOpen && projectCode) {
+      loadSalesRequestFor(projectCode);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, projectCode]);
 
   const initializeQAPData = () => {
     setMqpData(
@@ -361,6 +330,7 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
       // only include id if we're editing; for new QAPs, omit it
       ...(editingQAP ? { id: editingQAP.id } : {}),
       customerName,
+      projectCode,
       projectName,
       orderQuantity,
       productType,
@@ -369,6 +339,7 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
       currentLevel: 2,
       specs: { mqp: mqpData, visual: visualElData },
       submittedBy: user?.username,
+      salesRequestId: linkedSR?.id,
     };
     onSave(payload as QAPFormData, "level-2");
     onClose();
@@ -381,6 +352,7 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
       // only include id if we're editing; for new QAPs, omit it
       ...(editingQAP ? { id: editingQAP.id } : {}),
       customerName,
+      projectCode,
       projectName,
       orderQuantity,
       productType,
@@ -389,6 +361,7 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
       currentLevel: 1,
       specs: { mqp: mqpData, visual: visualElData },
       submittedBy: user?.username,
+      salesRequestId: linkedSR?.id,
     };
     onSave(payload as QAPFormData, "draft");
     onClose();
@@ -402,11 +375,18 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
     setProductType("");
     setPlant("");
     setShowReviewSelection(false);
+    setProjectCode("");
+    setLinkedSR(null);
   };
 
   // only allow progressing once all required fields are set
   const isFormValid = Boolean(
-    customerName && projectName && orderQuantity > 0 && productType && plant
+    projectCode &&
+      customerName &&
+      projectName &&
+      orderQuantity > 0 &&
+      productType &&
+      plant
   );
 
   const getUnmatchedItems = () => {
@@ -785,6 +765,79 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
     );
   };
 
+  // add this helper just above the component's return()
+  function renderBomTable(bom?: BomPayload | null) {
+    if (!bom || !Array.isArray(bom.components) || !bom.components.length)
+      return null;
+
+    return (
+      <div className="mt-4">
+        <Label className="text-amber-700">BOM</Label>
+
+        {/* Optional BOM header bits */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm mt-2 mb-2">
+          <div>
+            <span className="text-amber-700 font-medium">Vendor</span>
+            <div className="font-medium">{bom.vendorName || "-"}</div>
+          </div>
+          <div>
+            <span className="text-amber-700 font-medium">RFID Location</span>
+            <div className="font-medium">{bom.rfidLocation || "-"}</div>
+          </div>
+          <div>
+            <span className="text-amber-700 font-medium">Document Ref</span>
+            <div className="font-medium">{bom.documentRef || "-"}</div>
+          </div>
+        </div>
+
+        {bom.components.map((comp, idx) => (
+          <div key={`${comp.name}-${idx}`} className="mt-3">
+            <div className="font-semibold text-amber-900 mb-1">{comp.name}</div>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse border border-amber-300 text-xs">
+                <thead className="bg-amber-100">
+                  <tr>
+                    <th className="border border-amber-300 p-2 text-left">
+                      Model
+                    </th>
+                    <th className="border border-amber-300 p-2 text-left">
+                      Sub-Vendor
+                    </th>
+                    <th className="border border-amber-300 p-2 text-left">
+                      Spec
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(comp.rows || []).map((r, i) => (
+                    <tr key={i} className="bg-white">
+                      <td className="border border-amber-200 p-2">
+                        {r.model || "-"}
+                      </td>
+                      <td className="border border-amber-200 p-2">
+                        {r.subVendor || "-"}
+                      </td>
+                      <td className="border border-amber-200 p-2">
+                        {r.spec || "-"}
+                      </td>
+                    </tr>
+                  ))}
+                  {!comp.rows?.length && (
+                    <tr>
+                      <td className="border border-amber-200 p-2" colSpan={3}>
+                        No rows
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-[95vw] max-h-[90vh] flex flex-col p-0">
@@ -800,19 +853,27 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
               {/* Form Fields */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6 bg-blue-50 p-4 rounded-lg">
                 <div className="space-y-2">
-                  <Label>Customer Name *</Label>
-                  <Select value={customerName} onValueChange={setCustomerName}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select customer" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {customerOptions.map((option) => (
-                        <SelectItem key={option} value={option}>
-                          {option}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Label>Customer Name (auto)</Label>
+                  <Input value={customerName} readOnly />
+
+                  <div className="space-y-2">
+                    <Label>Project Code *</Label>
+                    <Select
+                      value={projectCode}
+                      onValueChange={onPickProjectCode}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select project code" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {projectCodeOptions.map((code) => (
+                          <SelectItem key={code} value={code}>
+                            {code}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
 
                 <div className="space-y-2">
@@ -866,6 +927,131 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
                   </Select>
                 </div>
               </div>
+
+              {/* Sales Request Snapshot (auto when a Project Code is chosen) */}
+              {projectCode && (
+                <div className="mb-6 border rounded-lg p-4 bg-amber-50">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-semibold text-amber-900">
+                      Sales Request Snapshot
+                    </h3>
+                    {loadingSR && (
+                      <span className="text-sm text-amber-700">Loading…</span>
+                    )}
+                  </div>
+
+                  {!loadingSR && !linkedSR && (
+                    <div className="text-sm text-amber-800">
+                      No Sales Request found for <b>{projectCode}</b>. You can
+                      still fill the fields manually.
+                    </div>
+                  )}
+
+                  {linkedSR && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                      <div>
+                        <Label className="text-amber-700">Project Code</Label>
+                        <div className="font-medium">
+                          {linkedSR.projectCode}
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-amber-700">Customer</Label>
+                        <div className="font-medium">
+                          {linkedSR.customerName}
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-amber-700">Plant</Label>
+                        <div className="font-medium uppercase">
+                          {linkedSR.moduleManufacturingPlant}
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-amber-700">Order Type</Label>
+                        <div className="font-medium uppercase">
+                          {linkedSR.moduleOrderType}
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-amber-700">Cell Type</Label>
+                        <div className="font-medium">
+                          {linkedSR.cellType || "-"}
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-amber-700">RFQ Qty (MW)</Label>
+                        <div className="font-medium">
+                          {linkedSR.rfqOrderQtyMW?.toLocaleString?.() ?? "-"}
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-amber-700">
+                          Delivery Timeline
+                        </Label>
+                        <div className="font-medium">
+                          {(linkedSR.deliveryStartDate || "—") +
+                            " → " +
+                            (linkedSR.deliveryEndDate || "—")}
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-amber-700">Location</Label>
+                        <div className="font-medium">
+                          {linkedSR.projectLocation || "-"}
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-amber-700">Priority</Label>
+                        <div className="font-medium capitalize">
+                          {linkedSR.priority || "-"}
+                        </div>
+                      </div>
+                      <div className="md:col-span-3">
+                        <Label className="text-amber-700">Remarks</Label>
+                        <div className="font-medium">
+                          {linkedSR.remarks || "-"}
+                        </div>
+                      </div>
+
+                      {/* Optional BOM highlights when present */}
+                      {linkedSR.bom && (
+                        <>
+                          <div>
+                            <Label className="text-amber-700">Tech (BOM)</Label>
+                            <div className="font-medium">
+                              {linkedSR.bom.technologyProposed || "-"}
+                            </div>
+                          </div>
+                          <div>
+                            <Label className="text-amber-700">
+                              Module Wattage (WP)
+                            </Label>
+                            <div className="font-medium">
+                              {linkedSR.bom.moduleWattageWp ?? "-"}
+                            </div>
+                          </div>
+                          <div>
+                            <Label className="text-amber-700">
+                              Model Number
+                            </Label>
+                            <div className="font-medium">
+                              {linkedSR.bom.moduleModelNumber || "-"}
+                            </div>
+                          </div>
+                          <div className="md:col-span-3">
+                            <Label className="text-amber-700">Dimensions</Label>
+                            <div className="font-medium">
+                              {linkedSR.bom.moduleDimensionsOption || "-"}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                      {renderBomTable(linkedSR.bom)}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Tabs for MQP and Visual/EL - simplified version for this implementation */}
               <Tabs defaultValue="mqp" className="w-full">

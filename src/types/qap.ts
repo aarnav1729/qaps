@@ -10,12 +10,14 @@ export interface User {
 export interface QAPFormData {
   id: string;
   customerName: string;
+  projectCode: string;
   projectName: string;
   orderQuantity: number;
   productType: string;
   plant: string;
   status: 'draft' | 'submitted' | 'level-2' | 'level-3' | 'level-4' | 'final-comments' | 'level-5' | 'approved' | 'rejected';
   submittedBy?: string;
+  salesRequestId?: string;
   submittedAt?: Date;
   currentLevel: 1 | 2 | 3 | 4 | 5;
   levelResponses: {

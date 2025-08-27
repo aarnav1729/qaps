@@ -237,7 +237,7 @@ const Index: React.FC<IndexProps> = ({ qapData, onSave, onDelete }) => {
         editingQAP={selectedQAP}
         onSave={handleSave}
         nextSno={nextSno}
-        /** 👉 The modal will hide “Save Draft / Next / Send for Review”
+        /** 👉 The modal will hide “Save Draft / Next / Send for Review”
          *  whenever canEdit === false  */
         canEdit={canEditSelected}
       />

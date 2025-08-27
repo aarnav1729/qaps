@@ -25,7 +25,8 @@ export type BomComponentName =
   | "Bypass Diode"
   | "Solar Cable"
   | "Fluxing Agent"
-  | "Additional Material (Fixing Tape and Insulation Tape)";
+  | "Additional Material (Fixing Tape and Insulation Tape)"
+  | "RFID Tag";
 
 export const VENDOR_NAME_LOCKIN = "Premier Energies" as const;
 export const RFID_LOCATION_LOCKIN = "TOP Left Side, front view" as const;
@@ -124,12 +125,14 @@ export const BOM_MASTER: Record<BomComponentName, BomComponentOption[]> = {
     },
     {
       model: "(A) AR coated Semi Tempered Solar Glass",
-      subVendor: "Wujiang C.S.G. Glass Co., ltd. CSG Holding Co., Ltd Anhui CSG New Energy Material Technology Co., Ltd Dongguan CSG Solar Glass Co., Ltd Guangxi CSG New Energy Material Technology Co., Ltd",
+      subVendor:
+        "Wujiang C.S.G. Glass Co., ltd. CSG Holding Co., Ltd Anhui CSG New Energy Material Technology Co., Ltd Dongguan CSG Solar Glass Co., Ltd Guangxi CSG New Energy Material Technology Co., Ltd",
       spec: "(A) Thickness [mm]: 2mm Surface treatment: AR Coated Transmission data: ≥ 91.5%",
     },
     {
       model: "(B) AR Coated Semi Tempered Solar Glass",
-      subVendor: "Flat Glass group Zhejiang Jiafu Glass Co Flat (Vietnam) Co., Ltd Anhui Flat Solar Glass Co,.Ltd Flat (Hong Kong) Co.,Limited.",
+      subVendor:
+        "Flat Glass group Zhejiang Jiafu Glass Co Flat (Vietnam) Co., Ltd Anhui Flat Solar Glass Co,.Ltd Flat (Hong Kong) Co.,Limited.",
       spec: "(B) Thickness [mm]: 2mm Surface treatment: AR Coated Transmission data: ≥ 91.5%",
     },
     {
@@ -139,12 +142,14 @@ export const BOM_MASTER: Record<BomComponentName, BomComponentOption[]> = {
     },
     {
       model: "(D) AR Coated Semi Tempered HS Solar Glass",
-      subVendor: "Xinyi Solar (Malaysla) SDN. BHD Xinyi Solar (SuZhou) Ltd. Guangxi Xinyi Photovaltaic Industry Co.,Ltd. Xinyi PV Products (Anhui) Holdings Ltd",
+      subVendor:
+        "Xinyi Solar (Malaysla) SDN. BHD Xinyi Solar (SuZhou) Ltd. Guangxi Xinyi Photovaltaic Industry Co.,Ltd. Xinyi PV Products (Anhui) Holdings Ltd",
       spec: "(D) Thickness [mm]: 2mm Surface treatment: AR Coated Transmission data: ≥ 91.5%",
     },
     {
       model: "(E) AR Coated Semi Tempered HS Solar Glass",
-      subVendor: "Hunan Kibing Solar Technology Co., Ltd Zhejiang Ninghai Kibing New Energy Management Co. Ltd",
+      subVendor:
+        "Hunan Kibing Solar Technology Co., Ltd Zhejiang Ninghai Kibing New Energy Management Co. Ltd",
       spec: "(E) Thickness [mm]: 2mm Surface treatment: AR Coated Transmission data: ≥ 91.5%",
     },
   ],
@@ -157,12 +162,14 @@ export const BOM_MASTER: Record<BomComponentName, BomComponentOption[]> = {
     },
     {
       model: "(A) Heat Strengthened Glass- Grid Patterned",
-      subVendor: "Wujiang C.S.G. Glass Co., ltd. CSG Holding Co., Ltd Anhui CSG New Energy Material Technology Co., Ltd Dongguan CSG Solar Glass Co., Ltd Guangxi CSG New Energy Material Technology Co., Ltd",
+      subVendor:
+        "Wujiang C.S.G. Glass Co., ltd. CSG Holding Co., Ltd Anhui CSG New Energy Material Technology Co., Ltd Dongguan CSG Solar Glass Co., Ltd Guangxi CSG New Energy Material Technology Co., Ltd",
       spec: "(A) Thickness [mm]: 2mm Surface treatment: AR Coated Transmission data: ≥ 91.6%",
     },
     {
       model: "(B) Heat Strengthened Glass- Grid Patterned",
-      subVendor: "Flat Glass group Zhejiang Jiafu Glass Co Flat (Vietnam) Co., Ltd Anhui Flat Solar Glass Co,.Ltd Flat (Hong Kong) Co.,Limited",
+      subVendor:
+        "Flat Glass group Zhejiang Jiafu Glass Co Flat (Vietnam) Co., Ltd Anhui Flat Solar Glass Co,.Ltd Flat (Hong Kong) Co.,Limited",
       spec: "(B) Thickness [mm]: 2mm Surface treatment: AR Coated Transmission data: ≥ 91.6%",
     },
     {
@@ -172,12 +179,14 @@ export const BOM_MASTER: Record<BomComponentName, BomComponentOption[]> = {
     },
     {
       model: "(D) Semi tempered HS with Grid Patterned Glass",
-      subVendor: "Xinyi Solar (Malaysla) SDN. BHD Xinyi Solar (SuZhou) Ltd. Guangxi Xinyi Photovaltaic Industry Co.,Ltd. Xinyi PV Products (Anhui) Holdings Ltd",
+      subVendor:
+        "Xinyi Solar (Malaysla) SDN. BHD Xinyi Solar (SuZhou) Ltd. Guangxi Xinyi Photovaltaic Industry Co.,Ltd. Xinyi PV Products (Anhui) Holdings Ltd",
       spec: "(D) Thickness [mm]: 2mm Surface treatment: AR Coated Transmission Data: ≥ 91.6%",
     },
     {
       model: "(E) Semi tempered HS with Grid Patterned Glass",
-      subVendor: "Hunan Kibing Solar Technology Co., Ltd Zhejiang Ninghai Kibing New Energy Management Co. Ltd",
+      subVendor:
+        "Hunan Kibing Solar Technology Co., Ltd Zhejiang Ninghai Kibing New Energy Management Co. Ltd",
       spec: "(E) Thickness [mm]: 2mm Surface Treatment: AR Coated Transmission data: ≥ 91.6%",
     },
   ],
@@ -221,11 +230,11 @@ export const BOM_MASTER: Record<BomComponentName, BomComponentOption[]> = {
     {
       model: "(8) dia 0.26+/-0.04mm",
       subVendor: "Geba Cables and wires India Pvt Ltd",
-      spec: "Dimensions [mm]: Ø-0.32/0.30/0.28/0.26mm Ø:0.24+/-0.04mm Composition of alloy: Sn60Pb40"
+      spec: "Dimensions [mm]: Ø-0.32/0.30/0.28/0.26mm Ø:0.24+/-0.04mm Composition of alloy: Sn60Pb40",
     },
     {
       model: ":dia 0.26+/-0.04mm",
-      subVendor: "Giga Storage Corporation",    
+      subVendor: "Giga Storage Corporation",
       spec: "Dimensions [mm]: Ø-0.32/0.30/0.28/0.26mm Ø:0.24+/-0.04mm Composition of Alloy: Sn60Pb40",
     },
   ],
@@ -278,7 +287,7 @@ export const BOM_MASTER: Record<BomComponentName, BomComponentOption[]> = {
     },
   ],
 
-  "Frame": [
+  Frame: [
     {
       model: "6005T6,30x30/15mm",
       subVendor: "New SULV/Haihong/tinze/Anan/Fuzhou Antong",
@@ -418,7 +427,7 @@ export const BOM_MASTER: Record<BomComponentName, BomComponentOption[]> = {
     {
       model: "PV-ZH202B",
       subVendor: "Zhejiang Zhonghuan Sunter PV Technology Co., Ltd.,",
-      spec: "Max. voltage [V]:1500 Max. current [A]: 40", 
+      spec: "Max. voltage [V]:1500 Max. current [A]: 40",
     },
     {
       model: "PVKST4/xy_EVO2/xy_ UR PV-KBT4-EVO 2/xy_UR",
@@ -496,17 +505,19 @@ export const BOM_MASTER: Record<BomComponentName, BomComponentOption[]> = {
   "EVA (Encapsulation) Front": [
     {
       model: "F406PS",
-      subVendor: "Hangzhou First Applied Material Co., Ltd/First Material Science (Thailand) Co., Ltd/ Vietnam Advance Film Material Company Limited",
-      spec: "Thickness[mm]: 0.50mm±0.05mm CTI: 600V Max. Storage temp. [°C]: ≤ 30", 
+      subVendor:
+        "Hangzhou First Applied Material Co., Ltd/First Material Science (Thailand) Co., Ltd/ Vietnam Advance Film Material Company Limited",
+      spec: "Thickness[mm]: 0.50mm±0.05mm CTI: 600V Max. Storage temp. [°C]: ≤ 30",
     },
     {
       model: "SV-15296P",
       subVendor: "Changzhou Sveck PV New Material Co., Ltd",
-      spec: "Thickness[mm]: 0.50±0.05 CTI: 600V Max. Storage temp. [°C]: ≤ 30", 
+      spec: "Thickness[mm]: 0.50±0.05 CTI: 600V Max. Storage temp. [°C]: ≤ 30",
     },
     {
       model: "EP 304",
-      subVendor: "Hangzhou First Applied Material Co., Ltd/First Material Science (Thailand) Co., Ltd/ Vietnam Advance Film Material Company Limited",
+      subVendor:
+        "Hangzhou First Applied Material Co., Ltd/First Material Science (Thailand) Co., Ltd/ Vietnam Advance Film Material Company Limited",
       spec: "Thickness[mm]: 0.50±0.05 CTI: 600V Max. Storage temp. [°C]: ≤ 30 ",
     },
     {
@@ -524,7 +535,8 @@ export const BOM_MASTER: Record<BomComponentName, BomComponentOption[]> = {
   "EVA (Encapsulation) Back": [
     {
       model: "EP308",
-      subVendor: "Hangzhou First Applied Material Co., Ltd/First Material Science (Thailand) Co., Ltd/ Vietnam Advance Film Material Company Limited",
+      subVendor:
+        "Hangzhou First Applied Material Co., Ltd/First Material Science (Thailand) Co., Ltd/ Vietnam Advance Film Material Company Limited",
       spec: "Thickness[mm]: 0.50mm±0.05mm CTI: 600V Max. Storage temp. [°C]: ≤ 30",
     },
     {
@@ -534,7 +546,8 @@ export const BOM_MASTER: Record<BomComponentName, BomComponentOption[]> = {
     },
     {
       model: "EP308",
-      subVendor: "Hangzhou First Applied Material Co., Ltd/First Material Science (Thailand) Co., Ltd/ Vietnam Advance Film Material Company Limited",
+      subVendor:
+        "Hangzhou First Applied Material Co., Ltd/First Material Science (Thailand) Co., Ltd/ Vietnam Advance Film Material Company Limited",
       spec: "Thickness[mm]: 0.50±0.05 CTI: 600V Max. Storage temp. [°C]: ≤ 30",
     },
     {
@@ -546,7 +559,7 @@ export const BOM_MASTER: Record<BomComponentName, BomComponentOption[]> = {
       model: "HEP-01M",
       subVendor: "Hanwha Advanced Materials Corporation",
       spec: "Thickness[mm]: 0.50±0.05 CTI: 600V Max.Storage temp[°C]: ≤ 30",
-    }
+    },
   ],
 
   "Bypass Diode": [
@@ -713,6 +726,14 @@ export const BOM_MASTER: Record<BomComponentName, BomComponentOption[]> = {
       model: "HWD-5060DK",
       subVendor: "Suzhou Hengkun Precision Electronic Co. Ltd",
       spec: "(B) Dimensions [mm]: 10mm Article/specification no.: NA",
+    },
+  ],
+
+  "RFID Tag": [
+    {
+      model: "PID-X40",
+      subVendor: "Perfect ID",
+      spec: "PID-X40 wet inlay",
     },
   ],
 } as const;
