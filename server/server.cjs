@@ -6,12 +6,24 @@ const compression = require("compression");
 const sql = require("mssql");
 const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
-const { body, param, validationResult } = require("express-validator");
+const {
+  body,
+  param,
+  validationResult,
+  body: vBody,
+  param: vParam,
+} = require("express-validator");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const https = require("https");
 const app = express();
+const bcrypt = require("bcryptjs");
+const crypto = require("crypto");
+
+// server.cjs
+const qapSpecsRouter = require("./routes/qapSpecifications.cjs");
+app.use("/api", qapSpecsRouter);
 
 // middleware
 app.use(
@@ -42,6 +54,69 @@ const mssqlConfig = {
 };
 
 let mssqlPool;
+
+// ---- File paths (adjust if your structure differs) ----
+const PROJECT_ROOT = path.join(__dirname, ".."); // server/.. = project root
+const DATA_DIR = path.join(PROJECT_ROOT, "data"); // JSON store folder (create if absent)
+const SRC_DATA_DIR = path.join(PROJECT_ROOT, "src", "data"); // TypeScript data folder
+
+const SPEC_STORE_JSON = path.join(DATA_DIR, "specs.store.json");
+const BOM_STORE_JSON = path.join(DATA_DIR, "bom.store.json");
+
+const SPEC_TS = path.join(SRC_DATA_DIR, "qapSpecifications.ts");
+const BOM_TS = path.join(SRC_DATA_DIR, "bomMaster.ts");
+
+// Ensure directories exist
+for (const d of [DATA_DIR, SRC_DATA_DIR]) {
+  if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+}
+
+// ---- Types (JS doc to keep it clear) ----
+/**
+ * @typedef {"MQP"|"Visual"} CriteriaType
+ * @typedef {"Critical"|"Major"|"Minor"} SpecClass
+ * @typedef {Object} SpecItem
+ * @property {string} id
+ * @property {CriteriaType} criteria
+ * @property {string} subCriteria
+ * @property {string} specification
+ * @property {SpecClass} class
+ * @property {string=} description
+ * @property {string=} sampling
+ * @property {string=} typeOfCheck
+ */
+
+/**
+ * @typedef {"M10"|"G12R"|"G12"} Technology
+ * @typedef {"Solar Cell"|"Front Cover"|"Back Cover"|"Encapsulation (EVA)"|"Back Sheet (Tedlar)"|"Frame"|"Junction Box"|"Bypass Diodes"|"Interconnect Ribbons"|"Bus Bar"|"Sealants"|"Label"|"Carton Box"} BomComponentName
+ * @typedef {{model:string, subVendor?:string|null, spec?:string|null}} BomOption
+ * @typedef {{id:string, name:BomComponentName, technology:Technology, options:BomOption[]}} BomItem
+ */
+
+// ---- Stores in memory ----
+/** @type {SpecItem[]} */
+let SPEC_STORE = [];
+/** @type {BomItem[]} */
+let BOM_STORE = [];
+
+// ---- Load/Save JSON store ----
+function readJsonSafe(file, fallback) {
+  try {
+    if (!fs.existsSync(file)) return fallback;
+    const txt = fs.readFileSync(file, "utf-8");
+    return JSON.parse(txt);
+  } catch {
+    return fallback;
+  }
+}
+function writeJson(file, obj) {
+  fs.writeFileSync(file, JSON.stringify(obj, null, 2), "utf-8");
+}
+
+// ---- Generators to TypeScript files ----
+function escapeTs(s) {
+  return String(s).replace(/`/g, "\\`");
+}
 
 // project schema
 async function initMssql() {
@@ -86,6 +161,10 @@ async function initMssql() {
         createdAt           DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
         lastModifiedAt      DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME()
       );
+
+      -- QAPs: ensure salesRequestId exists for linkage
+IF COL_LENGTH('QAPs','salesRequestId') IS NULL
+  ALTER TABLE QAPs ADD salesRequestId UNIQUEIDENTIFIER NULL;
 
       ------------------------------------------------
       -- 3a) MQP Specs
@@ -154,72 +233,135 @@ async function initMssql() {
       );
 
       ------------------------------------------------
--- SalesRequests (master)
-IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SalesRequests')
-CREATE TABLE SalesRequests (
-  id                          UNIQUEIDENTIFIER DEFAULT NEWID() PRIMARY KEY,
-  customerName                NVARCHAR(200)   NOT NULL,
-  isNewCustomer               NVARCHAR(3)     NOT NULL,      -- 'yes' | 'no'
-  moduleManufacturingPlant    NVARCHAR(10)    NOT NULL,      -- 'p2' | 'p4' | 'p5' | 'p6'
-  moduleOrderType             NVARCHAR(10)    NOT NULL,      -- 'm10' | 'g12r' | 'g12'
-  cellType                    NVARCHAR(10)    NOT NULL,      -- 'DCR' | 'NDCR'
-  wattageBinning              INT             NOT NULL,
-  rfqOrderQtyMW               INT             NOT NULL,
-  premierBiddedOrderQtyMW     INT             NULL,
-  deliveryStartDate           DATE            NOT NULL,
-  deliveryEndDate             DATE            NOT NULL,
-  projectLocation             NVARCHAR(200)   NOT NULL,
-  cableLengthRequired         INT             NOT NULL,
-  qapType                     NVARCHAR(50)    NOT NULL,      -- 'Customer' | 'Premier Energies'
+      -- SalesRequests (master)
+      IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SalesRequests')
+      CREATE TABLE SalesRequests (
+        id                          UNIQUEIDENTIFIER DEFAULT NEWID() PRIMARY KEY,
+        customerName                NVARCHAR(200)   NOT NULL,
+        isNewCustomer               NVARCHAR(3)     NOT NULL,      -- 'yes' | 'no'
+        moduleManufacturingPlant    NVARCHAR(10)    NOT NULL,      -- 'p2' | 'p4' | 'p5' | 'p6'
+        moduleOrderType             NVARCHAR(10)    NOT NULL,      -- 'm10' | 'g12r' | 'g12'
+        cellType                    NVARCHAR(10)    NOT NULL,      -- 'DCR' | 'NDCR'
+        wattageBinning              INT             NOT NULL,
+        rfqOrderQtyMW               INT             NOT NULL,
+        premierBiddedOrderQtyMW     INT             NULL,
+        deliveryStartDate           DATE            NOT NULL,
+        deliveryEndDate             DATE            NOT NULL,
+        projectLocation             NVARCHAR(200)   NOT NULL,
+        cableLengthRequired         INT             NOT NULL,
+        qapType                     NVARCHAR(50)    NOT NULL,      -- 'Customer' | 'Premier Energies'
 
-  qapTypeAttachmentName       NVARCHAR(200)   NULL,
-  qapTypeAttachmentUrl        NVARCHAR(500)   NULL,
+        qapTypeAttachmentName       NVARCHAR(200)   NULL,
+        qapTypeAttachmentUrl        NVARCHAR(500)   NULL,
 
-  primaryBom                  NVARCHAR(3)     NOT NULL,      -- 'yes' | 'no'
-  primaryBomAttachmentName    NVARCHAR(200)   NULL,
-  primaryBomAttachmentUrl     NVARCHAR(500)   NULL,
+        primaryBom                  NVARCHAR(3)     NOT NULL,      -- 'yes' | 'no'
+        primaryBomAttachmentName    NVARCHAR(200)   NULL,
+        primaryBomAttachmentUrl     NVARCHAR(500)   NULL,
 
-  inlineInspection            NVARCHAR(3)     NOT NULL,      -- 'yes' | 'no'
-  cellProcuredBy              NVARCHAR(20)    NOT NULL,      -- 'Customer' | 'Premier Energies'
-  agreedCTM                   DECIMAL(18,8)   NOT NULL,
-  factoryAuditTentativeDate   DATE            NULL,
-  xPitchMm                    INT             NULL,
-  trackerDetails              INT             NULL,
-  priority                    NVARCHAR(10)    NOT NULL,      -- 'high' | 'low'
-  remarks                     NVARCHAR(MAX)   NULL,
+        inlineInspection            NVARCHAR(3)     NOT NULL,      -- 'yes' | 'no'
+        cellProcuredBy              NVARCHAR(20)    NOT NULL,      -- 'Customer' | 'Premier Energies'
+        agreedCTM                   DECIMAL(18,8)   NOT NULL,
+        factoryAuditTentativeDate   DATE            NULL,
+        xPitchMm                    INT             NULL,
+        trackerDetails              INT             NULL,
+        priority                    NVARCHAR(10)    NOT NULL,      -- 'high' | 'low'
+        remarks                     NVARCHAR(MAX)   NULL,
 
-  createdBy                   NVARCHAR(50)    NOT NULL,
-  createdAt                   DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
+        createdBy                   NVARCHAR(50)    NOT NULL,
+        createdAt                   DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
 
-  -- store BOM JSON as text (SQL Server JSON functions can still query it)
-  bom                         NVARCHAR(MAX)   NULL
-);
+        -- store BOM JSON as text (SQL Server JSON functions can still query it)
+        bom                         NVARCHAR(MAX)   NULL
+      );
 
-------------------------------------------------
--- SalesRequestFiles (child)
-IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SalesRequestFiles')
-CREATE TABLE SalesRequestFiles (
-  id             INT IDENTITY(1,1) PRIMARY KEY,
-  salesRequestId UNIQUEIDENTIFIER NOT NULL
-      CONSTRAINT FK_SRF_SR FOREIGN KEY REFERENCES SalesRequests(id) ON DELETE CASCADE,
-  title          NVARCHAR(200)   NULL,
-  fileName       NVARCHAR(200)   NOT NULL,
-  url            NVARCHAR(500)   NOT NULL
-);
+      -- NEW: add wattageBinningDist column for distribution JSON
+      IF COL_LENGTH('SalesRequests','wattageBinningDist') IS NULL
+        ALTER TABLE SalesRequests ADD wattageBinningDist NVARCHAR(MAX) NULL;
 
-------------------------------------------------
--- SalesRequestHistory (audit trail)
-IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SalesRequestHistory')
-CREATE TABLE SalesRequestHistory (
-  id             INT IDENTITY(1,1) PRIMARY KEY,
-  salesRequestId UNIQUEIDENTIFIER NOT NULL
-      CONSTRAINT FK_SRH_SR FOREIGN KEY REFERENCES SalesRequests(id) ON DELETE CASCADE,
-  action         NVARCHAR(20)    NOT NULL,  -- 'create' | 'update' | 'delete'
-  changedBy      NVARCHAR(50)    NOT NULL,
-  changedAt      DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
-  changes        NVARCHAR(MAX)   NULL       -- JSON array of { field, before, after }
-);
+        
+      -- NEW: persist sub-dropdowns + misc (nullable; backward compatible)
+      IF COL_LENGTH('SalesRequests','moduleCellType') IS NULL
+        ALTER TABLE SalesRequests ADD moduleCellType NVARCHAR(10) NULL; -- 'M10'|'M10R'|'G12'|'G12R'
+      IF COL_LENGTH('SalesRequests','cellTech') IS NULL
+        ALTER TABLE SalesRequests ADD cellTech NVARCHAR(10) NULL; -- 'PERC'|'TOPCon'
+      IF COL_LENGTH('SalesRequests','cutCells') IS NULL
+        ALTER TABLE SalesRequests ADD cutCells INT NULL; -- 60|66|72|78
+      IF COL_LENGTH('SalesRequests','certificationRequired') IS NULL
+        ALTER TABLE SalesRequests ADD certificationRequired NVARCHAR(50) NULL; -- 'BIS'|'IEC'|'BIS + IEC'|'Not Required'
+      IF COL_LENGTH('SalesRequests','projectCode') IS NULL
+        ALTER TABLE SalesRequests ADD projectCode NVARCHAR(100) NULL; -- optional display-only
+      ------------------------------------------------
+      -- SalesRequestFiles (child)
+      IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SalesRequestFiles')
+      CREATE TABLE SalesRequestFiles (
+        id             INT IDENTITY(1,1) PRIMARY KEY,
+        salesRequestId UNIQUEIDENTIFIER NOT NULL
+            CONSTRAINT FK_SRF_SR FOREIGN KEY REFERENCES SalesRequests(id) ON DELETE CASCADE,
+        title          NVARCHAR(200)   NULL,
+        fileName       NVARCHAR(200)   NOT NULL,
+        url            NVARCHAR(500)   NOT NULL
+      );
 
+      ------------------------------------------------
+      -- SalesRequestHistory (audit trail)
+      IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SalesRequestHistory')
+      CREATE TABLE SalesRequestHistory (
+        id             INT IDENTITY(1,1) PRIMARY KEY,
+        salesRequestId UNIQUEIDENTIFIER NOT NULL
+            CONSTRAINT FK_SRH_SR FOREIGN KEY REFERENCES SalesRequests(id) ON DELETE CASCADE,
+        action         NVARCHAR(20)    NOT NULL,  -- 'create' | 'update' | 'delete'
+        changedBy      NVARCHAR(50)    NOT NULL,
+        changedAt      DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
+        changes        NVARCHAR(MAX)   NULL       -- JSON array of { field, before, after }
+      );
+
+      ------------------------------------------------
+      -- Customers (master)
+      IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Customers')
+      BEGIN
+        CREATE TABLE Customers (
+          id        UNIQUEIDENTIFIER DEFAULT NEWID() PRIMARY KEY,
+          name      NVARCHAR(200) NOT NULL,
+          createdAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+          updatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+        );
+
+        -- Make names unique (collation is typically case-insensitive; if yours is case-sensitive,
+        -- keep this and also consider a computed lowercase column + unique index).
+        CREATE UNIQUE INDEX UX_Customers_name ON Customers(name);
+      END;
+
+      -- (Optional) auto-bump updatedAt on updates if you prefer DB-side stamping
+      IF OBJECT_ID('dbo.trg_Customers_UpdatedAt', 'TR') IS NULL
+      EXEC('CREATE TRIGGER trg_Customers_UpdatedAt ON Customers
+      AFTER UPDATE AS
+        UPDATE c SET updatedAt = SYSUTCDATETIME()
+        FROM Customers c
+        INNER JOIN inserted i ON c.id = i.id;');
+
+      ------------------------------------------------  
+      -- Order support for BOM components
+      IF COL_LENGTH('dbo.BomComponents','position') IS NULL
+      BEGIN
+        ALTER TABLE dbo.BomComponents ADD position INT NULL;
+
+        -- compile this after the ALTER using dynamic SQL
+        EXEC sp_executesql N'
+          ;WITH x AS (
+            SELECT name, ROW_NUMBER() OVER (ORDER BY name) AS rn
+            FROM dbo.BomComponents
+          )
+          UPDATE c
+          SET position = x.rn
+          FROM dbo.BomComponents c
+          JOIN x ON x.name = c.name;
+        ';
+      END;
+      ------------------------------------------------
+      ------------------------------------------------
+      -- Only add a position column; do NOT add an id.
+      IF COL_LENGTH('dbo.BomComponents','position') IS NULL
+      ALTER TABLE dbo.BomComponents ADD position INT NULL;
     `);
 
     console.log("✅ MSSQL schema ensured");
@@ -231,14 +373,15 @@ CREATE TABLE SalesRequestHistory (
 // call + connect init
 async function initDatabases() {
   await initMssql();
+  await upsertBomTsFromDb();
 }
-initDatabases();
 
 // session management via JWT in httpOnly cookie
 const JWT_SECRET =
   process.env.JWT_SECRET || "please_change_me_to_a_strong_secret";
 const JWT_EXPIRES_IN = "2h";
 
+// auth middleware
 function authenticateToken(req, res, next) {
   const token =
     req.cookies.token || (req.headers.authorization || "").split(" ")[1];
@@ -253,6 +396,8 @@ function authenticateToken(req, res, next) {
     next();
   });
 }
+
+// role-based authorization middleware
 function authorizeRole(...allowed) {
   return (req, res, next) => {
     if (!allowed.includes(req.user.role)) return res.sendStatus(403);
@@ -264,11 +409,141 @@ function authorizeRole(...allowed) {
 async function tryMssql(fn) {
   return await fn(mssqlPool);
 }
+
 // helper for express-validator
 function handleValidation(req, res, next) {
   const err = validationResult(req);
   if (!err.isEmpty()) return res.status(400).json({ errors: err.array() });
   next();
+}
+
+// small coercion helpers used by Sales Requests create/update
+function yesNo(v) {
+  return String(v || "").toLowerCase() === "yes" ? "yes" : "no";
+}
+
+// return int or null if invalid/absent
+function intOrNull(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+// return decimal or zero if invalid/absent
+function decOrZero(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+// Accept "YYYY-MM-DD" or any ISO-ish string → "YYYY-MM-DD" | null
+function normYMD(v) {
+  if (!v) return null;
+  const s = String(v);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
+// Simple fallback for enumerations (prevents accidental NULLs)
+function pick(v, def) {
+  const s = (v ?? "").toString().trim();
+  return s ? s : def;
+}
+
+// treat "" as "omit" on UPDATE so we never write NULLs accidentally
+function isBlank(v) {
+  return (
+    v === undefined || v === null || (typeof v === "string" && v.trim() === "")
+  );
+}
+
+// keep original value if blank (undefined or "")
+function keepIfPresent(v) {
+  // undefined => don't update; "" => don't update; anything else => keep original value
+  return isBlank(v) ? undefined : v;
+}
+
+function coerceOrderTagFromBody(b) {
+  // Prefer new sub-field if present; else legacy order type
+  const tag = (b.moduleCellType || b.moduleOrderType || "M10").toString();
+  return tag.toUpperCase(); // "M10" | "M10R" | "G12" | "G12R"
+}
+
+function makeSrProjectCodeFromBody(b) {
+  return makeProjectCodeSR({
+    customerName: b.customerName || "CUS",
+    plant: (b.moduleManufacturingPlant || "P?").toString().toUpperCase(), // "P2"/"P5"/"P6"
+    orderTag: coerceOrderTagFromBody(b),
+    date: b.deliveryStartDate, // "YYYY-MM-DD"
+  });
+}
+
+// ── Project Code helper (SR-format) ──────────────────────────────────────────
+// Builds: SR-CUS-P5-G12R-YYYYMMDD-0001 (FE is the source of truth for seq; BE just mirrors)
+function makeProjectCodeSR({
+  customerName,
+  plant, // "P2" | "P5" | "P6"
+  orderTag, // "M10" | "M10R" | "G12" | "G12R"
+  date, // "YYYY-MM-DD" | Date | undefined
+}) {
+  const cus3 =
+    (customerName || "CUS")
+      .replace(/[^A-Za-z]/g, "")
+      .toUpperCase()
+      .slice(0, 3) || "CUS";
+  const plantTag = (plant || "P?").toUpperCase();
+  const ord = (orderTag || "M10").toUpperCase();
+  const d = date ? new Date(date) : new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const seq = "0001"; // placeholder; if you later add server-side sequencing, replace this
+  return `SR-${cus3}-${plantTag}-${ord}-${yyyy}${mm}${dd}-${seq}`;
+}
+
+// strict required coercers (CREATE path)
+function mustEnum(v, allowed, defIfBlank) {
+  const s = String(v ?? "").trim();
+  const val = s || defIfBlank;
+  if (!allowed.includes(val))
+    throw new Error(`Bad enum value: ${s || "(empty)"}`);
+  return val;
+}
+
+// returns finite int, else throws
+function mustInt(v, { gt = null, gte = null } = {}) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) throw new Error("Bad int");
+  if (gt != null && !(n > gt)) throw new Error("Bad int > check");
+  if (gte != null && !(n >= gte)) throw new Error("Bad int >= check");
+  return n;
+}
+
+// returns finite decimal, else throws
+function mustDec(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) throw new Error("Bad decimal");
+  return n;
+}
+
+// returns "YYYY-MM-DD" or throws
+function mustYMD(v) {
+  const s = normYMD(v);
+  if (!s) throw new Error("Bad date");
+  return s;
+}
+
+// inflate SalesRequest row from DB + attach files
+function mapSpecRow(r) {
+  return {
+    id: String(r.id), // DB id is INT, UI expects string
+    criteria: r.criteria, // "MQP" | "Visual"
+    subCriteria: r.subCriteria || "",
+    specification: r.specification || "",
+    class: r.class || "Major", // driver returns "[class]" as "class"
+    description: r.description || null,
+    sampling: r.sampling || null,
+    typeOfCheck: r.typeOfCheck || null,
+  };
 }
 
 // ensure uploads directory exists
@@ -278,9 +553,11 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 // serve static uploads
 app.use("/uploads", express.static(uploadDir));
 
+// serve frontend static files
 const distDir = path.join(__dirname, "dist");
 const indexHtml = path.join(distDir, "index.html");
 
+// serve SPA + static assets
 app.use(express.static(distDir));
 app.use((req, res, next) => {
   if (req.path.startsWith("/api/")) return next();
@@ -298,6 +575,7 @@ const storage = multer.diskStorage({
   },
 });
 
+// max file size 100MB
 const upload = multer({
   storage,
   limits: { fileSize: 100 * 1024 * 1024 }, // 10MB
@@ -519,6 +797,52 @@ app.delete(
   }
 );
 
+// fetch BOM master from DB
+async function fetchBomFromDb() {
+  const q = `
+    SELECT
+      c.name     AS compName,
+      c.position AS compPos,
+      o.id       AS optId,
+      o.model,
+      o.subVendor,
+      o.spec
+    FROM dbo.BomComponents c
+    LEFT JOIN dbo.BomComponentOptions o
+      ON o.componentName = c.name
+    ORDER BY
+      CASE WHEN c.position IS NULL THEN 1 ELSE 0 END,
+      c.position, c.name, o.id
+  `;
+  const { recordset: rows } = await mssqlPool.request().query(q);
+
+  const map = new Map();
+  for (const r of rows) {
+    if (!map.has(r.compName)) {
+      map.set(r.compName, { id: r.compName, name: r.compName, options: [] });
+    }
+    if (r.optId != null) {
+      map.get(r.compName).options.push({
+        model: r.model,
+        subVendor: r.subVendor,
+        spec: r.spec,
+      });
+    }
+  }
+  return [...map.values()];
+}
+
+// regenerate bomMaster.ts from DB
+async function upsertBomTsFromDb() {
+  try {
+    const list = await fetchBomFromDb();
+    // reuse existing generator
+    fs.writeFileSync(BOM_TS, generateBomTs(list), "utf-8");
+  } catch (e) {
+    console.warn("Skipping bomMaster.ts regeneration:", e.message || e);
+  }
+}
+
 // GET /api/qaps → list all QAPs (with optional filters)  [UPDATED: embeds salesRequest]
 app.get("/api/qaps", authenticateToken, async (req, res) => {
   const { status, plant } = req.query;
@@ -685,7 +1009,6 @@ app.get("/api/qaps", authenticateToken, async (req, res) => {
   }
 });
 
-// GET /api/qaps/for-review → list QAPs with unmatched items for this user’s role
 // GET /api/qaps/for-review → list QAPs with unmatched items for this user’s role  [UPDATED: embeds salesRequest]
 app.get("/api/qaps/for-review", authenticateToken, async (req, res) => {
   const userRole = req.user.role;
@@ -1032,12 +1355,12 @@ app.post(
               INSERT INTO QAPs (
                 id, customerName, projectName, orderQuantity,
                 productType, plant, status, submittedBy, submittedAt,
-                currentLevel, createdAt, lastModifiedAt, salesRequestId
+                currentLevel, createdAt, lastModifiedAt, projectCode, salesRequestId
               )
               VALUES (
                 @id,@c,@p,@o,
                 @pt,@pl,@s,@sb,SYSUTCDATETIME(),
-                @cl,SYSUTCDATETIME(),SYSUTCDATETIME(),@srid
+                @cl,SYSUTCDATETIME(),SYSUTCDATETIME(),@pc, @srid
               );
             `);
 
@@ -1737,54 +2060,72 @@ app.post(
   }
 );
 
+// -─────────────────────────────────────────────────────────────────
+// SPEC ENDPOINTS
 // GET /api/spec-templates → list available spec templates
 app.get("/api/spec-templates", authenticateToken, async (req, res) => {
   // simply combine your in‑memory arrays
-  const { qapSpecifications } = require("../src/data/qapSpecification");
+  const { qapSpecifications } = require("../src/data/qapSpecifications");
   res.json(qapSpecifications);
 });
-
-// POST /api/spec-templates → create a new spec template (admin only)
-app.post(
-  "/api/spec-templates",
-  authenticateToken,
-  authorizeRole("admin"),
-  body("criteria").isString(),
-  body("subCriteria").isString(),
-  body("class").isString(),
-  handleValidation,
-  (req, res) => {
-    // in real life you’d persist to a `SpecTemplates` table
-    // for now, just echo back
-    res.status(201).json(req.body);
-  }
-);
 
 // helper for file URLs under sales-requests
 const PUBLIC_APP_URL = process.env.APP_URL || "https://localhost:11443";
 const fileUrl = (fileName) => `${PUBLIC_APP_URL}/uploads/${fileName}`;
 
-// helper to parse numbers from form data
-const intOrNull = (v) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-};
+// ─────────────────────────────────────────────────────────────────
+// Data-file helpers to read from root/src/data/*.ts or *.js
+const vm = require("vm");
+function tryRequireJs(fpathNoExt) {
+  try {
+    return require(fpathNoExt + ".js");
+  } catch {
+    try {
+      return require(fpathNoExt); // if someone compiled to .cjs or .mjs and Node can load it
+    } catch {
+      return null;
+    }
+  }
+}
+/**
+ * Load an exported array from a TS/JS data file.
+ * - Tries compiled JS first (root/src/data/X.js).
+ * - If missing, reads TS source and extracts a `export const <name> = [...]` literal.
+ */
+function loadArrayExportFromDataFile(absPathNoExt, exportNameCandidates) {
+  // 1) Prefer compiled JS
+  const jsMod = tryRequireJs(absPathNoExt);
+  if (jsMod) {
+    for (const k of exportNameCandidates) {
+      if (Array.isArray(jsMod[k])) return jsMod[k];
+    }
+    // default export fallback
+    if (Array.isArray(jsMod.default)) return jsMod.default;
+  }
 
-// helper to parse decimal numbers from form data
-const decOrZero = (v) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-};
-
-// helper to parse yes/no from form data
-const yesNo = (v) => (v === "yes" ? "yes" : v === "no" ? "no" : "no");
-
-// helper to pick only certain keys from an object
-const pick = (o, keys) =>
-  keys.reduce(
-    (acc, k) => (o[k] !== undefined ? ((acc[k] = o[k]), acc) : acc),
-    {}
-  );
+  // 2) Fallback: parse TS file literal
+  const tsPath = absPathNoExt + ".ts";
+  if (!fs.existsSync(tsPath)) return [];
+  const raw = fs.readFileSync(tsPath, "utf8");
+  // Find: export const <name> = [ ... ];
+  for (const name of exportNameCandidates) {
+    const re = new RegExp(
+      String.raw`export\s+const\s+${name}\s*=\s*(\[[\s\S]*?\])\s*;?`,
+      "m"
+    );
+    const m = raw.match(re);
+    if (m && m[1]) {
+      const literal = m[1];
+      // Very safe evaluation in a sandbox: only array/object/primitive literals
+      // Avoid JSON.parse because trailing commas & single quotes may appear.
+      const context = {};
+      const script = new vm.Script("(" + literal + ")");
+      const arr = script.runInNewContext(context, { timeout: 1000 });
+      if (Array.isArray(arr)) return arr;
+    }
+  }
+  return [];
+}
 
 // function to create a snapshot of fields from sales-requests for history
 function snapshotForHistory(row, otherFilesList) {
@@ -1880,107 +2221,134 @@ const salesRequestUpload = upload.fields([
   { name: "otherAttachments", maxCount: 50 }, // multiple additional files
 ]);
 
+function ymdPartsUTC(d = new Date()) {
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const yyyy = d.getUTCFullYear();
+  return { dd, mm, yyyy, ymd: `${yyyy}${mm}${dd}`, dmy: `${dd}-${mm}-${yyyy}` };
+}
+
+function bumpDocRefString(docRef) {
+  try {
+    if (!docRef || typeof docRef !== "string") return docRef;
+    const { dmy, ymd } = ymdPartsUTC();
+
+    // 1) Rev.N → Rev.(N+1) (or inject Rev.1 if not present)
+    const revMatch = docRef.match(/\bRev\.(\d+)\b/i);
+    let out = docRef;
+    if (revMatch) {
+      const n = parseInt(revMatch[1], 10);
+      out = out.replace(/\bRev\.(\d+)\b/i, `Rev.${(n || 0) + 1}`);
+    } else {
+      // Append a revision token if missing
+      out = `${out} Rev.1`;
+    }
+
+    // 2) Replace any DD-MM-YYYY date token with today (keep format)
+    out = out.replace(/\b\d{2}-\d{2}-\d{4}\b/g, dmy);
+
+    // 3) Replace the last 8-digit date token (YYYYMMDD) with today (if present)
+    out = out.replace(/(\d{8})(?!.*\d)/, ymd);
+
+    return out;
+  } catch {
+    return docRef;
+  }
+}
+
+function bumpBomDocRefJSON(bomJson) {
+  try {
+    const obj = typeof bomJson === "string" ? JSON.parse(bomJson) : bomJson;
+    if (!obj || typeof obj !== "object") return bomJson;
+    const current = obj.documentRef || "";
+    const bumped = bumpDocRefString(current);
+    if (bumped !== current) obj.documentRef = bumped;
+    return JSON.stringify(obj);
+  } catch {
+    return bomJson;
+  }
+}
+
 // function to inflate a sales request row from DB + associated files into API response
 function inflateSalesRequestRow(row, filesMap) {
-  const files = filesMap ? filesMap[row.id] || [] : [];
+  const files = filesMap[row.id] || [];
+  const toYMD = (d) =>
+    !d
+      ? null
+      : (typeof d?.toISOString === "function"
+          ? d.toISOString()
+          : new Date(d).toISOString()
+        ).slice(0, 10);
   return {
+    ...row,
     id: row.id,
     projectCode: row.projectCode,
     customerName: row.customerName,
-    isNewCustomer: row.isNewCustomer,
-    moduleManufacturingPlant: row.moduleManufacturingPlant,
-    moduleOrderType: row.moduleOrderType,
-    cellType: row.cellType,
-    wattageBinning: row.wattageBinning,
-    rfqOrderQtyMW: row.rfqOrderQtyMW,
-    premierBiddedOrderQtyMW: row.premierBiddedOrderQtyMW,
-    deliveryStartDate:
-      row.deliveryStartDate?.toISOString?.().slice(0, 10) ??
-      row.deliveryStartDate,
-    deliveryEndDate:
-      row.deliveryEndDate?.toISOString?.().slice(0, 10) ?? row.deliveryEndDate,
-    projectLocation: row.projectLocation,
-    cableLengthRequired: row.cableLengthRequired,
-    qapType: row.qapType,
-    qapTypeAttachmentUrl: row.qapTypeAttachmentUrl,
-    primaryBom: row.primaryBom,
-    primaryBomAttachmentUrl: row.primaryBomAttachmentUrl,
-    inlineInspection: row.inlineInspection,
-    cellProcuredBy: row.cellProcuredBy,
-    agreedCTM: Number(row.agreedCTM),
-    factoryAuditTentativeDate: row.factoryAuditTentativeDate
-      ? row.factoryAuditTentativeDate.toISOString?.().slice(0, 10) ??
-        row.factoryAuditTentativeDate
+    // --- add normalized date strings for the UI ---
+    deliveryStartDate: toYMD(row.deliveryStartDate),
+    deliveryEndDate: toYMD(row.deliveryEndDate),
+    factoryAuditTentativeDate: toYMD(row.factoryAuditTentativeDate),
+    // NEW fields (null-safe)
+    projectCode: row.projectCode || null,
+    moduleCellType: row.moduleCellType || null,
+    cellTech: row.cellTech || null,
+    cutCells: row.cutCells != null ? Number(row.cutCells) : null,
+    certificationRequired: row.certificationRequired || null,
+    // existing + JSON handling
+    qapTypeAttachmentUrl: row.qapTypeAttachmentUrl || null,
+    primaryBomAttachmentUrl: row.primaryBomAttachmentUrl || null,
+    otherAttachments: files.map((f) => ({ title: f.title || "", url: f.url })),
+    bom: row.bom ? JSON.parse(row.bom) : null,
+    wattageBinningDist: row.wattageBinningDist
+      ? JSON.parse(row.wattageBinningDist)
       : null,
-    xPitchMm: row.xPitchMm,
-    trackerDetails: row.trackerDetails,
-    priority: row.priority,
-    remarks: row.remarks,
-    otherAttachments: files.map((f) => ({
-      title: f.title || null,
-      url: f.url,
-    })),
-    createdBy: row.createdBy,
-    createdAt: row.createdAt, // Express will serialize as ISO
-    bom: (() => {
-      try {
-        return row.bom ? JSON.parse(row.bom) : undefined;
-      } catch {
-        return undefined;
-      }
-    })(),
   };
 }
 
-// GET /api/sales-requests → list all sales requests
+// GET /api/sales-requests → list all sales requests (optional ?projectCode=)
 app.get("/api/sales-requests", authenticateToken, async (req, res) => {
   try {
     const { projectCode } = req.query || {};
     let masters = [];
-    await tryMssql(async (db) => {
-      if (db === mssqlPool) {
-        let rq = mssqlPool.request();
-        let sqlText = "SELECT * FROM SalesRequests";
-        if (projectCode) {
-          rq = rq.input("pc", sql.NVarChar, String(projectCode));
-          sqlText += " WHERE projectCode=@pc";
-        }
-        sqlText += " ORDER BY createdAt DESC";
-        masters = (await rq.query(sqlText)).recordset;
-      }
-    });
+
+    // 1) fetch masters (optionally filtered)
+    await (async () => {
+      const rq = mssqlPool.request();
+      const hasFilter = typeof projectCode === "string" && projectCode.trim();
+      const sqlText =
+        "SELECT * FROM SalesRequests" +
+        (hasFilter ? " WHERE projectCode=@pc" : "") +
+        " ORDER BY createdAt DESC";
+      if (hasFilter) rq.input("pc", sql.NVarChar, projectCode.trim());
+      masters = (await rq.query(sqlText)).recordset;
+    })();
 
     if (!masters.length) return res.json([]);
 
+    // 2) fetch all child file rows in one query
     const ids = masters.map((m) => m.id);
-    let files = [];
-    await tryMssql(async (db) => {
-      if (db === mssqlPool) {
-        let r = mssqlPool.request();
-        const inClause = ids.map((_, i) => `@id${i}`).join(",");
-        ids.forEach(
-          (id, i) => (r = r.input(`id${i}`, sql.UniqueIdentifier, id))
-        );
-        files = (
-          await r.query(
-            `SELECT * FROM SalesRequestFiles WHERE salesRequestId IN (${inClause}) ORDER BY id`
-          )
-        ).recordset;
-      }
-    });
+    const inClause = ids.map((_, i) => `@id${i}`).join(",");
+    let rf = mssqlPool.request();
+    ids.forEach((id, i) => (rf = rf.input(`id${i}`, sql.UniqueIdentifier, id)));
+    const files = (
+      await rf.query(
+        `SELECT * FROM SalesRequestFiles WHERE salesRequestId IN (${inClause}) ORDER BY id`
+      )
+    ).recordset;
+
+    // 3) map & inflate
     const filesMap = files.reduce((acc, f) => {
       (acc[f.salesRequestId] ||= []).push(f);
       return acc;
     }, {});
-
     res.json(masters.map((row) => inflateSalesRequestRow(row, filesMap)));
-  } catch (e) {
-    console.error("GET /api/sales-requests error:", e);
+  } catch (err) {
+    console.error("GET /api/sales-requests error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
 
-// GET /api/sales-requests/:id → get a specific sales request by ID
+// GET /api/sales-requests/:id → get one by id
 app.get(
   "/api/sales-requests/:id",
   authenticateToken,
@@ -1989,680 +2357,445 @@ app.get(
   async (req, res) => {
     const { id } = req.params;
     try {
-      let row;
-      await tryMssql(async (db) => {
-        if (db === mssqlPool) {
-          row = (
-            await mssqlPool
-              .request()
-              .input("id", sql.UniqueIdentifier, id)
-              .query("SELECT * FROM SalesRequests WHERE id=@id")
-          ).recordset[0];
-        }
-      });
+      const row = (
+        await mssqlPool
+          .request()
+          .input("id", sql.UniqueIdentifier, id)
+          .query("SELECT * FROM SalesRequests WHERE id=@id")
+      ).recordset[0];
+
       if (!row) return res.status(404).json({ message: "Not found" });
 
-      let files = [];
-      await tryMssql(async (db) => {
-        if (db === mssqlPool) {
-          files = (
-            await mssqlPool
-              .request()
-              .input("id", sql.UniqueIdentifier, id)
-              .query(
-                "SELECT * FROM SalesRequestFiles WHERE salesRequestId=@id ORDER BY id"
-              )
-          ).recordset;
-        }
-      });
-      const filesMap = { [id]: files };
-      res.json(inflateSalesRequestRow(row, filesMap));
-    } catch (e) {
-      console.error("GET /api/sales-requests/:id error:", e);
+      const files = (
+        await mssqlPool
+          .request()
+          .input("id", sql.UniqueIdentifier, id)
+          .query(
+            "SELECT * FROM SalesRequestFiles WHERE salesRequestId=@id ORDER BY id"
+          )
+      ).recordset;
+
+      res.json(inflateSalesRequestRow(row, { [id]: files }));
+    } catch (err) {
+      console.error("GET /api/sales-requests/:id error:", err);
       res.status(500).json({ message: "Server error" });
     }
   }
 );
 
-// POST /api/sales-requests → create a new sales request
+// CREATE (strict) — never write NULL into NOT NULL cols
+// CREATE Sales Request
 app.post(
   "/api/sales-requests",
   authenticateToken,
-  salesRequestUpload,
+  upload.fields([
+    { name: "qapTypeAttachment", maxCount: 1 },
+    { name: "primaryBomAttachment", maxCount: 1 },
+    { name: "otherAttachments", maxCount: 50 },
+  ]),
   async (req, res) => {
-    const f = req.body; // multipart fields arrive as strings
-
-    // uploaded files
-    const qapTypeFile = (req.files?.qapTypeAttachment || [])[0];
-    const primaryBomFile = (req.files?.primaryBomAttachment || [])[0];
-    const otherFiles = req.files?.otherAttachments || [];
-
-    // optional titles for "otherAttachments"
-    let otherTitles = [];
     try {
-      otherTitles = JSON.parse(f.otherAttachmentTitles || "[]");
-      if (!Array.isArray(otherTitles)) otherTitles = [];
-    } catch {
-      otherTitles = [];
-    }
+      const b = req.body;
+      // Either take FE-provided code or compute a canonical one here
+      const projectCode =
+        (b.projectCode && b.projectCode.trim()) || makeSrProjectCodeFromBody(b);
 
-    const newId = require("crypto").randomUUID();
-    const now = new Date();
-    const createdBy = req.user?.username || f.createdBy || "sales";
-    const actor = req.user?.username || createdBy; // who to log in history
+      const id = crypto.randomUUID();
 
-    const code = makeProjectCode({
-      customerName: f.customerName,
-      rfqOrderQtyMW: f.rfqOrderQtyMW,
-      projectLocation: f.projectLocation,
-      date: now,
-    });
+      // File URLs
+      const fileUrl = (f) => (f ? `/uploads/${f.filename}` : null);
+      const qapTypeFile = req.files?.qapTypeAttachment?.[0] || null;
+      const primaryBomFile = req.files?.primaryBomAttachment?.[0] || null;
 
-    const tx = new sql.Transaction(mssqlPool);
-    try {
-      await tx.begin();
-
-      // 1) insert master
-      const rq = tx
-        .request()
-        .input("id", sql.UniqueIdentifier, newId)
-        .input("customerName", sql.NVarChar, f.customerName?.trim() || "")
-        .input("isNewCustomer", sql.NVarChar, yesNo(f.isNewCustomer))
-        .input(
-          "moduleManufacturingPlant",
-          sql.NVarChar,
-          (f.moduleManufacturingPlant || "").toLowerCase()
-        )
-        .input(
-          "moduleOrderType",
-          sql.NVarChar,
-          (f.moduleOrderType || "").toLowerCase()
-        )
-        .input("cellType", sql.NVarChar, f.cellType || "DCR")
-        .input("wattageBinning", sql.Int, intOrNull(f.wattageBinning) ?? 0)
-        .input("rfqOrderQtyMW", sql.Int, intOrNull(f.rfqOrderQtyMW) ?? 0)
-        .input(
-          "premierBiddedOrderQtyMW",
-          sql.Int,
-          intOrNull(f.premierBiddedOrderQtyMW)
-        )
-        .input("deliveryStartDate", sql.Date, f.deliveryStartDate)
-        .input("deliveryEndDate", sql.Date, f.deliveryEndDate)
-        .input("projectLocation", sql.NVarChar, f.projectLocation?.trim() || "")
-        .input(
-          "cableLengthRequired",
-          sql.Int,
-          intOrNull(f.cableLengthRequired) ?? 0
-        )
-        .input("qapType", sql.NVarChar, f.qapType || "Customer")
-        .input(
-          "qapTypeAttachmentName",
-          sql.NVarChar,
-          qapTypeFile?.filename || null
-        )
-        .input(
-          "qapTypeAttachmentUrl",
-          sql.NVarChar,
-          qapTypeFile ? fileUrl(qapTypeFile.filename) : null
-        )
-        .input("primaryBom", sql.NVarChar, yesNo(f.primaryBom))
-        .input(
-          "primaryBomAttachmentName",
-          sql.NVarChar,
-          primaryBomFile?.filename || null
-        )
-        .input(
-          "primaryBomAttachmentUrl",
-          sql.NVarChar,
-          primaryBomFile ? fileUrl(primaryBomFile.filename) : null
-        )
-        .input("inlineInspection", sql.NVarChar, yesNo(f.inlineInspection))
-        .input("cellProcuredBy", sql.NVarChar, f.cellProcuredBy || "Customer")
-        .input("agreedCTM", sql.Decimal(18, 8), decOrZero(f.agreedCTM))
-        .input(
-          "factoryAuditTentativeDate",
-          sql.Date,
-          f.factoryAuditTentativeDate || null
-        )
-        .input("xPitchMm", sql.Int, intOrNull(f.xPitchMm))
-        .input("trackerDetails", sql.Int, intOrNull(f.trackerDetails))
-        .input("priority", sql.NVarChar, f.priority || "low")
-        .input("remarks", sql.NVarChar, f.remarks || null)
-        .input("createdBy", sql.NVarChar, createdBy)
-        .input("createdAt", sql.DateTime2, now)
-        .input("projectCode", sql.NVarChar, code)
-        .input("bom", sql.NVarChar, f.bom || null);
-
-      await rq.query(`
-        INSERT INTO SalesRequests (
-          id, customerName, isNewCustomer, moduleManufacturingPlant,
-          moduleOrderType, cellType, wattageBinning, rfqOrderQtyMW,
-          premierBiddedOrderQtyMW, deliveryStartDate, deliveryEndDate,
-          projectLocation, cableLengthRequired, qapType,
-          qapTypeAttachmentName, qapTypeAttachmentUrl,
-          primaryBom, primaryBomAttachmentName, primaryBomAttachmentUrl,
-          inlineInspection, cellProcuredBy, agreedCTM, factoryAuditTentativeDate,
-          xPitchMm, trackerDetails, priority, remarks, createdBy, createdAt, bom, projectCode
-        )
-        VALUES (
-          @id, @customerName, @isNewCustomer, @moduleManufacturingPlant,
-          @moduleOrderType, @cellType, @wattageBinning, @rfqOrderQtyMW,
-          @premierBiddedOrderQtyMW, @deliveryStartDate, @deliveryEndDate,
-          @projectLocation, @cableLengthRequired, @qapType,
-          @qapTypeAttachmentName, @qapTypeAttachmentUrl,
-          @primaryBom, @primaryBomAttachmentName, @primaryBomAttachmentUrl,
-          @inlineInspection, @cellProcuredBy, @agreedCTM, @factoryAuditTentativeDate,
-          @xPitchMm, @trackerDetails, @priority, @remarks, @createdBy, @createdAt, @bom, @projectCode
-        );
-      `);
-
-      // 2) insert child files (otherAttachments)
-      if (otherFiles.length) {
-        for (let i = 0; i < otherFiles.length; i++) {
-          const ffile = otherFiles[i];
-          const title = (otherTitles[i] || "").trim();
-          await tx
-            .request()
-            .input("srid", sql.UniqueIdentifier, newId)
-            .input("title", sql.NVarChar, title || null)
-            .input("fn", sql.NVarChar, ffile.filename)
-            .input("url", sql.NVarChar, fileUrl(ffile.filename)).query(`
-              INSERT INTO SalesRequestFiles (salesRequestId, title, fileName, url)
-              VALUES (@srid, @title, @fn, @url);
-            `);
+      // Optional “other attachments”
+      const otherTitles = (() => {
+        try {
+          return JSON.parse(b.otherAttachmentTitles || "[]");
+        } catch {
+          return [];
         }
+      })();
+
+      // Distribution JSON
+      let wattageBinningDist = null;
+      try {
+        const arr = JSON.parse(b.wattageBinningDist || "[]");
+        if (Array.isArray(arr)) wattageBinningDist = JSON.stringify(arr);
+      } catch {
+        wattageBinningDist = null;
       }
 
-      // 3) fetch fresh row + files and write history
-      const row = (
-        await tx
-          .request()
-          .input("id", sql.UniqueIdentifier, newId)
-          .query("SELECT * FROM SalesRequests WHERE id=@id")
-      ).recordset[0];
-      const files = (
-        await tx
-          .request()
-          .input("id", sql.UniqueIdentifier, newId)
-          .query(
-            "SELECT * FROM SalesRequestFiles WHERE salesRequestId=@id ORDER BY id"
-          )
-      ).recordset;
+      // BOM JSON (string)
+      const bomJson = b.bom && b.bom.trim() ? b.bom : null;
 
-      const afterSnap = snapshotForHistory(row, files);
-      const changes = Object.keys(afterSnap).map((k) => ({
-        field: k,
-        before: null,
-        after: afterSnap[k],
-      }));
+      await tryMssql(async (db) => {
+        if (db === mssqlPool) {
+          const rq = mssqlPool.request();
 
-      await tx
-        .request()
-        .input("sid", sql.UniqueIdentifier, newId)
-        .input("act", sql.NVarChar, "create")
-        .input("by", sql.NVarChar, actor)
-        .input("chg", sql.NVarChar, JSON.stringify(changes)).query(`
-          INSERT INTO SalesRequestHistory (salesRequestId, action, changedBy, changes)
-          VALUES (@sid, @act, @by, @chg);
-        `);
+          rq.input("id", sql.UniqueIdentifier, id)
+            .input("customerName", sql.NVarChar, b.customerName)
+            .input("isNewCustomer", sql.NVarChar, yesNo(b.isNewCustomer))
+            .input(
+              "moduleManufacturingPlant",
+              sql.NVarChar,
+              (b.moduleManufacturingPlant || "").toLowerCase()
+            )
+            .input(
+              "moduleOrderType",
+              sql.NVarChar,
+              (b.moduleOrderType || "").toLowerCase()
+            )
+            .input("cellType", sql.NVarChar, pick(b.cellType, "DCR"))
+            .input(
+              "wattageBinning",
+              sql.Int,
+              mustInt(b.wattageBinning || 0, { gte: 0 })
+            )
+            .input(
+              "rfqOrderQtyMW",
+              sql.Int,
+              mustInt(b.rfqOrderQtyMW || 0, { gt: 0 })
+            )
+            .input(
+              "premierBiddedOrderQtyMW",
+              sql.Int,
+              intOrNull(b.premierBiddedOrderQtyMW)
+            )
+            .input("deliveryStartDate", sql.Date, mustYMD(b.deliveryStartDate))
+            .input("deliveryEndDate", sql.Date, mustYMD(b.deliveryEndDate))
+            .input("projectLocation", sql.NVarChar, b.projectLocation || "")
+            .input(
+              "cableLengthRequired",
+              sql.Int,
+              mustInt(b.cableLengthRequired || 0, { gte: 0 })
+            )
+            .input(
+              "qapType",
+              sql.NVarChar,
+              mustEnum(b.qapType, ["Customer", "Premier Energies"], "Customer")
+            )
+            .input(
+              "qapTypeAttachmentName",
+              sql.NVarChar,
+              qapTypeFile ? qapTypeFile.originalname : null
+            )
+            .input("qapTypeAttachmentUrl", sql.NVarChar, fileUrl(qapTypeFile))
+            .input(
+              "primaryBom",
+              sql.NVarChar,
+              mustEnum(b.primaryBom, ["yes", "no"], "no")
+            )
+            .input(
+              "primaryBomAttachmentName",
+              sql.NVarChar,
+              primaryBomFile ? primaryBomFile.originalname : null
+            )
+            .input(
+              "primaryBomAttachmentUrl",
+              sql.NVarChar,
+              fileUrl(primaryBomFile)
+            )
+            .input(
+              "inlineInspection",
+              sql.NVarChar,
+              mustEnum(b.inlineInspection, ["yes", "no"], "no")
+            )
+            .input(
+              "cellProcuredBy",
+              sql.NVarChar,
+              pick(b.cellProcuredBy, "Customer")
+            )
+            .input("agreedCTM", sql.Decimal(18, 8), mustDec(b.agreedCTM || 0))
+            .input(
+              "factoryAuditTentativeDate",
+              sql.Date,
+              normYMD(b.factoryAuditTentativeDate)
+            )
+            .input("xPitchMm", sql.Int, intOrNull(b.xPitchMm))
+            .input("trackerDetails", sql.Int, intOrNull(b.trackerDetails))
+            .input(
+              "priority",
+              sql.NVarChar,
+              mustEnum(b.priority, ["high", "low"], "low")
+            )
+            .input("remarks", sql.NVarChar, b.remarks || null)
+            .input(
+              "createdBy",
+              sql.NVarChar,
+              b.createdBy || req.user?.username || "sales"
+            )
+            .input("bom", sql.NVarChar, bomJson)
+            .input("wattageBinningDist", sql.NVarChar, wattageBinningDist)
+            .input("moduleCellType", sql.NVarChar, b.moduleCellType || null)
+            .input("cellTech", sql.NVarChar, b.cellTech || null)
+            .input("cutCells", sql.Int, intOrNull(b.cutCells))
+            .input(
+              "certificationRequired",
+              sql.NVarChar,
+              b.certificationRequired || null
+            )
+            .input("projectCode", sql.NVarChar, projectCode);
 
-      await tx.commit();
+          await rq.query(`
+            INSERT INTO SalesRequests (
+              id, customerName, isNewCustomer, moduleManufacturingPlant, moduleOrderType,
+              cellType, wattageBinning, rfqOrderQtyMW, premierBiddedOrderQtyMW,
+              deliveryStartDate, deliveryEndDate, projectLocation, cableLengthRequired,
+              qapType, qapTypeAttachmentName, qapTypeAttachmentUrl,
+              primaryBom, primaryBomAttachmentName, primaryBomAttachmentUrl,
+              inlineInspection, cellProcuredBy, agreedCTM, factoryAuditTentativeDate,
+              xPitchMm, trackerDetails, priority, remarks, createdBy, bom,
+              wattageBinningDist, moduleCellType, cellTech, cutCells, certificationRequired,
+              projectCode
+            )
+            VALUES (
+              @id, @customerName, @isNewCustomer, @moduleManufacturingPlant, @moduleOrderType,
+              @cellType, @wattageBinning, @rfqOrderQtyMW, @premierBiddedOrderQtyMW,
+              @deliveryStartDate, @deliveryEndDate, @projectLocation, @cableLengthRequired,
+              @qapType, @qapTypeAttachmentName, @qapTypeAttachmentUrl,
+              @primaryBom, @primaryBomAttachmentName, @primaryBomAttachmentUrl,
+              @inlineInspection, @cellProcuredBy, @agreedCTM, @factoryAuditTentativeDate,
+              @xPitchMm, @trackerDetails, @priority, @remarks, @createdBy, @bom,
+              @wattageBinningDist, @moduleCellType, @cellTech, @cutCells, @certificationRequired,
+              @projectCode
+            );
+          `);
 
-      // respond with the created entity
-      return res
-        .status(201)
-        .json(inflateSalesRequestRow(row, { [newId]: files }));
+          // Save "otherAttachments" (optional)
+          if (Array.isArray(req.files?.otherAttachments)) {
+            for (let i = 0; i < req.files.otherAttachments.length; i++) {
+              const f = req.files.otherAttachments[i];
+              const t = (otherTitles[i] || "").toString().trim() || null;
+              await mssqlPool
+                .request()
+                .input("sid", sql.UniqueIdentifier, id)
+                .input("title", sql.NVarChar, t)
+                .input("fn", sql.NVarChar, f.originalname)
+                .input("url", sql.NVarChar, fileUrl(f)).query(`
+                  INSERT INTO SalesRequestFiles (salesRequestId, title, fileName, url)
+                  VALUES (@sid, @title, @fn, @url);
+                `);
+            }
+          }
+        }
+      });
+
+      res.status(201).json({ id, projectCode });
     } catch (e) {
-      try {
-        await tx.rollback();
-      } catch {}
       console.error("POST /api/sales-requests error:", e);
-      return res.status(500).json({ message: "Server error" });
+      res.status(500).json({ message: "Server error" });
     }
   }
 );
 
-// PUT /api/sales-requests/:id → update an existing sales request
+// UPDATE (edit) — never overwrite with NULL
+// UPDATE Sales Request
 app.put(
   "/api/sales-requests/:id",
   authenticateToken,
-  param("id").isUUID(),
-  handleValidation,
-  salesRequestUpload,
+  upload.fields([
+    { name: "qapTypeAttachment", maxCount: 1 },
+    { name: "primaryBomAttachment", maxCount: 1 },
+    { name: "otherAttachments", maxCount: 50 },
+  ]),
   async (req, res) => {
     const { id } = req.params;
-    const f = req.body;
-
-    // incoming files
-    const qapTypeFile = (req.files?.qapTypeAttachment || [])[0];
-    const primaryBomFile = (req.files?.primaryBomAttachment || [])[0];
-    const otherFiles = req.files?.otherAttachments || [];
-    let otherTitles = [];
     try {
-      otherTitles = JSON.parse(f.otherAttachmentTitles || "[]");
-      if (!Array.isArray(otherTitles)) otherTitles = [];
-    } catch {
-      otherTitles = [];
-    }
-
-    // removal flags
-    const removeQap =
-      f.removeQapTypeAttachment === "true" || f.removeQapTypeAttachment === "1";
-    const removePrimary =
-      f.removePrimaryBomAttachment === "true" ||
-      f.removePrimaryBomAttachment === "1";
-    let removeOtherIds = [];
-    try {
-      const tmp = JSON.parse(f.removeOtherAttachmentIds || "[]");
-      if (Array.isArray(tmp))
-        removeOtherIds = tmp.filter((x) => Number.isInteger(x));
-    } catch {}
-
-    const actor = req.user?.username || "sales";
-    const tx = new sql.Transaction(mssqlPool);
-
-    // we will delete physical files only AFTER commit succeeds
-    const filesToUnlink = [];
-
-    try {
-      await tx.begin();
-
-      // A) current row + files (BEFORE snapshot)
-      const beforeRow = (
-        await tx
+      // Load current row
+      const cur = (
+        await mssqlPool
           .request()
           .input("id", sql.UniqueIdentifier, id)
-          .query("SELECT * FROM SalesRequests WHERE id=@id")
+          .query("SELECT TOP 1 * FROM SalesRequests WHERE id=@id")
       ).recordset[0];
-      if (!beforeRow) {
-        await tx.rollback();
-        return res.status(404).json({ message: "Not found" });
+      if (!cur) return res.status(404).json({ message: "Not found" });
+
+      const b = req.body;
+
+      // Decide projectCode
+      let projectCode = undefined; // undefined means "don't update"
+      if (!isBlank(b.projectCode)) {
+        projectCode = b.projectCode.trim();
+      } else {
+        // If any of the code-driving fields changed, recompute
+        const maybeChanged =
+          !isBlank(b.customerName) ||
+          !isBlank(b.moduleManufacturingPlant) ||
+          !isBlank(b.moduleCellType) ||
+          !isBlank(b.moduleOrderType) ||
+          !isBlank(b.deliveryStartDate);
+        if (maybeChanged) {
+          const merged = {
+            ...cur,
+            ...b,
+          };
+          projectCode = makeSrProjectCodeFromBody(merged);
+        }
       }
-      const beforeFiles = (
-        await tx
-          .request()
-          .input("id", sql.UniqueIdentifier, id)
-          .query(
-            "SELECT * FROM SalesRequestFiles WHERE salesRequestId=@id ORDER BY id"
-          )
-      ).recordset;
-      const beforeSnap = snapshotForHistory(beforeRow, beforeFiles);
 
-      // B) build master UPDATE
-      const fields = [];
-      let reqt = tx.request().input("id", sql.UniqueIdentifier, id);
+      // Build dynamic update (only provided fields)
+      const sets = [];
+      const rq = mssqlPool.request().input("id", sql.UniqueIdentifier, id);
 
-      const candidates = pick(f, [
-        "customerName",
-        "isNewCustomer",
+      const set = (col, type, val) => {
+        if (val === undefined) return;
+        rq.input(col, type, val);
+        sets.push(`${col}=@${col}`);
+      };
+
+      set("customerName", sql.NVarChar, keepIfPresent(b.customerName));
+      set("isNewCustomer", sql.NVarChar, keepIfPresent(yesNo(b.isNewCustomer)));
+      set(
         "moduleManufacturingPlant",
+        sql.NVarChar,
+        keepIfPresent((b.moduleManufacturingPlant || "").toLowerCase())
+      );
+      set(
         "moduleOrderType",
+        sql.NVarChar,
+        keepIfPresent((b.moduleOrderType || "").toLowerCase())
+      );
+      set(
         "cellType",
+        sql.NVarChar,
+        keepIfPresent(pick(b.cellType, cur.cellType))
+      );
+      set(
         "wattageBinning",
-        "rfqOrderQtyMW",
+        sql.Int,
+        keepIfPresent(intOrNull(b.wattageBinning))
+      );
+      set("rfqOrderQtyMW", sql.Int, keepIfPresent(intOrNull(b.rfqOrderQtyMW)));
+      set(
         "premierBiddedOrderQtyMW",
+        sql.Int,
+        keepIfPresent(intOrNull(b.premierBiddedOrderQtyMW))
+      );
+      set(
         "deliveryStartDate",
+        sql.Date,
+        keepIfPresent(normYMD(b.deliveryStartDate))
+      );
+      set(
         "deliveryEndDate",
-        "projectLocation",
+        sql.Date,
+        keepIfPresent(normYMD(b.deliveryEndDate))
+      );
+      set("projectLocation", sql.NVarChar, keepIfPresent(b.projectLocation));
+      set(
         "cableLengthRequired",
-        "qapType",
-        "primaryBom",
+        sql.Int,
+        keepIfPresent(intOrNull(b.cableLengthRequired))
+      );
+      set("qapType", sql.NVarChar, keepIfPresent(pick(b.qapType, cur.qapType)));
+      set(
         "inlineInspection",
-        "cellProcuredBy",
+        sql.NVarChar,
+        keepIfPresent(
+          mustEnum(
+            b.inlineInspection || cur.inlineInspection,
+            ["yes", "no"],
+            cur.inlineInspection
+          )
+        )
+      );
+      set("cellProcuredBy", sql.NVarChar, keepIfPresent(b.cellProcuredBy));
+      set(
         "agreedCTM",
+        sql.Decimal(18, 8),
+        keepIfPresent(decOrZero(b.agreedCTM))
+      );
+      set(
         "factoryAuditTentativeDate",
-        "xPitchMm",
+        sql.Date,
+        keepIfPresent(normYMD(b.factoryAuditTentativeDate))
+      );
+      set("xPitchMm", sql.Int, keepIfPresent(intOrNull(b.xPitchMm)));
+      set(
         "trackerDetails",
+        sql.Int,
+        keepIfPresent(intOrNull(b.trackerDetails))
+      );
+      set(
         "priority",
-        "remarks",
-        "bom",
-      ]);
+        sql.NVarChar,
+        keepIfPresent(pick(b.priority, cur.priority))
+      );
+      set("remarks", sql.NVarChar, keepIfPresent(b.remarks));
+      set("moduleCellType", sql.NVarChar, keepIfPresent(b.moduleCellType));
+      set("cellTech", sql.NVarChar, keepIfPresent(b.cellTech));
+      set("cutCells", sql.Int, keepIfPresent(intOrNull(b.cutCells)));
+      set(
+        "certificationRequired",
+        sql.NVarChar,
+        keepIfPresent(b.certificationRequired)
+      );
+      set("projectCode", sql.NVarChar, projectCode);
 
-      if (candidates.customerName !== undefined) {
-        fields.push("customerName=@customerName");
-        reqt = reqt.input(
-          "customerName",
-          sql.NVarChar,
-          candidates.customerName.trim()
-        );
-      }
-      if (candidates.isNewCustomer !== undefined) {
-        fields.push("isNewCustomer=@isNewCustomer");
-        reqt = reqt.input(
-          "isNewCustomer",
-          sql.NVarChar,
-          yesNo(candidates.isNewCustomer)
-        );
-      }
-      if (candidates.moduleManufacturingPlant !== undefined) {
-        fields.push("moduleManufacturingPlant=@moduleManufacturingPlant");
-        reqt = reqt.input(
-          "moduleManufacturingPlant",
-          sql.NVarChar,
-          candidates.moduleManufacturingPlant.toLowerCase()
-        );
-      }
-      if (candidates.moduleOrderType !== undefined) {
-        fields.push("moduleOrderType=@moduleOrderType");
-        reqt = reqt.input(
-          "moduleOrderType",
-          sql.NVarChar,
-          candidates.moduleOrderType.toLowerCase()
-        );
-      }
-      if (candidates.cellType !== undefined) {
-        fields.push("cellType=@cellType");
-        reqt = reqt.input("cellType", sql.NVarChar, candidates.cellType);
-      }
-      if (candidates.wattageBinning !== undefined) {
-        fields.push("wattageBinning=@wattageBinning");
-        reqt = reqt.input(
-          "wattageBinning",
-          sql.Int,
-          intOrNull(candidates.wattageBinning) ?? 0
-        );
-      }
-      if (candidates.rfqOrderQtyMW !== undefined) {
-        fields.push("rfqOrderQtyMW=@rfqOrderQtyMW");
-        reqt = reqt.input(
-          "rfqOrderQtyMW",
-          sql.Int,
-          intOrNull(candidates.rfqOrderQtyMW) ?? 0
-        );
-      }
-      if (candidates.premierBiddedOrderQtyMW !== undefined) {
-        fields.push("premierBiddedOrderQtyMW=@premierBiddedOrderQtyMW");
-        reqt = reqt.input(
-          "premierBiddedOrderQtyMW",
-          sql.Int,
-          intOrNull(candidates.premierBiddedOrderQtyMW)
-        );
-      }
-      if (candidates.deliveryStartDate !== undefined) {
-        fields.push("deliveryStartDate=@deliveryStartDate");
-        reqt = reqt.input(
-          "deliveryStartDate",
-          sql.Date,
-          candidates.deliveryStartDate || null
-        );
-      }
-      if (candidates.deliveryEndDate !== undefined) {
-        fields.push("deliveryEndDate=@deliveryEndDate");
-        reqt = reqt.input(
-          "deliveryEndDate",
-          sql.Date,
-          candidates.deliveryEndDate || null
-        );
-      }
-      if (candidates.projectLocation !== undefined) {
-        fields.push("projectLocation=@projectLocation");
-        reqt = reqt.input(
-          "projectLocation",
-          sql.NVarChar,
-          candidates.projectLocation.trim()
-        );
-      }
-      if (candidates.cableLengthRequired !== undefined) {
-        fields.push("cableLengthRequired=@cableLengthRequired");
-        reqt = reqt.input(
-          "cableLengthRequired",
-          sql.Int,
-          intOrNull(candidates.cableLengthRequired) ?? 0
-        );
-      }
-      if (candidates.qapType !== undefined) {
-        fields.push("qapType=@qapType");
-        reqt = reqt.input("qapType", sql.NVarChar, candidates.qapType);
-      }
-      if (candidates.primaryBom !== undefined) {
-        fields.push("primaryBom=@primaryBom");
-        reqt = reqt.input(
-          "primaryBom",
-          sql.NVarChar,
-          yesNo(candidates.primaryBom)
-        );
-      }
-      if (candidates.inlineInspection !== undefined) {
-        fields.push("inlineInspection=@inlineInspection");
-        reqt = reqt.input(
-          "inlineInspection",
-          sql.NVarChar,
-          yesNo(candidates.inlineInspection)
-        );
-      }
-      if (candidates.cellProcuredBy !== undefined) {
-        fields.push("cellProcuredBy=@cellProcuredBy");
-        reqt = reqt.input(
-          "cellProcuredBy",
-          sql.NVarChar,
-          candidates.cellProcuredBy
-        );
-      }
-      if (candidates.agreedCTM !== undefined) {
-        fields.push("agreedCTM=@agreedCTM");
-        reqt = reqt.input(
-          "agreedCTM",
-          sql.Decimal(18, 8),
-          decOrZero(candidates.agreedCTM)
-        );
-      }
-      if (candidates.factoryAuditTentativeDate !== undefined) {
-        fields.push("factoryAuditTentativeDate=@factoryAuditTentativeDate");
-        reqt = reqt.input(
-          "factoryAuditTentativeDate",
-          sql.Date,
-          candidates.factoryAuditTentativeDate || null
-        );
-      }
-      if (candidates.xPitchMm !== undefined) {
-        fields.push("xPitchMm=@xPitchMm");
-        reqt = reqt.input("xPitchMm", sql.Int, intOrNull(candidates.xPitchMm));
-      }
-      if (candidates.trackerDetails !== undefined) {
-        fields.push("trackerDetails=@trackerDetails");
-        reqt = reqt.input(
-          "trackerDetails",
-          sql.Int,
-          intOrNull(candidates.trackerDetails)
-        );
-      }
-      if (candidates.priority !== undefined) {
-        fields.push("priority=@priority");
-        reqt = reqt.input("priority", sql.NVarChar, candidates.priority);
-      }
-      if (candidates.remarks !== undefined) {
-        fields.push("remarks=@remarks");
-        reqt = reqt.input("remarks", sql.NVarChar, candidates.remarks || null);
-      }
-      if (candidates.bom !== undefined) {
-        fields.push("bom=@bom");
-        reqt = reqt.input("bom", sql.NVarChar, candidates.bom || null);
-      }
-
-      // ── projectCode: recompute when key inputs change ───────────────────────
-      const nameChanged = candidates.customerName !== undefined;
-      const qtyChanged = candidates.rfqOrderQtyMW !== undefined;
-      const locChanged = candidates.projectLocation !== undefined;
-
-      if (nameChanged || qtyChanged || locChanged) {
-        const effective = {
-          customerName:
-            candidates.customerName !== undefined
-              ? String(candidates.customerName)
-              : beforeRow.customerName,
-          rfqOrderQtyMW:
-            candidates.rfqOrderQtyMW !== undefined
-              ? candidates.rfqOrderQtyMW
-              : beforeRow.rfqOrderQtyMW,
-          projectLocation:
-            candidates.projectLocation !== undefined
-              ? String(candidates.projectLocation)
-              : beforeRow.projectLocation,
-        };
-        const newCode = makeProjectCode({ ...effective, date: new Date() });
-        fields.push("projectCode=@projectCode");
-        reqt = reqt.input("projectCode", sql.NVarChar, newCode);
-      }
-
-      // attachment field changes
-      if (removeQap) {
-        fields.push("qapTypeAttachmentName=NULL", "qapTypeAttachmentUrl=NULL");
-        if (beforeRow.qapTypeAttachmentName)
-          filesToUnlink.push(beforeRow.qapTypeAttachmentName);
-      }
-      if (removePrimary) {
-        fields.push(
-          "primaryBomAttachmentName=NULL",
-          "primaryBomAttachmentUrl=NULL"
-        );
-        if (beforeRow.primaryBomAttachmentName)
-          filesToUnlink.push(beforeRow.primaryBomAttachmentName);
-      }
+      // Files (if new ones were sent)
+      const qapTypeFile = req.files?.qapTypeAttachment?.[0] || null;
+      const primaryBomFile = req.files?.primaryBomAttachment?.[0] || null;
       if (qapTypeFile) {
-        fields.push(
-          "qapTypeAttachmentName=@qapTypeAttachmentName",
-          "qapTypeAttachmentUrl=@qapTypeAttachmentUrl"
+        set("qapTypeAttachmentName", sql.NVarChar, qapTypeFile.originalname);
+        set(
+          "qapTypeAttachmentUrl",
+          sql.NVarChar,
+          `/uploads/${qapTypeFile.filename}`
         );
-        reqt = reqt
-          .input("qapTypeAttachmentName", sql.NVarChar, qapTypeFile.filename)
-          .input(
-            "qapTypeAttachmentUrl",
-            sql.NVarChar,
-            fileUrl(qapTypeFile.filename)
-          );
-        if (beforeRow.qapTypeAttachmentName)
-          filesToUnlink.push(beforeRow.qapTypeAttachmentName);
       }
       if (primaryBomFile) {
-        fields.push(
-          "primaryBomAttachmentName=@primaryBomAttachmentName",
-          "primaryBomAttachmentUrl=@primaryBomAttachmentUrl"
+        set(
+          "primaryBomAttachmentName",
+          sql.NVarChar,
+          primaryBomFile.originalname
         );
-        reqt = reqt
-          .input(
-            "primaryBomAttachmentName",
-            sql.NVarChar,
-            primaryBomFile.filename
-          )
-          .input(
-            "primaryBomAttachmentUrl",
-            sql.NVarChar,
-            fileUrl(primaryBomFile.filename)
-          );
-        if (beforeRow.primaryBomAttachmentName)
-          filesToUnlink.push(beforeRow.primaryBomAttachmentName);
+        set(
+          "primaryBomAttachmentUrl",
+          sql.NVarChar,
+          `/uploads/${primaryBomFile.filename}`
+        );
       }
 
-      if (!fields.length && !otherFiles.length && !removeOtherIds.length) {
-        await tx.rollback();
+      // Optional arrays
+      if (!isBlank(b.wattageBinningDist)) {
+        set("wattageBinningDist", sql.NVarChar, b.wattageBinningDist);
+      }
+      if (!isBlank(b.bom)) {
+        set("bom", sql.NVarChar, b.bom);
+      }
+
+      if (!sets.length)
         return res.status(400).json({ message: "Nothing to update" });
-      }
 
-      if (fields.length) {
-        await reqt.query(
-          `UPDATE SalesRequests SET ${fields.join(
-            ","
-          )}, createdAt=createdAt WHERE id=@id`
-        );
-      }
+      await rq.query(
+        `UPDATE SalesRequests SET ${sets.join(", ")} WHERE id=@id;`
+      );
 
-      // C) remove selected other files (by id)
-      if (removeOtherIds.length) {
-        const existing = (
-          await tx
+      // Other attachments append
+      if (Array.isArray(req.files?.otherAttachments)) {
+        let otherTitles = [];
+        try {
+          otherTitles = JSON.parse(b.otherAttachmentTitles || "[]");
+        } catch {}
+        for (let i = 0; i < req.files.otherAttachments.length; i++) {
+          const f = req.files.otherAttachments[i];
+          const t = (otherTitles[i] || "").toString().trim() || null;
+          await mssqlPool
             .request()
-            .input("id", sql.UniqueIdentifier, id)
-            .query(
-              "SELECT id,fileName FROM SalesRequestFiles WHERE salesRequestId=@id"
-            )
-        ).recordset;
-        const toRemove = existing.filter((r) => removeOtherIds.includes(r.id));
-        if (toRemove.length) {
-          const inClause = toRemove.map((_, i) => `@rid${i}`).join(",");
-          let delReq = tx.request();
-          toRemove.forEach(
-            (r, i) => (delReq = delReq.input(`rid${i}`, sql.Int, r.id))
-          );
-          await delReq.query(
-            `DELETE FROM SalesRequestFiles WHERE id IN (${inClause})`
-          );
-          toRemove.forEach((r) => filesToUnlink.push(r.fileName));
+            .input("sid", sql.UniqueIdentifier, id)
+            .input("title", sql.NVarChar, t)
+            .input("fn", sql.NVarChar, f.originalname)
+            .input("url", sql.NVarChar, `/uploads/${f.filename}`).query(`
+              INSERT INTO SalesRequestFiles (salesRequestId, title, fileName, url)
+              VALUES (@sid, @title, @fn, @url);
+            `);
         }
       }
 
-      // D) append new other files
-      for (let i = 0; i < otherFiles.length; i++) {
-        const ff = otherFiles[i];
-        const title = (otherTitles[i] || "").trim();
-        await tx
-          .request()
-          .input("srid", sql.UniqueIdentifier, id)
-          .input("title", sql.NVarChar, title || null)
-          .input("fn", sql.NVarChar, ff.filename)
-          .input("url", sql.NVarChar, fileUrl(ff.filename))
-          .query(
-            "INSERT INTO SalesRequestFiles (salesRequestId, title, fileName, url) VALUES (@srid, @title, @fn, @url)"
-          );
-      }
-
-      // E) AFTER snapshot + history
-      const afterRow = (
-        await tx
-          .request()
-          .input("id", sql.UniqueIdentifier, id)
-          .query("SELECT * FROM SalesRequests WHERE id=@id")
-      ).recordset[0];
-      const afterFiles = (
-        await tx
-          .request()
-          .input("id", sql.UniqueIdentifier, id)
-          .query(
-            "SELECT * FROM SalesRequestFiles WHERE salesRequestId=@id ORDER BY id"
-          )
-      ).recordset;
-
-      const afterSnap = snapshotForHistory(afterRow, afterFiles);
-      const allKeys = Array.from(
-        new Set([...Object.keys(beforeSnap), ...Object.keys(afterSnap)])
-      );
-      const changes = allKeys.reduce((arr, k) => {
-        if (!isEqual(beforeSnap[k], afterSnap[k])) {
-          arr.push({
-            field: k,
-            before: beforeSnap[k] ?? null,
-            after: afterSnap[k] ?? null,
-          });
-        }
-        return arr;
-      }, []);
-
-      if (changes.length) {
-        await tx
-          .request()
-          .input("sid", sql.UniqueIdentifier, id)
-          .input("act", sql.NVarChar, "update")
-          .input("by", sql.NVarChar, actor)
-          .input("chg", sql.NVarChar, JSON.stringify(changes)).query(`
-            INSERT INTO SalesRequestHistory (salesRequestId, action, changedBy, changes)
-            VALUES (@sid, @act, @by, @chg);
-          `);
-      }
-
-      await tx.commit();
-
-      // F) only now delete physical files (best-effort)
-      filesToUnlink.forEach((fn) =>
-        fs.unlink(path.join(uploadDir, fn), () => {})
-      );
-
-      // respond
-      return res.json(inflateSalesRequestRow(afterRow, { [id]: afterFiles }));
+      res.json({ id, projectCode: projectCode ?? cur.projectCode });
     } catch (e) {
-      try {
-        await tx.rollback();
-      } catch {}
       console.error("PUT /api/sales-requests/:id error:", e);
-      return res.status(500).json({ message: "Server error" });
+      res.status(500).json({ message: "Server error" });
     }
   }
 );
@@ -2723,7 +2856,7 @@ app.delete(
   }
 );
 
-// GET /api/sales-requests/:id/history → get change history for a sales request
+// GET /api/sales-requests/:id/history → change history (newest first)
 app.get(
   "/api/sales-requests/:id/history",
   authenticateToken,
@@ -2737,7 +2870,10 @@ app.get(
           .request()
           .input("id", sql.UniqueIdentifier, id)
           .query(
-            "SELECT id, salesRequestId, action, changedBy, changedAt, changes FROM SalesRequestHistory WHERE salesRequestId=@id ORDER BY changedAt DESC, id DESC"
+            `SELECT id, salesRequestId, action, changedBy, changedAt, changes
+             FROM SalesRequestHistory
+             WHERE salesRequestId=@id
+             ORDER BY changedAt DESC, id DESC`
           )
       ).recordset;
 
@@ -2757,8 +2893,8 @@ app.get(
       }));
 
       res.json(parsed);
-    } catch (e) {
-      console.error("GET /api/sales-requests/:id/history error:", e);
+    } catch (err) {
+      console.error("GET /api/sales-requests/:id/history error:", err);
       res.status(500).json({ message: "Server error" });
     }
   }
@@ -2775,6 +2911,1177 @@ app.get("/api/project-codes", authenticateToken, async (_req, res) => {
     res.json(recordset.map((r) => r.projectCode));
   } catch (e) {
     console.error(e);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// GET /api/project-codes  (distinct non-empty codes for dropdown)
+app.get("/api/project-codes", authenticateToken, async (_req, res) => {
+  try {
+    const { recordset } = await mssqlPool
+      .request()
+      .query(
+        "SELECT DISTINCT projectCode FROM SalesRequests WHERE projectCode IS NOT NULL AND projectCode <> '' ORDER BY projectCode"
+      );
+    res.json(recordset.map((r) => r.projectCode));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// GET /api/customers?includeCounts=1
+app.get("/api/customers", authenticateToken, async (req, res) => {
+  try {
+    const includeCounts = String(req.query.includeCounts || "") === "1";
+
+    if (includeCounts) {
+      // Count SalesRequests by case/space-insensitive customerName match
+      const q = `
+        SELECT
+          c.id, c.name, c.createdAt, c.updatedAt,
+          COUNT(s.id) AS salesRequestCount
+        FROM Customers c
+        LEFT JOIN SalesRequests s
+          ON LTRIM(RTRIM(LOWER(s.customerName))) = LTRIM(RTRIM(LOWER(c.name)))
+        GROUP BY c.id, c.name, c.createdAt, c.updatedAt
+        ORDER BY c.name
+      `;
+      const { recordset } = await mssqlPool.request().query(q);
+      return res.json(recordset);
+    }
+
+    const { recordset } = await mssqlPool
+      .request()
+      .query(
+        `SELECT id, name, createdAt, updatedAt FROM Customers ORDER BY name`
+      );
+    res.json(recordset);
+  } catch (e) {
+    console.error("GET /api/customers error:", e);
+    res.status(500).send("Server error");
+  }
+});
+
+// POST /api/customers  { name }
+app.post(
+  "/api/customers",
+  [
+    authenticateToken,
+    vBody("name").isString().trim().notEmpty(),
+    handleValidation,
+  ],
+  async (req, res) => {
+    try {
+      const name = String(req.body.name || "").trim();
+
+      // dupe (case/space-insensitive)
+      const dupe = await mssqlPool
+        .request()
+        .input("n", sql.NVarChar, name)
+        .query(
+          `SELECT TOP 1 id
+           FROM Customers
+           WHERE LTRIM(RTRIM(LOWER(name))) = LTRIM(RTRIM(LOWER(@n)))`
+        );
+      if (dupe.recordset.length) {
+        return res
+          .status(409)
+          .json({ message: "A customer with this name already exists" });
+      }
+
+      const id = require("crypto").randomUUID();
+      const now = new Date();
+
+      await mssqlPool
+        .request()
+        .input("id", sql.UniqueIdentifier, id)
+        .input("n", sql.NVarChar, name)
+        .input("now", sql.DateTime2, now)
+        .query(
+          `INSERT INTO Customers (id, name, createdAt, updatedAt)
+           VALUES (@id, @n, @now, @now)`
+        );
+
+      const { recordset } = await mssqlPool
+        .request()
+        .input("id", sql.UniqueIdentifier, id)
+        .query(
+          `SELECT id, name, createdAt, updatedAt
+           FROM Customers WHERE id=@id`
+        );
+
+      res.status(201).json(recordset[0]);
+    } catch (e) {
+      console.error("POST /api/customers error:", e);
+      res.status(500).send("Server error");
+    }
+  }
+);
+
+// GET /api/customers/:id
+app.get(
+  "/api/customers/:id",
+  [authenticateToken, vParam("id").isUUID(), handleValidation],
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { recordset } = await mssqlPool
+        .request()
+        .input("id", sql.UniqueIdentifier, id)
+        .query(
+          `SELECT id, name, createdAt, updatedAt
+           FROM Customers WHERE id=@id`
+        );
+      if (!recordset.length)
+        return res.status(404).json({ message: "Customer not found" });
+      res.json(recordset[0]);
+    } catch (e) {
+      console.error("GET /api/customers/:id error:", e);
+      res.status(500).send("Server error");
+    }
+  }
+);
+
+// PUT /api/customers/:id  { name }
+app.put(
+  "/api/customers/:id",
+  [
+    authenticateToken,
+    vParam("id").isUUID(),
+    vBody("name").isString().trim().notEmpty(),
+    handleValidation,
+  ],
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const name = String(req.body.name || "").trim();
+
+      // exists?
+      const exists = await mssqlPool
+        .request()
+        .input("id", sql.UniqueIdentifier, id)
+        .query(`SELECT id FROM Customers WHERE id=@id`);
+      if (!exists.recordset.length)
+        return res.status(404).json({ message: "Customer not found" });
+
+      // dupe name (different id)
+      const dupe = await mssqlPool
+        .request()
+        .input("n", sql.NVarChar, name)
+        .input("id", sql.UniqueIdentifier, id)
+        .query(
+          `SELECT TOP 1 id
+           FROM Customers
+           WHERE LTRIM(RTRIM(LOWER(name))) = LTRIM(RTRIM(LOWER(@n)))
+             AND id <> @id`
+        );
+      if (dupe.recordset.length) {
+        return res
+          .status(409)
+          .json({ message: "A customer with this name already exists" });
+      }
+
+      await mssqlPool
+        .request()
+        .input("id", sql.UniqueIdentifier, id)
+        .input("n", sql.NVarChar, name)
+        .query(
+          `UPDATE Customers
+           SET name=@n, updatedAt=SYSUTCDATETIME()
+           WHERE id=@id`
+        );
+
+      const { recordset } = await mssqlPool
+        .request()
+        .input("id", sql.UniqueIdentifier, id)
+        .query(
+          `SELECT id, name, createdAt, updatedAt
+           FROM Customers WHERE id=@id`
+        );
+
+      res.json(recordset[0]);
+    } catch (e) {
+      console.error("PUT /api/customers/:id error:", e);
+      res.status(500).send("Server error");
+    }
+  }
+);
+
+// DELETE /api/customers/:id  (does NOT delete SalesRequests)
+app.delete(
+  "/api/customers/:id",
+  [authenticateToken, vParam("id").isUUID(), handleValidation],
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const r = await mssqlPool
+        .request()
+        .input("id", sql.UniqueIdentifier, id)
+        .query(`DELETE FROM Customers WHERE id=@id`);
+      // API from Customers.tsx expects 204 on success
+      return res.status(204).send("");
+    } catch (e) {
+      console.error("DELETE /api/customers/:id error:", e);
+      res.status(500).send("Server error");
+    }
+  }
+);
+
+// `src/data/qapSpecifications.ts`
+function generateSpecTs(specs) {
+  const header = `// AUTO-GENERATED by server at ${new Date().toISOString()}
+// Do not edit by hand. Update via the Spec Builder UI.
+
+export type CriteriaType = "MQP" | "Visual";
+export type SpecClass = "Critical" | "Major" | "Minor";
+
+export interface QAPSpecification {
+  id: string;
+  criteria: CriteriaType;
+  subCriteria: string;
+  specification: string;
+  class: SpecClass;
+  description?: string;
+  sampling?: string;
+  typeOfCheck?: string;
+}
+
+export const mqpSpecifications: QAPSpecification[] = [
+`;
+
+  const footer = `
+];
+
+export const visualElSpecifications: QAPSpecification[] = [
+`;
+
+  const end = `
+];
+
+export const qapSpecifications: QAPSpecification[] = [
+  ...mqpSpecifications,
+  ...visualElSpecifications,
+];
+`;
+
+  const mqp = specs
+    .filter((s) => s.criteria === "MQP")
+    .map(
+      (s) => `  {
+    id: "${s.id}",
+    criteria: "MQP",
+    subCriteria: \`${escapeTs(s.subCriteria)}\`,
+    specification: \`${escapeTs(s.specification)}\`,
+    class: "${s.class}",
+    ${
+      s.description ? `description: \`${escapeTs(s.description)}\`,\n    ` : ""
+    }${
+        s.typeOfCheck
+          ? `typeOfCheck: \`${escapeTs(s.typeOfCheck)}\`,\n    `
+          : ""
+      }${s.sampling ? `sampling: \`${escapeTs(s.sampling)}\`,\n    ` : ""}},`
+    )
+    .join("\n");
+
+  const visual = specs
+    .filter((s) => s.criteria === "Visual")
+    .map(
+      (s) => `  {
+    id: "${s.id}",
+    criteria: "Visual",
+    subCriteria: \`${escapeTs(s.subCriteria)}\`,
+    specification: \`${escapeTs(s.specification)}\`,
+    class: "${s.class}",
+    ${
+      s.description ? `description: \`${escapeTs(s.description)}\`,\n    ` : ""
+    }},`
+    )
+    .join("\n");
+
+  return header + mqp + footer + visual + end;
+}
+
+// `src/data/bomMaster.ts`
+function generateBomTs(list) {
+  // list: [{ name: string, options: [{model, subVendor, spec}] }, ...]
+  const names = [...new Set(list.map((x) => x.name))].sort();
+
+  const compMap = {};
+  for (const n of names) {
+    const item = list.find((x) => x.name === n);
+    compMap[n] = (item?.options || []).map((o) => ({
+      model: o.model,
+      subVendor: o.subVendor ?? null,
+      spec: o.spec ?? null,
+    }));
+  }
+
+  const nameUnion = names.map((n) => JSON.stringify(n)).join(" | ");
+
+  // Adjust these to your real lock-ins / techs if needed:
+  const VENDOR = "Premier Energies";
+  const RFID = "Near junction box";
+  const TECHS = ["M10", "G12R", "G12"];
+
+  const ts = `/* @generated by server.cjs – do not edit by hand */
+
+export type BomComponentName = ${nameUnion};
+export type BomComponentOption = { model: string; subVendor?: string | null; spec?: string | null };
+
+export const BOM_MASTER = ${JSON.stringify(compMap, null, 2)} as const
+  satisfies Record<BomComponentName, readonly BomComponentOption[]>;
+
+export const VENDOR_NAME_LOCKIN = ${JSON.stringify(VENDOR)};
+export const RFID_LOCATION_LOCKIN = ${JSON.stringify(RFID)};
+export const TECHNOLOGIES = ${JSON.stringify(TECHS)} as const;
+
+export function getOptionsFor(name: BomComponentName): readonly BomComponentOption[] {
+  return BOM_MASTER[name] || [];
+}
+`;
+
+  return ts;
+}
+
+// ---- Initialize stores from JSON; if JSON not present, try to bootstrap ----
+(function bootstrapStores() {
+  SPEC_STORE = readJsonSafe(SPEC_STORE_JSON, []);
+  BOM_STORE = readJsonSafe(BOM_STORE_JSON, []);
+
+  // If TypeScript files exist but JSON is empty, create a minimal bootstrap read by naive regex (optional).
+  // For reliability, we keep JSON as the source of truth once present.
+  // If both are empty, we just start empty.
+  writeJson(SPEC_STORE_JSON, SPEC_STORE);
+  writeJson(BOM_STORE_JSON, BOM_STORE);
+
+  // ---- Bootstrap from TS if JSON is empty (prevents empty arrays on fresh boots) ----
+  try {
+    if (!SPEC_STORE.length) {
+      const specFromTs = loadArrayExportFromDataFile(
+        SPEC_TS.replace(/\.ts$/, ""),
+        [
+          "qapSpecifications",
+          "mqpSpecifications",
+          "visualElSpecifications",
+          "default",
+        ]
+      );
+      if (Array.isArray(specFromTs) && specFromTs.length) {
+        SPEC_STORE = specFromTs.map((s) => ({
+          id: String(s.id ?? crypto.randomUUID()),
+          criteria: s.criteria,
+          subCriteria: s.subCriteria ?? "",
+          specification: s.specification ?? "",
+          class: s.class ?? "Major",
+          description: s.description ?? null,
+          sampling: s.sampling ?? null,
+          typeOfCheck: s.typeOfCheck ?? null,
+        }));
+      }
+    }
+  } catch {}
+
+  try {
+    if (!BOM_STORE.length) {
+      const bomFromTs = loadArrayExportFromDataFile(
+        BOM_TS.replace(/\.ts$/, ""),
+        ["bomComponents", "default"]
+      );
+      if (Array.isArray(bomFromTs) && bomFromTs.length) {
+        BOM_STORE = bomFromTs.map((b) => ({
+          id: String(b.id ?? crypto.randomUUID()),
+          name: b.name,
+          options: (b.options || []).map((o) => ({
+            model: String(o.model ?? "").trim(),
+            subVendor: o.subVendor ? String(o.subVendor).trim() : null,
+            spec: o.spec ? String(o.spec).trim() : null,
+          })),
+        }));
+      }
+    }
+  } catch {}
+
+  // persist stores and ensure TS files exist (now populated if possible)
+  writeJson(SPEC_STORE_JSON, SPEC_STORE);
+  writeJson(BOM_STORE_JSON, BOM_STORE);
+
+  if (!fs.existsSync(SPEC_TS)) {
+    fs.writeFileSync(SPEC_TS, generateSpecTs(SPEC_STORE), "utf-8");
+  } else {
+    // keep TS in sync with (possibly) hydrated store
+    fs.writeFileSync(SPEC_TS, generateSpecTs(SPEC_STORE), "utf-8");
+  }
+  if (!fs.existsSync(BOM_TS)) {
+    fs.writeFileSync(BOM_TS, generateBomTs(BOM_STORE), "utf-8");
+  } else {
+    // keep TS in sync with (possibly) hydrated store
+    fs.writeFileSync(BOM_TS, generateBomTs(BOM_STORE), "utf-8");
+  }
+})();
+
+// ---- Utilities ----
+const isNonEmpty = (s) => typeof s === "string" && s.trim().length > 0;
+const SPEC_CLASSES = new Set(["Critical", "Major", "Minor"]);
+const CRITERIA_SET = new Set(["MQP", "Visual"]);
+
+const COMP_SET = new Set([
+  "Solar Cell",
+  "Front Cover",
+  "Back Cover",
+  "Encapsulation (EVA)",
+  "Back Sheet (Tedlar)",
+  "Frame",
+  "Junction Box",
+  "Bypass Diodes",
+  "Interconnect Ribbons",
+  "Bus Bar",
+  "Sealants",
+  "Label",
+  "Carton Box",
+]);
+
+function regenerateSpecFile() {
+  writeJson(SPEC_STORE_JSON, SPEC_STORE);
+  fs.writeFileSync(SPEC_TS, generateSpecTs(SPEC_STORE), "utf-8");
+}
+
+function regenerateBomFile() {
+  writeJson(BOM_STORE_JSON, BOM_STORE);
+  fs.writeFileSync(BOM_TS, generateBomTs(BOM_STORE), "utf-8");
+}
+
+// ---- BOM API ----
+// GET /api/bom-components
+app.get("/api/bom-components", authenticateToken, async (_req, res) => {
+  try {
+    const comps = (
+      await mssqlPool.request().query(`
+      SELECT name, position
+      FROM dbo.BomComponents
+      ORDER BY COALESCE(position, 2147483647), name
+    `)
+    ).recordset;
+
+    if (!comps.length) return res.json([]);
+
+    const names = comps.map((c) => c.name);
+    const inClause = names.map((_, i) => `@n${i}`).join(",");
+    let rq = mssqlPool.request();
+    names.forEach((n, i) => (rq = rq.input(`n${i}`, sql.NVarChar, n)));
+    const opts = (
+      await rq.query(`
+      SELECT componentName, model, subVendor, spec
+      FROM dbo.BomComponentOptions
+      WHERE componentName IN (${inClause})
+      ORDER BY id
+    `)
+    ).recordset;
+
+    const byName = opts.reduce((acc, r) => {
+      (acc[r.componentName] ||= []).push({
+        model: r.model,
+        subVendor: r.subVendor,
+        spec: r.spec,
+      });
+      return acc;
+    }, {});
+
+    const result = comps.map((c) => ({
+      id: c.name, // ← keep UI happy
+      name: c.name,
+      options: byName[c.name] || [],
+    }));
+
+    res.json(result);
+  } catch (e) {
+    console.error("GET /api/bom-components", e);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// POST /api/bom-components  (create)
+app.post("/api/bom-components", authenticateToken, async (req, res) => {
+  try {
+    const { name, options } = req.body || {};
+    if (typeof name !== "string" || !name.trim())
+      return res.status(400).json({ message: "Component name is required" });
+
+    const clean = (Array.isArray(options) ? options : [])
+      .filter((o) => o && String(o.model || "").trim())
+      .map((o) => ({
+        model: String(o.model).trim(),
+        subVendor: o.subVendor ? String(o.subVendor).trim() : null,
+        spec: o.spec ? String(o.spec).trim() : null,
+      }));
+    if (!clean.length)
+      return res
+        .status(400)
+        .json({ message: "At least one option.model is required" });
+
+    // ensure component not duplicate (by name)
+    const exists = await mssqlPool
+      .request()
+      .input("n", sql.NVarChar, name)
+      .query(`SELECT TOP 1 name FROM dbo.BomComponents WHERE name=@n`);
+    if (exists.recordset.length)
+      return res.status(409).json({ message: "Component already exists" });
+
+    // insert component
+    await mssqlPool
+      .request()
+      .input("n", sql.NVarChar, name)
+      .query(`INSERT INTO dbo.BomComponents(name) VALUES(@n)`);
+
+    // insert options
+    for (const o of clean) {
+      await mssqlPool
+        .request()
+        .input("cn", sql.NVarChar, name)
+        .input("m", sql.NVarChar, o.model)
+        .input("sv", sql.NVarChar, o.subVendor)
+        .input("sp", sql.NVarChar, o.spec).query(`
+          INSERT INTO dbo.BomComponentOptions(componentName, model, subVendor, spec)
+          VALUES (@cn, @m, @sv, @sp)
+        `);
+    }
+
+    res.status(201).json({ id: name, name, options: clean });
+  } catch (e) {
+    console.error("POST /api/bom-components", e);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// PUT /api/bom-components/:id  (rename + replace options)
+app.put("/api/bom-components/:id", authenticateToken, async (req, res) => {
+  try {
+    const oldName = req.params.id; // UI sends previous id → treat as oldName
+    const { name: newName, options } = req.body || {};
+    const targetName =
+      typeof newName === "string" && newName.trim() ? newName.trim() : oldName;
+
+    // ensure component exists
+    const found = await mssqlPool
+      .request()
+      .input("n", sql.NVarChar, oldName)
+      .query(`SELECT TOP 1 name FROM dbo.BomComponents WHERE name=@n`);
+    if (!found.recordset.length)
+      return res.status(404).json({ message: "Component not found" });
+
+    // handle rename (if name changed)
+    if (targetName !== oldName) {
+      // prevent collision
+      const dupe = await mssqlPool
+        .request()
+        .input("n", sql.NVarChar, targetName)
+        .query(`SELECT TOP 1 name FROM dbo.BomComponents WHERE name=@n`);
+      if (dupe.recordset.length)
+        return res
+          .status(409)
+          .json({ message: "A component with this name already exists" });
+
+      await mssqlPool
+        .request()
+        .input("old", sql.NVarChar, oldName)
+        .input("neu", sql.NVarChar, targetName).query(`
+          UPDATE dbo.BomComponents SET name=@neu WHERE name=@old;
+          UPDATE dbo.BomComponentOptions SET componentName=@neu WHERE componentName=@old;
+        `);
+    }
+
+    // replace options fully
+    await mssqlPool
+      .request()
+      .input("cn", sql.NVarChar, targetName)
+      .query(`DELETE FROM dbo.BomComponentOptions WHERE componentName=@cn`);
+
+    const clean = (Array.isArray(options) ? options : [])
+      .filter((o) => o && String(o.model || "").trim())
+      .map((o) => ({
+        model: String(o.model).trim(),
+        subVendor: o.subVendor ? String(o.subVendor).trim() : null,
+        spec: o.spec ? String(o.spec).trim() : null,
+      }));
+
+    if (!clean.length)
+      return res
+        .status(400)
+        .json({ message: "At least one option.model is required" });
+
+    for (const o of clean) {
+      await mssqlPool
+        .request()
+        .input("cn", sql.NVarChar, targetName)
+        .input("m", sql.NVarChar, o.model)
+        .input("sv", sql.NVarChar, o.subVendor)
+        .input("sp", sql.NVarChar, o.spec).query(`
+          INSERT INTO dbo.BomComponentOptions(componentName, model, subVendor, spec)
+          VALUES (@cn, @m, @sv, @sp)
+        `);
+    }
+
+    res.json({ id: targetName, name: targetName, options: clean });
+  } catch (e) {
+    console.error("PUT /api/bom-components/:id", e);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// DELETE /api/bom-components/:id
+app.delete("/api/bom-components/:id", authenticateToken, async (req, res) => {
+  try {
+    const name = req.params.id;
+    await mssqlPool.request().input("n", sql.NVarChar, name).query(`
+        DELETE FROM dbo.BomComponentOptions WHERE componentName=@n;
+        DELETE FROM dbo.BomComponents       WHERE name=@n;
+      `);
+    res.json({ message: "BOM component removed." });
+  } catch (e) {
+    console.error("DELETE /api/bom-components/:id", e);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// POST /api/bom-components/reorder
+app.post("/api/bom-components/reorder", authenticateToken, async (req, res) => {
+  try {
+    const { ids } = req.body || {}; // UI sends array of "id" (we use component names)
+    if (!Array.isArray(ids) || !ids.length)
+      return res.status(400).json({ message: "ids required" });
+
+    // ensure position column exists
+    await mssqlPool.request().query(`
+      IF COL_LENGTH('dbo.BomComponents','position') IS NULL
+        ALTER TABLE dbo.BomComponents ADD position INT NULL;
+    `);
+
+    // batch update positions
+    // set unknowns to null, known to their order index
+    let i = 0;
+    for (const name of ids) {
+      await mssqlPool
+        .request()
+        .input("n", sql.NVarChar, name)
+        .input("p", sql.Int, ++i)
+        .query(`UPDATE dbo.BomComponents SET position=@p WHERE name=@n`);
+    }
+
+    res.json({ message: "Order saved" });
+  } catch (e) {
+    console.error("POST /api/bom-components/reorder", e);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ---- SPECS API ----
+
+// ───────────────────────────────────────────────────────────────
+// SPECS CRUD (backed by dbo.QAPSpecifications)
+// id = INT IDENTITY in DB; UI treats it as string
+// ───────────────────────────────────────────────────────────────
+const asUiSpec = (r) => ({
+  id: String(r.id),
+  criteria: r.criteria, // "MQP" | "Visual"
+  subCriteria: r.subCriteria || "",
+  specification: r.specification || "",
+  class: r.class || "Major",
+  description: r.description || null,
+  sampling: r.sampling || null,
+  typeOfCheck: r.typeOfCheck || null,
+});
+
+// GET /api/specs?criteria=MQP|Visual  (criteria optional)
+app.get("/api/specs", authenticateToken, async (req, res) => {
+  try {
+    const crit = String(req.query.criteria || "").trim();
+    let rq = mssqlPool.request();
+    let where = "";
+    if (crit === "MQP" || crit === "Visual") {
+      where = "WHERE criteria=@crit";
+      rq = rq.input("crit", sql.NVarChar, crit);
+    }
+    const q = `
+      SELECT id, criteria, subCriteria, specification, [class] AS class,
+             [description], sampling, typeOfCheck, sno
+      FROM dbo.QAPSpecifications
+      ${where}
+      ORDER BY COALESCE(sno, 2147483647), subCriteria
+    `;
+    const rows = (await rq.query(q)).recordset;
+    res.json(rows.map(asUiSpec));
+  } catch (e) {
+    console.error("GET /api/specs", e);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// POST /api/specs  (create; auto-assign next sno within criteria)
+app.post("/api/specs", authenticateToken, async (req, res) => {
+  try {
+    const s = req.body || {};
+    if (!s.criteria || !s.subCriteria || !s.specification || !s.class) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+    const crit = String(s.criteria);
+    const { recordset: maxRows } = await mssqlPool
+      .request()
+      .input("crit", sql.NVarChar, crit)
+      .query(
+        "SELECT ISNULL(MAX(sno),0) AS maxSno FROM dbo.QAPSpecifications WHERE criteria=@crit"
+      );
+    const nextSno = (maxRows[0]?.maxSno || 0) + 1;
+
+    const { recordset: rid } = await mssqlPool
+      .request()
+      .input("sno", sql.Int, nextSno)
+      .input("criteria", sql.NVarChar, crit)
+      .input("subCriteria", sql.NVarChar, s.subCriteria)
+      .input("specification", sql.NVarChar, s.specification)
+      .input("class", sql.NVarChar, s.class)
+      .input(
+        "description",
+        sql.NVarChar,
+        crit === "Visual" ? s.description || null : null
+      )
+      .input(
+        "sampling",
+        sql.NVarChar,
+        crit === "MQP" ? s.sampling || null : null
+      )
+      .input(
+        "typeOfCheck",
+        sql.NVarChar,
+        crit === "MQP" ? s.typeOfCheck || null : null
+      ).query(`
+        INSERT INTO dbo.QAPSpecifications
+          (sno, criteria, subCriteria, specification, [class],
+           [description], sampling, typeOfCheck)
+        VALUES
+          (@sno, @criteria, @subCriteria, @specification, @class,
+           @description, @sampling, @typeOfCheck);
+
+        SELECT CAST(SCOPE_IDENTITY() AS INT) AS id;
+      `);
+
+    const newId = rid[0].id;
+    const row = (
+      await mssqlPool
+        .request()
+        .input("id", sql.Int, newId)
+        .query(
+          `SELECT id, criteria, subCriteria, specification, [class] AS class,
+                  [description], sampling, typeOfCheck, sno
+           FROM dbo.QAPSpecifications WHERE id=@id`
+        )
+    ).recordset[0];
+
+    res.status(201).json(asUiSpec(row));
+  } catch (e) {
+    console.error("POST /api/specs", e);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// PUT /api/specs/:id  (full replace of editable fields)
+app.put("/api/specs/:id", authenticateToken, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id))
+      return res.status(400).json({ message: "Bad id" });
+
+    const s = req.body || {};
+    if (!s.criteria || !s.subCriteria || !s.specification || !s.class) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+    const crit = String(s.criteria);
+
+    const rq = mssqlPool
+      .request()
+      .input("id", sql.Int, id)
+      .input("criteria", sql.NVarChar, crit)
+      .input("subCriteria", sql.NVarChar, s.subCriteria)
+      .input("specification", sql.NVarChar, s.specification)
+      .input("class", sql.NVarChar, s.class)
+      .input(
+        "description",
+        sql.NVarChar,
+        crit === "Visual" ? s.description || null : null
+      )
+      .input(
+        "sampling",
+        sql.NVarChar,
+        crit === "MQP" ? s.sampling || null : null
+      )
+      .input(
+        "typeOfCheck",
+        sql.NVarChar,
+        crit === "MQP" ? s.typeOfCheck || null : null
+      );
+
+    const { rowsAffected } = await rq.query(`
+      UPDATE dbo.QAPSpecifications
+      SET criteria=@criteria,
+          subCriteria=@subCriteria,
+          specification=@specification,
+          [class]=@class,
+          [description]=@description,
+          sampling=@sampling,
+          typeOfCheck=@typeOfCheck
+      WHERE id=@id;
+    `);
+
+    if (!rowsAffected[0]) return res.status(404).json({ message: "Not found" });
+
+    const row = (
+      await mssqlPool
+        .request()
+        .input("id", sql.Int, id)
+        .query(
+          `SELECT id, criteria, subCriteria, specification, [class] AS class,
+                  [description], sampling, typeOfCheck, sno
+           FROM dbo.QAPSpecifications WHERE id=@id`
+        )
+    ).recordset[0];
+
+    res.json(asUiSpec(row));
+  } catch (e) {
+    console.error("PUT /api/specs/:id", e);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// DELETE /api/specs/:id
+app.delete("/api/specs/:id", authenticateToken, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id))
+      return res.status(400).json({ message: "Bad id" });
+    const { rowsAffected } = await mssqlPool
+      .request()
+      .input("id", sql.Int, id)
+      .query("DELETE FROM dbo.QAPSpecifications WHERE id=@id");
+    if (!rowsAffected[0]) return res.status(404).json({ message: "Not found" });
+    res.json({ message: "deleted" });
+  } catch (e) {
+    console.error("DELETE /api/specs/:id", e);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// POST /api/specs/reorder  { criteria, ids: string[] }  (set sno by order)
+app.post("/api/specs/reorder", authenticateToken, async (req, res) => {
+  try {
+    const { criteria, ids } = req.body || {};
+    if ((criteria !== "MQP" && criteria !== "Visual") || !Array.isArray(ids))
+      return res.status(400).json({ message: "Bad payload" });
+
+    const tx = new sql.Transaction(mssqlPool);
+    await tx.begin();
+    try {
+      // first null out to avoid duplicates, then set in order
+      await new sql.Request(tx)
+        .input("crit", sql.NVarChar, criteria)
+        .query(
+          `UPDATE dbo.QAPSpecifications SET sno=NULL WHERE criteria=@crit`
+        );
+
+      for (let i = 0; i < ids.length; i++) {
+        const idInt = parseInt(String(ids[i]), 10);
+        if (!Number.isFinite(idInt)) continue;
+        await new sql.Request(tx)
+          .input("id", sql.Int, idInt)
+          .input("sno", sql.Int, i + 1)
+          .query(`UPDATE dbo.QAPSpecifications SET sno=@sno WHERE id=@id`);
+      }
+
+      await tx.commit();
+      res.json({ message: "ok" });
+    } catch (e) {
+      await tx.rollback();
+      throw e;
+    }
+  } catch (e) {
+    console.error("POST /api/specs/reorder", e);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ---- BOM API ----
+function rowsToBomComponents(rows) {
+  // rows: one per option (or null option fields if none)
+  const byName = new Map();
+  for (const r of rows) {
+    if (!byName.has(r.componentName)) {
+      byName.set(r.componentName, {
+        id: r.componentName, // UI uses id:string; we'll use the PK name
+        name: r.componentName,
+        technology: r.technology || "M10", // derived from ModelMaster; default for UI
+        options: [],
+      });
+    }
+    if (r.optionId) {
+      byName.get(r.componentName).options.push({
+        model: r.model,
+        subVendor: r.subVendor || null,
+        spec: r.spec || null,
+      });
+    }
+  }
+
+  // If a component has mixed technologies (different models), keep the first non-null
+  return Array.from(byName.values());
+}
+
+app.get("/api/bom-components", authenticateToken, async (_req, res) => {
+  try {
+    const { recordset } = await mssqlPool.request().query(`
+      SELECT
+        c.name AS componentName,
+        c.position,
+        o.id AS optionId,
+        o.model,
+        o.subVendor,
+        o.spec,
+        mm.technology
+      FROM dbo.BomComponents c
+      LEFT JOIN dbo.BomComponentOptions o ON o.componentName = c.name
+      LEFT JOIN dbo.ModelMaster mm ON mm.model = o.model
+      ORDER BY c.position, c.name, o.id
+    `);
+    res.json(rowsToBomComponents(recordset));
+  } catch (e) {
+    console.error("GET /api/bom-components", e);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// POST /api/bom-components
+app.post("/api/bom-components", authenticateToken, async (req, res) => {
+  const p = req.body || {};
+  try {
+    if (!COMP_SET.has(p.name))
+      return res.status(400).json({ message: "Invalid component name" });
+    if (!TECH_SET.has(p.technology))
+      return res.status(400).json({ message: "Invalid technology" });
+
+    const opts = Array.isArray(p.options) ? p.options : [];
+    const options = opts
+      .filter((o) => o && typeof o.model === "string" && o.model.trim())
+      .map((o) => ({
+        model: String(o.model).trim(),
+        subVendor: o.subVendor?.toString().trim() || null,
+        spec: o.spec?.toString().trim() || null,
+      }));
+    if (!options.length)
+      return res
+        .status(400)
+        .json({ message: "At least one option with a model is required" });
+
+    const tx = new sql.Transaction(mssqlPool);
+    await tx.begin();
+    try {
+      // position = max+1
+      const nextPos = (
+        await tx
+          .request()
+          .query("SELECT ISNULL(MAX(position),0)+1 AS n FROM dbo.BomComponents")
+      ).recordset[0].n;
+
+      await tx
+        .request()
+        .input("n", sql.NVarChar, p.name)
+        .input("pos", sql.Int, nextPos)
+        .query(
+          "INSERT INTO dbo.BomComponents(name, position) VALUES (@n, @pos)"
+        );
+
+      for (const o of options) {
+        await tx
+          .request()
+          .input("cn", sql.NVarChar, p.name)
+          .input("m", sql.NVarChar, o.model)
+          .input("sv", sql.NVarChar, o.subVendor)
+          .input("sp", sql.NVarChar, o.spec)
+          .query(`INSERT INTO dbo.BomComponentOptions(componentName, model, subVendor, spec)
+                  VALUES (@cn, @m, @sv, @sp)`);
+
+        // ensure model exists in ModelMaster with given technology (insert if missing)
+        await tx
+          .request()
+          .input("model", sql.NVarChar, o.model)
+          .input("tech", sql.NVarChar, p.technology).query(`
+            IF NOT EXISTS (SELECT 1 FROM dbo.ModelMaster WHERE model=@model)
+              INSERT INTO dbo.ModelMaster(model, technology) VALUES (@model, @tech);
+          `);
+      }
+
+      await tx.commit();
+
+      // return the single component freshly loaded
+      const rows = (
+        await mssqlPool.request().input("n", sql.NVarChar, p.name).query(`
+            SELECT c.name AS componentName, c.position,
+                   o.id AS optionId, o.model, o.subVendor, o.spec,
+                   mm.technology
+            FROM dbo.BomComponents c
+            LEFT JOIN dbo.BomComponentOptions o ON o.componentName = c.name
+            LEFT JOIN dbo.ModelMaster mm ON mm.model = o.model
+            WHERE c.name=@n
+            ORDER BY o.id
+          `)
+      ).recordset;
+
+      res.status(201).json(rowsToBomComponents(rows)[0]);
+    } catch (e) {
+      await tx.rollback();
+      throw e;
+    }
+  } catch (e) {
+    console.error("POST /api/bom-components", e);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// PUT /api/bom-components/:id
+app.put("/api/bom-components/:id", authenticateToken, async (req, res) => {
+  const id = req.params.id; // current name
+  const p = req.body || {};
+  try {
+    if (p.name && !COMP_SET.has(p.name))
+      return res.status(400).json({ message: "Invalid component name" });
+    if (p.technology && !TECH_SET.has(p.technology))
+      return res.status(400).json({ message: "Invalid technology" });
+
+    const newName = p.name || id;
+    const options = (Array.isArray(p.options) ? p.options : [])
+      .filter((o) => o && typeof o.model === "string" && o.model.trim())
+      .map((o) => ({
+        model: String(o.model).trim(),
+        subVendor: o.subVendor?.toString().trim() || null,
+        spec: o.spec?.toString().trim() || null,
+      }));
+    if (!options.length)
+      return res
+        .status(400)
+        .json({ message: "At least one option with a model is required" });
+
+    const tx = new sql.Transaction(mssqlPool);
+    await tx.begin();
+    try {
+      // ensure component exists
+      const exists = (
+        await tx
+          .request()
+          .input("id", sql.NVarChar, id)
+          .query("SELECT name FROM dbo.BomComponents WHERE name=@id")
+      ).recordset.length;
+      if (!exists) {
+        await tx.rollback();
+        return res.status(404).json({ message: "Not found" });
+      }
+
+      // rename if needed
+      if (newName !== id) {
+        await tx
+          .request()
+          .input("old", sql.NVarChar, id)
+          .input("nn", sql.NVarChar, newName)
+          .query(
+            "UPDATE dbo.BomComponents SET name=@nn WHERE name=@old; UPDATE dbo.BomComponentOptions SET componentName=@nn WHERE componentName=@old;"
+          );
+      }
+
+      // replace options
+      await tx
+        .request()
+        .input("n", sql.NVarChar, newName)
+        .query("DELETE FROM dbo.BomComponentOptions WHERE componentName=@n");
+
+      for (const o of options) {
+        await tx
+          .request()
+          .input("cn", sql.NVarChar, newName)
+          .input("m", sql.NVarChar, o.model)
+          .input("sv", sql.NVarChar, o.subVendor)
+          .input("sp", sql.NVarChar, o.spec)
+          .query(`INSERT INTO dbo.BomComponentOptions(componentName, model, subVendor, spec)
+                  VALUES (@cn, @m, @sv, @sp)`);
+
+        if (p.technology) {
+          await tx
+            .request()
+            .input("model", sql.NVarChar, o.model)
+            .input("tech", sql.NVarChar, p.technology).query(`
+              IF NOT EXISTS (SELECT 1 FROM dbo.ModelMaster WHERE model=@model)
+                INSERT INTO dbo.ModelMaster(model, technology) VALUES (@model, @tech);
+            `);
+        }
+      }
+
+      await tx.commit();
+
+      const rows = (
+        await mssqlPool.request().input("n", sql.NVarChar, newName).query(`
+            SELECT c.name AS componentName, c.position,
+                   o.id AS optionId, o.model, o.subVendor, o.spec, mm.technology
+            FROM dbo.BomComponents c
+            LEFT JOIN dbo.BomComponentOptions o ON o.componentName = c.name
+            LEFT JOIN dbo.ModelMaster mm ON mm.model = o.model
+            WHERE c.name=@n
+            ORDER BY o.id
+          `)
+      ).recordset;
+
+      res.json(rowsToBomComponents(rows)[0]);
+    } catch (e) {
+      await tx.rollback();
+      throw e;
+    }
+  } catch (e) {
+    console.error("PUT /api/bom-components/:id", e);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// DELETE /api/bom-components/:id
+app.delete("/api/bom-components/:id", authenticateToken, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const r = await mssqlPool.request().input("n", sql.NVarChar, id).query(`
+      DELETE FROM dbo.BomComponentOptions WHERE componentName=@n;
+      DELETE FROM dbo.BomComponents       WHERE name=@n;
+    `);
+    res.status(204).send("");
+  } catch (e) {
+    console.error("DELETE /api/bom-components/:id", e);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// POST /api/bom-components/reorder  { ids: string[] }
+// body: { ids: string[] } where ids are component names in desired order
+app.post("/api/bom-components/reorder", authenticateToken, async (req, res) => {
+  try {
+    const { ids } = req.body || {};
+    if (!Array.isArray(ids) || !ids.length)
+      return res.status(400).json({ message: "ids required" });
+
+    let rq = mssqlPool.request();
+    const whens = ids.map((name, i) => {
+      rq = rq.input("n" + i, sql.NVarChar, name).input("p" + i, sql.Int, i + 1);
+      return `WHEN name=@n${i} THEN @p${i}`;
+    });
+
+    await rq.query(`
+      UPDATE dbo.BomComponents
+      SET position = CASE ${whens.join(" ")} ELSE position END
+      WHERE name IN (${ids.map((_, i) => `@n${i}`).join(", ")})
+    `);
+
+    res.json({ message: "ok" });
+  } catch (e) {
+    console.error("POST /api/bom-components/reorder", e);
     res.status(500).json({ message: "Server error" });
   }
 });

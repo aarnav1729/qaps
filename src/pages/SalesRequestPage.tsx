@@ -1,25 +1,35 @@
 // src/pages/SalesRequestsPage.tsx
 import React, { useMemo, useState, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+// src/pages/SalesRequestsPage.tsx
+// src/pages/SalesRequestPage.tsx
+// src/pages/SalesRequestPage.tsx
 import {
   BOM_MASTER,
-  TECHNOLOGIES,
+  getOptionsFor,
   VENDOR_NAME_LOCKIN,
   RFID_LOCATION_LOCKIN,
-  type BomComponentName,
-  type BomComponentOption,
-  getOptionsFor,
+  TECHNOLOGIES,
+  BomComponentName,
+  BomComponentOption,
 } from "@/data/bomMaster";
 
 const API = window.location.origin;
 
 type YesNo = "yes" | "no";
-type Plant = "p2" | "p5" | "p6";
+type Plant = "P2" | "P5" | "P6";
 type OrderType = "m10" | "g12r" | "g12";
-type CellType = "DCR" | "NDCR";
+// DCR/NDCR flag (keeps the same field name 'cellType' on the object)
+type DcrCompliance = "DCR" | "NDCR";
+
+// New sub-dropdowns under Module Order Type
+type CellType = "M10" | "M10R" | "G12" | "G12R";
+type CellTech = "PERC" | "TOPCon";
+type CutCells = "60" | "66" | "72" | "78";
 type QapType = "Customer" | "Premier Energies";
 type Priority = "high" | "low";
 type Technology = (typeof TECHNOLOGIES)[number];
@@ -31,8 +41,15 @@ export interface SalesRequest {
   isNewCustomer: YesNo;
   moduleManufacturingPlant: Plant;
   moduleOrderType: OrderType;
-  cellType: CellType;
+  // Existing field kept; now represents DCR/NDCR compliance (label changed in UI)
+  cellType: DcrCompliance;
+  // NEW: optional sub-fields (frontend-safe, optional until backend persists them)
+  moduleCellType?: CellType | null; // M10/M10R/G12/G12R
+  cellTech?: CellTech | null; // PERC/TOPCon
+  cutCells?: number | null; // 60/66/72/78
+  certificationRequired?: "BIS" | "IEC" | "BIS + IEC" | "Not Required";
   wattageBinning: number;
+  wattageBinningDist?: { range: string; pct: number }[];
   rfqOrderQtyMW: number;
   premierBiddedOrderQtyMW?: number | null;
   deliveryStartDate: string; // YYYY-MM-DD
@@ -44,7 +61,7 @@ export interface SalesRequest {
   primaryBom: YesNo;
   primaryBomAttachmentUrl?: string | null;
   inlineInspection: YesNo;
-  cellProcuredBy: "Customer" | "Premier Energies";
+  cellProcuredBy: "Customer" | "Premier Energies" | "Financed By Customer";
   agreedCTM: number;
   factoryAuditTentativeDate?: string | null; // YYYY-MM-DD
   xPitchMm?: number | null;
@@ -80,6 +97,7 @@ type BomPayload = {
   moduleDimensionsOption: string;
   moduleModelNumber: string;
   components: BomComponent[];
+  wattPeakLabel: string;
 };
 
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -156,6 +174,7 @@ const PLANT_CONFIG = {
 } as const;
 
 const SalesRequestsPage: React.FC = () => {
+  const location = useLocation();
   const qc = useQueryClient();
   const { user } = useAuth();
   const [openCreate, setOpenCreate] = useState(false);
@@ -172,6 +191,20 @@ const SalesRequestsPage: React.FC = () => {
       return r.json();
     },
   });
+
+  // Optional client-side filter via ?customer=NAME
+  const customerFilter = useMemo(() => {
+    const qs = new URLSearchParams(location.search);
+    const v = qs.get("customer");
+    return v ? v.trim() : "";
+  }, [location.search]);
+  const rows = useMemo(
+    () =>
+      customerFilter
+        ? list.filter((r) => (r.customerName || "").trim() === customerFilter)
+        : list,
+    [list, customerFilter]
+  );
 
   const createMutation = useMutation({
     mutationFn: async (formData: FormData) => {
@@ -232,7 +265,7 @@ const SalesRequestsPage: React.FC = () => {
         <CardContent>
           {isLoading ? (
             <div>Loading…</div>
-          ) : list.length === 0 ? (
+          ) : rows.length === 0 ? (
             <div className="text-gray-600">No sales requests yet.</div>
           ) : (
             <div className="overflow-auto">
@@ -245,13 +278,13 @@ const SalesRequestsPage: React.FC = () => {
                     <Th>New Customer?</Th>
                     <Th>Plant</Th>
                     <Th>Order Type</Th>
-                    <Th>Cell Type</Th>
+                    <Th>DCR Compliance?</Th>
                     <Th>Wattage Binning</Th>
                     <Th>RFQ Qty (MW)</Th>
                     <Th>Premier Bidded Qty (MW)</Th>
                     <Th>Delivery Timeline</Th>
                     <Th>Project Location</Th>
-                    <Th>Cable Length</Th>
+                    <Th>JB Cable Length</Th>
                     <Th>QAP Type</Th>
                     <Th>Primary BOM?</Th>
                     <Th>Inline Inspection?</Th>
@@ -268,7 +301,7 @@ const SalesRequestsPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {list.map((row) => (
+                  {rows.map((row) => (
                     <tr key={row.id} className="align-top">
                       <Td>
                         <div className="flex items-center gap-2">
@@ -299,7 +332,19 @@ const SalesRequestsPage: React.FC = () => {
                       </Td>
                       <Td className="uppercase">{row.moduleOrderType}</Td>
                       <Td>{row.cellType}</Td>
-                      <Td>{fmtNum(row.wattageBinning)}</Td>
+                      <Td>
+                        {row.wattageBinningDist?.length ? (
+                          <ul className="list-disc pl-5 space-y-0.5">
+                            {row.wattageBinningDist.map((b, i) => (
+                              <li key={i}>
+                                {b.range}: {fmtDec(b.pct)}%
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          fmtNum(row.wattageBinning)
+                        )}
+                      </Td>
                       <Td>{fmtNum(row.rfqOrderQtyMW)}</Td>
                       <Td>{row.premierBiddedOrderQtyMW ?? "-"}</Td>
                       <Td>
@@ -390,6 +435,7 @@ const SalesRequestsPage: React.FC = () => {
           onCreate={(form) => createMutation.mutate(form)}
           creating={createMutation.isPending}
           currentUser={user?.username || "sales"}
+          prefillCustomerName={customerFilter}
         />
       )}
 
@@ -451,6 +497,43 @@ function displayFloat(s: any) {
   return Number.isFinite(n) ? fmtDec(n) : "-";
 }
 
+// Normalize anything like "2025-09-16T00:00:00.000Z" → "2025-09-16" for <input type="date">
+function toYMD(d?: string | null) {
+  if (!d) return "";
+  const s = String(d);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const dt = new Date(s);
+  return Number.isNaN(dt.getTime()) ? "" : dt.toISOString().slice(0, 10);
+}
+
+// Builds something like: SR-CUS-P5-G12R-20250916-0001
+function genProjectCode({
+  customerName,
+  plant,
+  orderTag,
+  date,
+}: {
+  customerName: string;
+  plant: string; // "P2" | "P5" | "P6"
+  orderTag: string; // "M10" | "M10R" | "G12" | "G12R" (or "m10"/"g12r"/"g12")
+  date?: string; // YYYY-MM-DD (optional; falls back to today)
+}) {
+  const cus3 =
+    (customerName || "CUS")
+      .replace(/[^A-Za-z]/g, "")
+      .toUpperCase()
+      .slice(0, 3) || "CUS";
+  const plantTag = (plant || "P?").toUpperCase();
+  const ord = (orderTag || "M10").toUpperCase();
+  const d = date ? new Date(date) : new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+
+  const seq = "0001"; // FE placeholder; let BE replace with a real sequence if desired
+  return `SR-${cus3}-${plantTag}-${ord}-${yyyy}${mm}${dd}-${seq}`;
+}
+
 /* ────────────────────────────────────────────────────────────────────────── */
 /*  Modal: Create + Edit (single component)                                  */
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -462,6 +545,7 @@ const SalesRequestModal: React.FC<{
   onUpdate?: (id: string, formData: FormData) => void;
   creating: boolean;
   currentUser: string;
+  prefillCustomerName?: string;
 }> = ({
   mode = "create",
   initial,
@@ -470,14 +554,22 @@ const SalesRequestModal: React.FC<{
   onUpdate,
   creating,
   currentUser,
+  prefillCustomerName = "",
 }) => {
   // Core request fields (store numbers as strings for smooth typing)
   const [state, setState] = useState({
-    customerName: "",
-    isNewCustomer: "yes" as YesNo,
-    moduleManufacturingPlant: "p2" as Plant,
+    customerName: prefillCustomerName || "",
+    moduleManufacturingPlant: "P2" as Plant,
     moduleOrderType: "m10" as OrderType,
-    cellType: "DCR" as CellType,
+    cellType: "DCR" as DcrCompliance, // relabeled to "DCR Compliance?" in UI+    // NEW (all optional → empty string means "unset"; no save blocker)
+    moduleCellType: "" as "" | CellType,
+    cellTech: "" as "" | CellTech,
+    cutCells: "" as "" | CutCells,
+    certificationRequired: "Not Required" as
+      | "BIS"
+      | "IEC"
+      | "BIS + IEC"
+      | "Not Required",
     wattageBinning: "" as string,
     rfqOrderQtyMW: "" as string,
     premierBiddedOrderQtyMW: "" as string,
@@ -488,7 +580,10 @@ const SalesRequestModal: React.FC<{
     qapType: "Customer" as QapType,
     primaryBom: "no" as YesNo,
     inlineInspection: "no" as YesNo,
-    cellProcuredBy: "Customer" as "Customer" | "Premier Energies",
+    cellProcuredBy: "Customer" as
+      | "Customer"
+      | "Premier Energies"
+      | "Financed By Customer",
     agreedCTM: "" as string, // decimal string
     factoryAuditTentativeDate: "",
     xPitchMm: "" as string,
@@ -504,6 +599,13 @@ const SalesRequestModal: React.FC<{
     { title: string; file: File | null }[]
   >([]);
 
+  // Wattage binning/distribution rows (string form for smooth typing)
+  const [wattBins, setWattBins] = useState<{ range: string; pct: string }[]>([
+    { range: "", pct: "" },
+    { range: "", pct: "" },
+    { range: "", pct: "" },
+  ]);
+
   // BOM editor state
   const [tech, setTech] = useState<Technology>("M10");
   const [vendorAddress, setVendorAddress] = useState("");
@@ -514,19 +616,103 @@ const SalesRequestModal: React.FC<{
   const [wattPeakLabel, setWattPeakLabel] = useState<string>(""); // "MIN 575 WP" / "MIN 700 WP" / etc
   const [components, setComponents] = useState<BomComponent[]>([]);
   const [docRef, setDocRef] = useState("");
+  const [projectCode, setProjectCode] = useState("");
+
+  // Model-picker modal state (scoped to SalesRequestModal)
+  const [modelDialog, setModelDialog] = useState<
+    { open: false } | { open: true; comp: BomComponentName; idx: number }
+  >({ open: false });
+
+  const openModelDialog = (comp: BomComponentName, idx: number) =>
+    setModelDialog({ open: true, comp, idx });
+
+  const closeModelDialog = () => setModelDialog({ open: false });
 
   // Preview toggle
   const [showPreview, setShowPreview] = useState(false);
+
+  // Pre-populate all components by default on create
+  useEffect(() => {
+    if (mode === "create") {
+      const all = (Object.keys(BOM_MASTER) as BomComponentName[]).map(
+        (name) => {
+          const opts = getOptionsFor(name) as readonly BomComponentOption[];
+          // default one row; if there is exactly one option (e.g., RFID Tag) preselect it
+          const defaultRow: BomRow =
+            opts.length === 1
+              ? {
+                  model: opts[0].model,
+                  subVendor: opts[0].subVendor ?? null,
+                  spec: opts[0].spec ?? null,
+                }
+              : { model: "", subVendor: null, spec: null };
+          return { name, rows: [defaultRow] };
+        }
+      );
+      setComponents((prev) => (prev.length ? prev : all));
+    }
+  }, [mode]);
+
+  useEffect(() => {
+    // If editing and the item already has a projectCode, keep it.
+    if (mode === "edit" && initial?.projectCode) {
+      setProjectCode(initial.projectCode);
+      return;
+    }
+    // Prefer the new Cell Type (M10/M10R/G12/G12R); fall back to legacy orderType
+    const orderTag = state.moduleCellType || state.moduleOrderType;
+    // Use deliveryStartDate if present so it's stable across a session
+    setProjectCode(
+      genProjectCode({
+        customerName: state.customerName,
+        plant: state.moduleManufacturingPlant,
+        orderTag,
+        date: state.deliveryStartDate || undefined,
+      })
+    );
+  }, [
+    mode,
+    initial?.projectCode,
+    state.customerName,
+    state.moduleManufacturingPlant,
+    state.moduleCellType,
+    state.moduleOrderType,
+    state.deliveryStartDate,
+  ]);
 
   // Pre-fill when editing
   useEffect(() => {
     if (mode === "edit" && initial) {
       setState({
         customerName: initial.customerName || "",
-        isNewCustomer: initial.isNewCustomer || "no",
-        moduleManufacturingPlant: initial.moduleManufacturingPlant || "p2",
+        moduleManufacturingPlant: String(
+          initial.moduleManufacturingPlant
+        ).toUpperCase() as Plant,
         moduleOrderType: initial.moduleOrderType || "m10",
         cellType: initial.cellType || "DCR",
+        // NEW: hydrate if backend starts returning them; else stay ""
+        moduleCellType:
+          (initial as any).moduleCellType &&
+          String((initial as any).moduleCellType)
+            ? (String((initial as any).moduleCellType) as CellType)
+            : "",
+        cellTech:
+          (initial as any).cellTech && String((initial as any).cellTech)
+            ? (String((initial as any).cellTech) as CellTech)
+            : "",
+        cutCells:
+          (initial as any).cutCells != null
+            ? (String((initial as any).cutCells) as CutCells)
+            : "",
+        certificationRequired:
+          (initial as any).certificationRequired &&
+          String((initial as any).certificationRequired)
+            ? (String((initial as any).certificationRequired) as
+                | "BIS"
+                | "IEC"
+                | "BIS + IEC"
+                | "Not Required")
+            : "Not Required",
         wattageBinning:
           initial.wattageBinning != null ? String(initial.wattageBinning) : "",
         rfqOrderQtyMW:
@@ -535,8 +721,8 @@ const SalesRequestModal: React.FC<{
           initial.premierBiddedOrderQtyMW != null
             ? String(initial.premierBiddedOrderQtyMW)
             : "",
-        deliveryStartDate: initial.deliveryStartDate || "",
-        deliveryEndDate: initial.deliveryEndDate || "",
+        deliveryStartDate: toYMD(initial.deliveryStartDate) || "",
+        deliveryEndDate: toYMD(initial.deliveryEndDate) || "",
         projectLocation: initial.projectLocation || "",
         cableLengthRequired:
           initial.cableLengthRequired != null
@@ -547,7 +733,8 @@ const SalesRequestModal: React.FC<{
         inlineInspection: initial.inlineInspection || "no",
         cellProcuredBy: initial.cellProcuredBy || "Customer",
         agreedCTM: initial.agreedCTM != null ? String(initial.agreedCTM) : "",
-        factoryAuditTentativeDate: initial.factoryAuditTentativeDate || "",
+        factoryAuditTentativeDate:
+          toYMD(initial.factoryAuditTentativeDate) || "",
         xPitchMm: initial.xPitchMm != null ? String(initial.xPitchMm) : "",
         trackerDetails:
           initial.trackerDetails != null ? String(initial.trackerDetails) : "",
@@ -575,6 +762,19 @@ const SalesRequestModal: React.FC<{
         };
         setTech(map[initial.moduleOrderType]);
       }
+      // Wattage distribution: prefer new array, else map legacy number -> one row @100%
+      if (initial.wattageBinningDist && initial.wattageBinningDist.length) {
+        setWattBins(
+          initial.wattageBinningDist.map((r) => ({
+            range: r.range || "",
+            pct: r.pct != null ? String(r.pct) : "",
+          }))
+        );
+      } else {
+        const legacy =
+          initial.wattageBinning != null ? String(initial.wattageBinning) : "";
+        setWattBins([{ range: legacy ? `${legacy}` : "", pct: "100" }]);
+      }
     }
   }, [mode, initial]);
 
@@ -596,20 +796,70 @@ const SalesRequestModal: React.FC<{
     setDocRef(ref);
   }, [state.customerName, tech, mode, initial?.bom?.documentRef]);
 
-  // Sync technology with Order Type on change in form (create only; in edit we respect BOM tech initially)
+  // Sync technology with selected Cell Type (create only; in edit we respect BOM tech initially)
   useEffect(() => {
     if (mode === "edit" && initial?.bom) return;
-    const map: Record<OrderType, Technology> = {
-      m10: "M10",
-      g12r: "G12R",
-      g12: "G12",
+    if (!state.moduleCellType) return;
+    const map: Record<CellType, Technology> = {
+      M10: "M10",
+      M10R: "M10", // map M10R to M10 technology
+      G12: "G12",
+      G12R: "G12R",
     };
-    setTech(map[state.moduleOrderType]);
-  }, [state.moduleOrderType, mode, initial?.bom]);
+    setTech(map[state.moduleCellType]);
+  }, [state.moduleCellType, mode, initial?.bom]);
+
+  // Backfill missing BOM defaults (edit & legacy rows) so UI shows valid defaults
+  useEffect(() => {
+    const p = state.moduleManufacturingPlant.toLowerCase() as
+      | "p2"
+      | "p5"
+      | "p6";
+    const cfg = PLANT_CONFIG[p];
+
+    // Dimensions
+    if (!moduleDimensionsOption) {
+      if (cfg.dimLocked) setModuleDimensionsOption(cfg.dimLocked);
+      else if (cfg.dimOpts.length) setModuleDimensionsOption(cfg.dimOpts[0]);
+    }
+
+    // Watt-peak label
+    if (!wattPeakLabel) {
+      if (cfg.wattLocked) setWattPeakLabel(cfg.wattLocked as string);
+      else if (cfg.wattOpts.length) setWattPeakLabel(cfg.wattOpts[0]);
+    }
+
+    // Module wattage (numeric)
+    if (!moduleWattageWp) {
+      if ("wattNumeric" in cfg && typeof cfg.wattNumeric === "number") {
+        setModuleWattageWp(String(cfg.wattNumeric));
+      } else if ((cfg as any).wattMap) {
+        const label = (cfg.wattLocked as string) || cfg.wattOpts[0];
+        const num = (cfg as any).wattMap?.[label];
+        if (num) setModuleWattageWp(String(num));
+      }
+    }
+
+    // Module model number
+    if (!moduleModelNumber && cfg.models.length) {
+      setModuleModelNumber(cfg.models[0]);
+    }
+  }, [
+    mode,
+    initial,
+    state.moduleManufacturingPlant,
+    moduleDimensionsOption,
+    moduleWattageWp,
+    moduleModelNumber,
+    wattPeakLabel,
+  ]);
 
   // reset/lock BOM fields when plant changes
   useEffect(() => {
-    const p = state.moduleManufacturingPlant as "p2" | "p5" | "p6";
+    const p = state.moduleManufacturingPlant.toLowerCase() as
+      | "p2"
+      | "p5"
+      | "p6";
     const cfg = PLANT_CONFIG[p];
 
     // reset model on plant change
@@ -640,6 +890,10 @@ const SalesRequestModal: React.FC<{
   }, [state.moduleManufacturingPlant]);
 
   const canSubmit = useMemo(() => {
+    // In EDIT mode allow saving with minimal/partial data.
+    if (mode === "edit") return true;
+
+    // CREATE mode: keep stricter validation
     const basicsOk =
       state.customerName.trim() &&
       state.deliveryStartDate &&
@@ -648,7 +902,6 @@ const SalesRequestModal: React.FC<{
       Number(state.rfqOrderQtyMW) > 0;
 
     const wattOk = moduleWattageWp !== "" && Number(moduleWattageWp) > 0;
-
     const bomOk =
       !!moduleModelNumber.trim() &&
       wattOk &&
@@ -657,8 +910,22 @@ const SalesRequestModal: React.FC<{
         (c) => c.rows.length > 0 && c.rows.every((r) => !!r.model)
       );
 
-    return !!(basicsOk && bomOk);
+    const hasQapAttachment = state.qapType !== "Customer" || !!qapTypeFile;
+
+    const nonEmptyRows = wattBins.filter(
+      (r) => r.range.trim() !== "" || r.pct.trim() !== ""
+    );
+    const pctNums = nonEmptyRows.map((r) => Number(r.pct));
+    const allPctsValid = pctNums.every((n) => Number.isFinite(n));
+    const sum = pctNums.reduce((a, b) => a + b, 0);
+    const distOk =
+      nonEmptyRows.length >= 1 && allPctsValid && Math.abs(sum - 100) < 0.001;
+
+    return !!(basicsOk && bomOk && hasQapAttachment && distOk);
   }, [
+    mode,
+    qapTypeFile,
+    state.qapType,
     state.customerName,
     state.deliveryStartDate,
     state.deliveryEndDate,
@@ -667,6 +934,7 @@ const SalesRequestModal: React.FC<{
     moduleModelNumber,
     moduleWattageWp,
     components,
+    wattBins,
   ]);
 
   const addOtherFile = () =>
@@ -736,6 +1004,7 @@ const SalesRequestModal: React.FC<{
       moduleDimensionsOption,
       moduleModelNumber: moduleModelNumber.trim(),
       components,
+      wattPeakLabel: wattPeakLabel || undefined,
     }),
     [
       tech,
@@ -745,17 +1014,123 @@ const SalesRequestModal: React.FC<{
       moduleDimensionsOption,
       moduleModelNumber,
       components,
+      wattPeakLabel,
     ]
   );
 
+  const FieldDiff: React.FC<{
+    change: { field: string; before: any; after: any };
+  }> = ({ change }) => {
+    const fmt = (v: any) =>
+      typeof v === "object" ? (
+        <pre className="text-xs bg-gray-50 p-2 rounded">
+          {JSON.stringify(v, null, 2)}
+        </pre>
+      ) : (
+        String(v ?? "—")
+      );
+
+    return (
+      <tr className="align-top">
+        <td className="px-2 py-1 font-medium">{change.field}</td>
+        <td className="px-2 py-1">{fmt(change.before)}</td>
+        <td className="px-2 py-1">{fmt(change.after)}</td>
+      </tr>
+    );
+  };
+
+  const HistoryList: React.FC<{ id: string }> = ({ id }) => {
+    const { data = [], isLoading } = useQuery<HistoryItem[]>({
+      queryKey: ["sr-history", id],
+      queryFn: async () => {
+        const r = await fetch(`${API}/api/sales-requests/${id}/history`, {
+          credentials: "include",
+        });
+        if (!r.ok) throw new Error("Failed to load history");
+        return r.json();
+      },
+    });
+
+    if (isLoading)
+      return <div className="text-sm text-gray-600">Loading history…</div>;
+    if (!data.length)
+      return <div className="text-sm text-gray-600">No changes yet.</div>;
+
+    return (
+      <div className="space-y-4">
+        {data.map((h) => (
+          <div key={h.id} className="border rounded">
+            <div className="px-3 py-2 bg-gray-50 text-sm flex items-center justify-between">
+              <div>
+                <span className="font-semibold">{h.action.toUpperCase()}</span>{" "}
+                by <span className="font-mono">{h.changedBy}</span>
+              </div>
+              <div className="text-gray-600">
+                {new Date(h.changedAt).toLocaleString()}
+              </div>
+            </div>
+            {h.changes?.length ? (
+              <div className="overflow-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-left bg-gray-50">
+                      <th className="px-2 py-1">Field</th>
+                      <th className="px-2 py-1">Before</th>
+                      <th className="px-2 py-1">After</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {h.changes.map((c, i) => (
+                      <FieldDiff key={i} change={c} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="px-3 py-2 text-sm text-gray-600">
+                No field-level changes captured.
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   const submit = () => {
+    // Front-end guard: require QAP attachment when Customer
+    if (
+      state.qapType === "Customer" &&
+      !qapTypeFile &&
+      !(mode === "edit" && initial?.qapTypeAttachmentUrl)
+    ) {
+      alert("QAP Type attachment is required when QAP Type = Customer.");
+      return;
+    }
+
     const fd = new FormData();
+
     // core fields
-    fd.append("customerName", state.customerName.trim());
-    fd.append("isNewCustomer", state.isNewCustomer);
-    fd.append("moduleManufacturingPlant", state.moduleManufacturingPlant);
+    // core fields
+    if (mode === "create") {
+      fd.append("customerName", state.customerName.trim());
+    }
+    fd.append("projectCode", projectCode); // ← add this
+    fd.append(
+      "isNewCustomer",
+      mode === "edit" && initial ? initial.isNewCustomer : "no"
+    );
+    fd.append(
+      "moduleManufacturingPlant",
+      state.moduleManufacturingPlant.toLowerCase()
+    );
     fd.append("moduleOrderType", state.moduleOrderType);
-    fd.append("cellType", state.cellType);
+    fd.append("cellType", state.cellType); // DCR/NDCR
+    fd.append("certificationRequired", state.certificationRequired);
+    // NEW optional sub-fields (server can ignore safely if not supported)
+    if (state.moduleCellType) fd.append("moduleCellType", state.moduleCellType);
+    if (state.cellTech) fd.append("cellTech", state.cellTech);
+    if (state.cutCells) fd.append("cutCells", state.cutCells);
     fd.append("wattageBinning", String(Number(state.wattageBinning || 0)));
     fd.append("rfqOrderQtyMW", String(Number(state.rfqOrderQtyMW || 0)));
     if (state.premierBiddedOrderQtyMW !== "") {
@@ -786,8 +1161,49 @@ const SalesRequestModal: React.FC<{
     if (state.remarks.trim()) fd.append("remarks", state.remarks.trim());
     fd.append("createdBy", currentUser);
 
-    // BOM JSON payload
-    fd.append("bom", JSON.stringify(bomPayload));
+    // NEW: wattage distribution JSON
+    const distPayload = wattBins
+      .filter((r) => r.range.trim() !== "" || r.pct.trim() !== "")
+      .map((r) => ({ range: r.range.trim(), pct: Number(r.pct || 0) }));
+    fd.append("wattageBinningDist", JSON.stringify(distPayload));
+
+    // BOM JSON payload — ensure defaults are applied even if untouched
+    {
+      const plantKey = state.moduleManufacturingPlant.toLowerCase() as
+        | "p2"
+        | "p5"
+        | "p6";
+      const cfg = PLANT_CONFIG[plantKey];
+
+      const finalModel =
+        (moduleModelNumber || "").trim() || cfg.models[0] || "";
+
+      const finalDims =
+        moduleDimensionsOption || cfg.dimLocked || cfg.dimOpts[0] || "";
+
+      const finalWattLabel =
+        wattPeakLabel || cfg.wattLocked || cfg.wattOpts[0] || "";
+
+      let finalWattNum = Number(moduleWattageWp || 0);
+      if (!finalWattNum) {
+        if ("wattNumeric" in cfg && typeof cfg.wattNumeric === "number") {
+          finalWattNum = cfg.wattNumeric;
+        } else if ((cfg as any).wattMap && finalWattLabel) {
+          const mapped = (cfg as any).wattMap[finalWattLabel];
+          if (mapped) finalWattNum = Number(mapped);
+        }
+      }
+
+      const bomForSave = {
+        ...bomPayload,
+        moduleModelNumber: finalModel,
+        moduleDimensionsOption: finalDims,
+        moduleWattageWp: finalWattNum,
+        wattPeakLabel: finalWattLabel || undefined,
+      };
+
+      fd.append("bom", JSON.stringify(bomForSave));
+    }
 
     // attachments: if provided, back-end will replace existing (for edit) or set new (for create)
     if (qapTypeFile) fd.append("qapTypeAttachment", qapTypeFile);
@@ -839,16 +1255,7 @@ const SalesRequestModal: React.FC<{
                 required
                 value={state.customerName}
                 onChange={(v) => setState((s) => ({ ...s, customerName: v }))}
-              />
-
-              <Select
-                label="Is this a new customer?"
-                required
-                value={state.isNewCustomer}
-                onChange={(v: any) =>
-                  setState((s) => ({ ...s, isNewCustomer: v }))
-                }
-                options={["yes", "no"]}
+                readOnly={mode === "edit" || !!prefillCustomerName}
               />
 
               <Select
@@ -858,34 +1265,51 @@ const SalesRequestModal: React.FC<{
                 onChange={(v: any) =>
                   setState((s) => ({ ...s, moduleManufacturingPlant: v }))
                 }
-                options={["p2", "p5", "p6"]}
+                options={["P2", "P5", "P6"]}
               />
 
-              <Select
-                label="Module Order Type"
-                required
-                value={state.moduleOrderType}
-                onChange={(v: any) =>
-                  setState((s) => ({ ...s, moduleOrderType: v }))
-                }
-                options={["m10", "g12r", "g12"]}
-              />
+              {/* Module Order Type is now a header only (no input) */}
+              <div className="md:col-span-2">
+                <div className="text-sm font-medium text-gray-700">
+                  Module Order Type
+                </div>
+              </div>
 
+              {/* NEW sub-dropdowns under "Module Order Type" */}
               <Select
                 label="Cell Type"
+                value={state.moduleCellType}
+                onChange={(v: any) =>
+                  setState((s) => ({ ...s, moduleCellType: v as CellType }))
+                }
+                options={["M10", "M10R", "G12", "G12R"]}
+              />
+              <Select
+                label="Cell Tech"
+                value={state.cellTech}
+                onChange={(v: any) =>
+                  setState((s) => ({ ...s, cellTech: v as CellTech }))
+                }
+                options={["PERC", "TOPCon"]}
+              />
+              <Select
+                label="No. of Cut Cells"
+                value={state.cutCells}
+                onChange={(v: any) =>
+                  setState((s) => ({ ...s, cutCells: v as CutCells }))
+                }
+                options={["60", "66", "72", "78"]}
+              />
+
+              <Select
+                label="DCR Compliance?"
                 required
                 value={state.cellType}
                 onChange={(v: any) => setState((s) => ({ ...s, cellType: v }))}
                 options={["DCR", "NDCR"]}
               />
 
-              <IntField
-                label="Wattage Binning/Distribution"
-                required
-                value={state.wattageBinning}
-                onChange={(v) => setState((s) => ({ ...s, wattageBinning: v }))}
-                placeholder="e.g., 540"
-              />
+              <WattageDistTable rows={wattBins} onChange={setWattBins} />
 
               <IntField
                 label="RFQ Order Quantity in MW"
@@ -927,13 +1351,13 @@ const SalesRequestModal: React.FC<{
               />
 
               <IntField
-                label="Cable Length Required"
+                label="JB Cable Length in mm"
                 required
                 value={state.cableLengthRequired}
                 onChange={(v) =>
                   setState((s) => ({ ...s, cableLengthRequired: v }))
                 }
-                placeholder="in meters"
+                placeholder="in mm"
               />
 
               {/* Right column */}
@@ -946,9 +1370,18 @@ const SalesRequestModal: React.FC<{
               />
 
               <File
-                label="QAP Type attachment (optional)"
+                label={
+                  state.qapType === "Customer"
+                    ? "QAP Type attachment * (Required when QAP Type = Customer)"
+                    : "QAP Type attachment (optional)"
+                }
                 onChange={setQapTypeFile}
               />
+              {state.qapType === "Customer" && (
+                <div className="text-xs text-red-600 mt-1">
+                  Required when QAP Type = Customer
+                </div>
+              )}
 
               <Select
                 label="Primary Technical Document - Primary BOM"
@@ -978,13 +1411,33 @@ const SalesRequestModal: React.FC<{
               />
 
               <Select
+                label="Certification Required?"
+                value={state.certificationRequired}
+                onChange={(v: any) =>
+                  setState((s) => ({
+                    ...s,
+                    certificationRequired: v as
+                      | "BIS"
+                      | "IEC"
+                      | "BIS + IEC"
+                      | "Not Required",
+                  }))
+                }
+                options={["BIS", "IEC", "BIS + IEC", "Not Required"]}
+              />
+
+              <Select
                 label="Cell Procured By"
                 required
                 value={state.cellProcuredBy}
                 onChange={(v: any) =>
                   setState((s) => ({ ...s, cellProcuredBy: v }))
                 }
-                options={["Customer", "Premier Energies"]}
+                options={[
+                  "Customer",
+                  "Premier Energies",
+                  "Financed By Customer",
+                ]}
               />
 
               <FloatField
@@ -1131,13 +1584,19 @@ const SalesRequestModal: React.FC<{
                       onChange={setModuleModelNumber}
                       options={
                         PLANT_CONFIG[
-                          state.moduleManufacturingPlant as "p2" | "p5" | "p6"
+                          state.moduleManufacturingPlant.toLowerCase() as
+                            | "p2"
+                            | "p5"
+                            | "p6"
                         ].models
                       }
                     />
                     {/* Watt-peak (lock or dropdown by plant). Also sets numeric moduleWattageWp */}
                     {PLANT_CONFIG[
-                      state.moduleManufacturingPlant as "p2" | "p5" | "p6"
+                      state.moduleManufacturingPlant.toLowerCase() as
+                        | "p2"
+                        | "p5"
+                        | "p6"
                     ].wattLocked ? (
                       <ReadOnly
                         label="Watt-peak"
@@ -1152,7 +1611,7 @@ const SalesRequestModal: React.FC<{
                           setWattPeakLabel(v);
                           const cfg =
                             PLANT_CONFIG[
-                              state.moduleManufacturingPlant as
+                              state.moduleManufacturingPlant.toLowerCase() as
                                 | "p2"
                                 | "p5"
                                 | "p6"
@@ -1162,14 +1621,20 @@ const SalesRequestModal: React.FC<{
                         }}
                         options={
                           PLANT_CONFIG[
-                            state.moduleManufacturingPlant as "p2" | "p5" | "p6"
+                            state.moduleManufacturingPlant.toLowerCase() as
+                              | "p2"
+                              | "p5"
+                              | "p6"
                           ].wattOpts
                         }
                       />
                     )}
                     {/* Dimensions (lock or dropdown by plant) */}
                     {PLANT_CONFIG[
-                      state.moduleManufacturingPlant as "p2" | "p5" | "p6"
+                      state.moduleManufacturingPlant.toLowerCase() as
+                        | "p2"
+                        | "p5"
+                        | "p6"
                     ].dimLocked ? (
                       <ReadOnly
                         label="Module Dimensions"
@@ -1183,51 +1648,17 @@ const SalesRequestModal: React.FC<{
                         onChange={(v: string) => setModuleDimensionsOption(v)}
                         options={
                           PLANT_CONFIG[
-                            state.moduleManufacturingPlant as "p2" | "p5" | "p6"
+                            state.moduleManufacturingPlant.toLowerCase() as
+                              | "p2"
+                              | "p5"
+                              | "p6"
                           ].dimOpts
                         }
                       />
                     )}
                   </div>
-
-                  {/* Add component */}
-                  <div className="flex flex-col md:flex-row gap-2 md:items-end">
-                    <div className="flex-1">
-                      <label className="block text-sm text-gray-700 mb-1">
-                        Add Component
-                      </label>
-                      <select
-                        className="w-full border rounded px-3 py-2"
-                        defaultValue=""
-                        onChange={(e) => {
-                          const v = e.target.value as BomComponentName;
-                          if (v) addComponent(v);
-                          e.currentTarget.selectedIndex = 0;
-                        }}
-                      >
-                        <option value="" disabled>
-                          Select component…
-                        </option>
-                        {availableComponents.map((c) => (
-                          <option
-                            key={c}
-                            value={c}
-                            disabled={!!components.find((x) => x.name === c)}
-                          >
-                            {c}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    {components.length > 0 && (
-                      <div className="text-sm text-gray-600 md:ml-auto">
-                        Tip: Use “+ Add Row” inside each component to add
-                        multiple entries (e.g., two cell types).
-                      </div>
-                    )}
-                  </div>
-
                   {/* Component tables */}
+
                   <div className="space-y-6">
                     {components.map((c) => (
                       <div key={c.name} className="border rounded-md">
@@ -1240,13 +1671,6 @@ const SalesRequestModal: React.FC<{
                               onClick={() => addRow(c.name)}
                             >
                               + Add Row
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              onClick={() => removeComponent(c.name)}
-                            >
-                              Remove Component
                             </Button>
                           </div>
                         </div>
@@ -1277,35 +1701,36 @@ const SalesRequestModal: React.FC<{
                                   return (
                                     <tr key={idx} className="align-top">
                                       <td className="px-3 py-2 min-w-[28rem]">
-                                        <select
-                                          className="w-full border rounded px-3 py-2"
-                                          value={r.model}
-                                          onChange={(e) =>
-                                            setRowModel(
-                                              c.name,
-                                              idx,
-                                              e.target.value
-                                            )
-                                          }
-                                        >
-                                          <option value="" disabled>
-                                            Select model…
-                                          </option>
-                                          {opts.map((o) => {
-                                            const label = `${o.model} — ${
-                                              o.subVendor || "-"
-                                            } — ${o.spec || "-"}`;
-                                            return (
-                                              <option
-                                                key={o.model}
-                                                value={o.model}
-                                                title={label}
+                                        <div className="space-y-2">
+                                          <input
+                                            className="w-full border rounded px-3 py-2 bg-gray-50 font-mono"
+                                            value={r.model || ""}
+                                            placeholder="No model chosen"
+                                            readOnly
+                                          />
+                                          <div className="flex items-center gap-2">
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              onClick={() =>
+                                                openModelDialog(c.name, idx)
+                                              }
+                                            >
+                                              {r.model ? "Change" : "Choose"}
+                                            </Button>
+                                            {r.model && (
+                                              <Button
+                                                size="sm"
+                                                variant="destructive"
+                                                onClick={() =>
+                                                  setRowModel(c.name, idx, "")
+                                                }
                                               >
-                                                {label}
-                                              </option>
-                                            );
-                                          })}
-                                        </select>
+                                                Clear
+                                              </Button>
+                                            )}
+                                          </div>
+                                        </div>
                                       </td>
 
                                       <td className="px-3 py-2 min-w-[16rem]">
@@ -1343,6 +1768,14 @@ const SalesRequestModal: React.FC<{
               </Card>
             </div>
 
+            {/* Change history (edit only) */}
+            {mode === "edit" && initial?.id && (
+              <div className="p-4 border-t">
+                <h3 className="font-semibold mb-2">Change History</h3>
+                <HistoryList id={initial.id} />
+              </div>
+            )}
+
             <div className="p-4 border-t flex items-center justify-end gap-3">
               <Button variant="outline" onClick={onClose}>
                 Cancel
@@ -1377,13 +1810,9 @@ const SalesRequestModal: React.FC<{
                   />
                   <PreviewRow
                     label="Project Code"
-                    value={initial?.projectCode || "-"}
-                  />{" "}
-                  {/* ← NEW */}
-                  <PreviewRow
-                    label="New Customer?"
-                    value={state.isNewCustomer}
+                    value={projectCode || initial?.projectCode || "-"}
                   />
+
                   <PreviewRow
                     label="Manufacturing Plant"
                     value={state.moduleManufacturingPlant.toUpperCase()}
@@ -1392,11 +1821,26 @@ const SalesRequestModal: React.FC<{
                     label="Order Type"
                     value={state.moduleOrderType.toUpperCase()}
                   />
-                  <PreviewRow label="Cell Type" value={state.cellType} />
-                  <PreviewRow
-                    label="Wattage Binning"
-                    value={displayInt(state.wattageBinning)}
-                  />
+                  <PreviewRow label="DCR Compliance?" value={state.cellType} />
+                  <div className="flex flex-col md:col-span-3">
+                    <span className="text-gray-500">
+                      Wattage Binning / Distribution
+                    </span>
+                    {wattBins.filter((r) => r.range.trim() || r.pct.trim())
+                      .length ? (
+                      <ul className="list-disc pl-5">
+                        {wattBins
+                          .filter((r) => r.range.trim() || r.pct.trim())
+                          .map((r, i) => (
+                            <li key={i}>
+                              {r.range || "—"}: {r.pct || "0"}%
+                            </li>
+                          ))}
+                      </ul>
+                    ) : (
+                      <span className="font-medium text-gray-900">-</span>
+                    )}
+                  </div>
                   <PreviewRow
                     label="RFQ Qty (MW)"
                     value={displayInt(state.rfqOrderQtyMW)}
@@ -1420,7 +1864,7 @@ const SalesRequestModal: React.FC<{
                     value={state.projectLocation}
                   />
                   <PreviewRow
-                    label="Cable Length"
+                    label="JB Cable Length"
                     value={displayInt(state.cableLengthRequired)}
                   />
                   <PreviewRow label="QAP Type" value={state.qapType} />
@@ -1431,6 +1875,10 @@ const SalesRequestModal: React.FC<{
                   <PreviewRow
                     label="Inline Inspection?"
                     value={state.inlineInspection.toUpperCase()}
+                  />
+                  <PreviewRow
+                    label="Certification Required?"
+                    value={state.certificationRequired}
                   />
                   <PreviewRow
                     label="Cell Procured By"
@@ -1559,6 +2007,22 @@ const SalesRequestModal: React.FC<{
           </div>
         )}
       </div>
+      <ModelPickerModal
+        open={modelDialog.open === true}
+        title={
+          modelDialog.open
+            ? `${modelDialog.comp} – Select model`
+            : "Select model"
+        }
+        options={modelDialog.open ? getOptionsFor(modelDialog.comp) : []}
+        onClose={closeModelDialog}
+        onPick={(model) => {
+          if (modelDialog.open) {
+            setRowModel(modelDialog.comp, modelDialog.idx, model);
+          }
+          closeModelDialog();
+        }}
+      />
     </div>
   );
 };
@@ -1648,6 +2112,10 @@ const ViewSalesRequestModal: React.FC<{
                       value={data.customerName}
                     />
                     <PreviewRow
+                      label="Project Code"
+                      value={data.projectCode || "-"}
+                    />
+                    <PreviewRow
                       label="New Customer?"
                       value={data.isNewCustomer}
                     />
@@ -1659,11 +2127,39 @@ const ViewSalesRequestModal: React.FC<{
                       label="Order Type"
                       value={data.moduleOrderType.toUpperCase()}
                     />
-                    <PreviewRow label="Cell Type" value={data.cellType} />
+                    {/* NEW preview rows */}
                     <PreviewRow
-                      label="Wattage Binning"
-                      value={fmtNum(data.wattageBinning)}
+                      label="Cell Type"
+                      value={data.moduleCellType || "-"}
                     />
+                    <PreviewRow
+                      label="Cell Tech"
+                      value={data.cellTech || "-"}
+                    />
+                    <PreviewRow
+                      label="No. of Cut Cells"
+                      value={data.cutCells || "-"}
+                    />
+                    <PreviewRow label="DCR Compliance?" value={data.cellType} />
+                    {data.wattageBinningDist?.length ? (
+                      <div className="flex flex-col md:col-span-3">
+                        <span className="text-gray-500">
+                          Wattage Binning / Distribution
+                        </span>
+                        <ul className="list-disc pl-5">
+                          {data.wattageBinningDist.map((b, i) => (
+                            <li key={i}>
+                              {b.range}: {fmtDec(b.pct)}%
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : (
+                      <PreviewRow
+                        label="Wattage Binning"
+                        value={fmtNum(data.wattageBinning)}
+                      />
+                    )}
                     <PreviewRow
                       label="RFQ Qty (MW)"
                       value={fmtNum(data.rfqOrderQtyMW)}
@@ -1681,7 +2177,7 @@ const ViewSalesRequestModal: React.FC<{
                       value={data.projectLocation}
                     />
                     <PreviewRow
-                      label="Cable Length"
+                      label="JB Cable Length"
                       value={fmtNum(data.cableLengthRequired)}
                     />
                     <PreviewRow label="QAP Type" value={data.qapType} />
@@ -1692,6 +2188,10 @@ const ViewSalesRequestModal: React.FC<{
                     <PreviewRow
                       label="Inline Inspection?"
                       value={data.inlineInspection.toUpperCase()}
+                    />
+                    <PreviewRow
+                      label="Certification Required?"
+                      value={(data as any).certificationRequired || "-"}
                     />
                     <PreviewRow
                       label="Cell Procured By"
@@ -1947,6 +2447,327 @@ function stringifyForView(v: any) {
   }
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// ModelPicker: table-styled dropdown for BOM "Model No." selection
+// ────────────────────────────────────────────────────────────────────────────
+const ModelPicker: React.FC<{
+  value: string;
+  options: readonly BomComponentOption[];
+  onChange: (model: string) => void;
+  placeholder?: string;
+}> = ({ value, options, onChange, placeholder = "Select model…" }) => {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = React.useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!ref.current) return;
+      if (!ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
+  const selected = value
+    ? options.find((o) => o.model === value) || null
+    : null;
+
+  const filtered = q
+    ? options.filter(
+        (o) =>
+          (o.model || "").toLowerCase().includes(q.toLowerCase()) ||
+          (o.subVendor || "").toLowerCase().includes(q.toLowerCase()) ||
+          (o.spec || "").toLowerCase().includes(q.toLowerCase())
+      )
+    : options;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        className="w-full border rounded px-3 py-2 text-left hover:bg-gray-50 focus:outline-none focus:ring"
+        onClick={() => setOpen((v) => !v)}
+        title={
+          selected
+            ? `${selected.model} | ${selected.subVendor || "-"} | ${
+                selected.spec || "-"
+              }`
+            : placeholder
+        }
+      >
+        {!selected ? (
+          <span className="text-gray-500">{placeholder}</span>
+        ) : (
+          <div className="grid grid-cols-[minmax(12rem,1fr)_minmax(10rem,1fr)_minmax(14rem,2fr)] gap-3 font-mono text-sm">
+            <span className="truncate">{selected.model}</span>
+            <span className="truncate">{selected.subVendor || "-"}</span>
+            <span className="truncate">{selected.spec || "-"}</span>
+          </div>
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute z-30 mt-1 w-[48rem] max-w-[90vw] bg-white border rounded shadow-lg">
+          <div className="p-2 border-b bg-gray-50">
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Type to filter by model / sub-vendor / spec"
+              className="w-full border rounded px-2 py-1.5 text-sm"
+            />
+          </div>
+
+          <div className="max-h-72 overflow-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50 sticky top-0">
+                <tr className="text-left">
+                  <th className="px-3 py-2 font-medium">Model</th>
+                  <th className="px-3 py-2 font-medium">Sub-vendor</th>
+                  <th className="px-3 py-2 font-medium">Specification</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="px-3 py-3 text-gray-500">
+                      No matches.
+                    </td>
+                  </tr>
+                ) : (
+                  filtered.map((o) => (
+                    <tr
+                      key={o.model}
+                      className="cursor-pointer hover:bg-blue-50"
+                      onClick={() => {
+                        onChange(o.model);
+                        setOpen(false);
+                        setQ("");
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          onChange(o.model);
+                          setOpen(false);
+                          setQ("");
+                        }
+                      }}
+                      tabIndex={0}
+                    >
+                      <td className="px-3 py-2 font-mono">{o.model}</td>
+                      <td className="px-3 py-2">{o.subVendor || "-"}</td>
+                      <td className="px-3 py-2 whitespace-pre-wrap">
+                        {o.spec || "-"}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ────────────────────────────────────────────────────────────────────────────
+// ModelPickerModal: full-screen-ish modal for BOM "Model No." selection
+// ────────────────────────────────────────────────────────────────────────────
+const ModelPickerModal: React.FC<{
+  open: boolean;
+  title?: string;
+  options: readonly BomComponentOption[];
+  onClose: () => void;
+  onPick: (model: string) => void;
+}> = ({ open, title = "Select model", options, onClose, onPick }) => {
+  const [q, setQ] = useState("");
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    if (open) document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const filtered = q
+    ? options.filter(
+        (o) =>
+          (o.model || "").toLowerCase().includes(q.toLowerCase()) ||
+          (o.subVendor || "").toLowerCase().includes(q.toLowerCase()) ||
+          (o.spec || "").toLowerCase().includes(q.toLowerCase())
+      )
+    : options;
+
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl max-h-[85vh] flex flex-col">
+        <div className="p-3 border-b flex items-center justify-between">
+          <div className="font-semibold">{title}</div>
+          <Button variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+
+        <div className="p-3 border-b">
+          <input
+            autoFocus
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Type to filter by model / sub-vendor / spec"
+            className="w-full border rounded px-3 py-2 text-sm"
+          />
+        </div>
+
+        <div className="overflow-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50 sticky top-0">
+              <tr className="text-left">
+                <th className="px-3 py-2 font-medium">Model</th>
+                <th className="px-3 py-2 font-medium">Sub-vendor</th>
+                <th className="px-3 py-2 font-medium">Specification</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={3} className="px-3 py-3 text-gray-500">
+                    No matches.
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((o) => (
+                  <tr
+                    key={o.model}
+                    className="cursor-pointer hover:bg-blue-50"
+                    onClick={() => onPick(o.model)}
+                    tabIndex={0}
+                    onKeyDown={(e) => e.key === "Enter" && onPick(o.model)}
+                  >
+                    <td className="px-3 py-2 font-mono">{o.model}</td>
+                    <td className="px-3 py-2">{o.subVendor || "-"}</td>
+                    <td className="px-3 py-2 whitespace-pre-wrap">
+                      {o.spec || "-"}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/** Editable table for Wattage Distribution with sum==100 validation */
+const WattageDistTable: React.FC<{
+  rows: { range: string; pct: string }[];
+  onChange: (rows: { range: string; pct: string }[]) => void;
+}> = ({ rows, onChange }) => {
+  const addRow = () => onChange([...rows, { range: "", pct: "" }]);
+  const removeRow = (idx: number) =>
+    onChange(rows.length > 1 ? rows.filter((_, i) => i !== idx) : rows);
+  const setCell = (
+    idx: number,
+    patch: Partial<{ range: string; pct: string }>
+  ) => {
+    const copy = [...rows];
+    copy[idx] = { ...copy[idx], ...patch };
+    onChange(copy);
+  };
+
+  const nonEmpty = rows.filter(
+    (r) => r.range.trim() !== "" || r.pct.trim() !== ""
+  );
+  const sum = nonEmpty.reduce((a, r) => a + (Number(r.pct) || 0), 0);
+  const valid = Math.abs(sum - 100) < 0.001 && nonEmpty.length >= 1;
+
+  return (
+    <div className="md:col-span-2">
+      <div className="flex items-center justify-between mb-1">
+        <label className="block text-sm text-gray-700">
+          Wattage Binning / Distribution *
+        </label>
+        <Button type="button" variant="outline" onClick={addRow}>
+          +
+        </Button>
+      </div>
+      <div className="overflow-auto border rounded">
+        <table className="min-w-full text-sm">
+          <thead className="bg-gray-50">
+            <tr className="text-left">
+              <th className="px-3 py-2 font-medium">Wattage Range</th>
+              <th className="px-3 py-2 font-medium">% (decimals allowed)</th>
+              <th className="px-3 py-2 font-medium">Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {rows.map((r, i) => (
+              <tr key={i}>
+                <td className="px-3 py-2">
+                  <input
+                    className="w-full border rounded px-3 py-2"
+                    value={r.range}
+                    onChange={(e) => setCell(i, { range: e.target.value })}
+                    placeholder="e.g., 540–545"
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <input
+                    className="w-full border rounded px-3 py-2"
+                    inputMode="decimal"
+                    value={r.pct}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === "" || /^([0-9]+(\.[0-9]*)?)$/.test(v)) {
+                        setCell(i, { pct: v });
+                      }
+                    }}
+                    placeholder="e.g., 33.3"
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    disabled={rows.length <= 1}
+                    onClick={() => removeRow(i)}
+                  >
+                    Remove
+                  </Button>
+                </td>
+              </tr>
+            ))}
+            <tr>
+              <td className="px-3 py-2 text-right font-medium">Total</td>
+              <td className="px-3 py-2 font-medium">{sum.toFixed(2)}%</td>
+              <td />
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div
+        className={`mt-1 text-xs ${valid ? "text-green-700" : "text-red-600"}`}
+      >
+        {valid
+          ? "Looks good: total is 100%."
+          : "Total must be exactly 100% and at least one row is required."}
+      </div>
+    </div>
+  );
+};
+
 /* ────────────────────────────────────────────────────────────────────────── */
 /*  Small field + preview components                                         */
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -1956,16 +2777,21 @@ const Text: React.FC<{
   value: string;
   onChange: (v: string) => void;
   required?: boolean;
-}> = ({ label, value, onChange, required }) => (
+
+  readOnly?: boolean;
+}> = ({ label, value, onChange, required, readOnly }) => (
   <div>
     <label className="block text-sm text-gray-700 mb-1">
       {label}
       {required && " *"}
     </label>
     <input
-      className="w-full border rounded px-3 py-2"
+      className={`w-full border rounded px-3 py-2 ${
+        readOnly ? "bg-gray-50" : ""
+      }`}
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      readOnly={!!readOnly}
     />
   </div>
 );
@@ -2016,6 +2842,10 @@ const Select: React.FC<{
       value={value}
       onChange={(e) => onChange(e.target.value)}
     >
+      {/* Show a consistent default placeholder across all dropdowns */}
+      <option value="" disabled={!!required} hidden>
+        select {label}
+      </option>
       {options.map((o) => (
         <option key={o} value={o}>
           {o}

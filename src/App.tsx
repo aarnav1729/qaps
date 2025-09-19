@@ -28,6 +28,7 @@ import AnalyticsPage from "./components/AnalyticsPage";
 import AdminPage from "./components/AdminPage";
 import AdminAnalytics from "./components/AdminAnalytics";
 import SalesRequestsPage from "./pages/SalesRequestPage";
+import CustomersPage from "./pages/Customers";
 
 import { QAPFormData } from "./types/qap";
 import { processWorkflowTransition } from "./utils/workflowUtils";
@@ -310,7 +311,7 @@ const AppContent: React.FC = () => {
             path="/"
             element={
               user?.role === "sales" ? (
-                <Navigate to="/sales" replace />
+                <Navigate to="/customers" replace />
               ) : (
                 <Index
                   qapData={qapData}
@@ -320,6 +321,31 @@ const AppContent: React.FC = () => {
               )
             }
           />
+
+          {/* Customers hub (Sales/Admin) */}
+          {(user?.role === "sales" || user?.role === "admin") && (
+            <Route path="/customers" element={<CustomersPage />} />
+          )}
+
+          {/* Sales Requests list (reachable via Customers “View” tile) */}
+          {(user?.role === "sales" || user?.role === "admin") && (
+            <Route path="/sales-requests" element={<SalesRequestsPage />} />
+          )}
+
+          {/* Optionally keep legacy /sales path redirecting to customers for sales users */}
+          {(user?.role === "sales" || user?.role === "admin") && (
+            <Route
+              path="/sales"
+              element={
+                user?.role === "sales" ? (
+                  <Navigate to="/customers" replace />
+                ) : (
+                  <Navigate to="/sales-requests" replace />
+                )
+              }
+            />
+          )}
+
           <Route
             path="/qap/:id"
             element={
@@ -416,11 +442,11 @@ const AppContent: React.FC = () => {
               }
             />
           )}
-          
+
           {(user?.role === "sales" || user?.role === "admin") && (
             <Route path="/sales" element={<SalesRequestsPage />} />
           )}
-          
+
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

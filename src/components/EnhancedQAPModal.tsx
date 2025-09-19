@@ -19,9 +19,10 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { QAPSpecification, QAPFormData } from "@/types/qap";
+// Keep the static lists only as a fallback, not the primary source:
 import {
-  mqpSpecifications,
-  visualElSpecifications,
+  mqpSpecifications as FALLBACK_MQP,
+  visualElSpecifications as FALLBACK_VISUAL,
 } from "@/data/qapSpecifications";
 import { useAuth } from "@/contexts/AuthContext";
 import { Save, Send } from "lucide-react";
@@ -81,6 +82,53 @@ type BomPayload = {
   moduleModelNumber?: string;
   components: BomComponent[];
 };
+
+// DB row shape (subset of QAPSpecifications)
+type DbQapRow = {
+  sno: number;
+  criteria: string;
+  subCriteria: string;
+  componentOperation?: string | null;
+  characteristics?: string | null;
+  class: string;
+  typeOfCheck?: string | null;
+  sampling?: string | null;
+  specification?: string | null;
+  defectClass?: string | null;
+  description?: string | null;
+  criteriaLimits?: string | null;
+};
+
+async function fetchQapFromDb(kind: "mqp" | "visual"): Promise<DbQapRow[]> {
+  const url = `${API}/api/qap-specifications?criteria=${kind}`;
+  const r = await fetch(url, { credentials: "include" });
+  if (!r.ok) throw new Error(`Failed loading ${kind} specs`);
+  return (await r.json()) as DbQapRow[];
+}
+
+function inflateRows(rows: DbQapRow[], startSno: number): QAPSpecification[] {
+  return rows.map((r, idx) => ({
+    // 👇 Keep UI serials independent of DB master ‘sno’ to avoid UX changes
+    sno: startSno + idx,
+    criteria: r.criteria,
+    subCriteria: r.subCriteria,
+    componentOperation: r.componentOperation || "",
+    characteristics: r.characteristics || "",
+    class: r.class as any,
+    typeOfCheck: r.typeOfCheck || "",
+    sampling: r.sampling || "",
+    specification: r.specification || "",
+    defect: undefined,
+    defectClass: r.defectClass || undefined,
+    description: r.description || undefined,
+    criteriaLimits: r.criteriaLimits || undefined,
+    // interaction fields
+    match: undefined,
+    customerSpecification: undefined,
+    selectedForReview: false,
+    reviewBy: [],
+  }));
+}
 
 const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
   isOpen,
@@ -207,29 +255,61 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
   }
 
   useEffect(() => {
-    if (isOpen) {
-      if (editingQAP) {
-        // load existing QAP: support either legacy `qaps` or new `specs`
-        setCustomerName(editingQAP.customerName || "");
-        setProjectName(editingQAP.projectName || "");
-        setOrderQuantity(editingQAP.orderQuantity || 0);
-        setProductType(editingQAP.productType || "");
-        setPlant(editingQAP.plant || "");
-        const existingMqp = Array.isArray(editingQAP.qaps)
-          ? editingQAP.qaps.filter((q) => q.criteria === "MQP")
-          : editingQAP.specs?.mqp || [];
-        const existingVisual = Array.isArray(editingQAP.qaps)
-          ? editingQAP.qaps.filter(
-              (q) => q.criteria === "Visual" || q.criteria === "EL"
-            )
-          : editingQAP.specs?.visual || [];
-        setMqpData(existingMqp);
-        setVisualElData(existingVisual);
-      } else {
-        resetForm();
-        initializeQAPData();
-      }
+    if (!isOpen) return;
+    if (editingQAP) {
+      // load existing QAP: support either legacy `qaps` or new `specs`
+      setCustomerName(editingQAP.customerName || "");
+      setProjectName(editingQAP.projectName || "");
+      setOrderQuantity(editingQAP.orderQuantity || 0);
+      setProductType(editingQAP.productType || "");
+      setPlant(editingQAP.plant || "");
+      const existingMqp = Array.isArray(editingQAP.qaps)
+        ? editingQAP.qaps.filter((q) => q.criteria === "MQP")
+        : editingQAP.specs?.mqp || [];
+      const existingVisual = Array.isArray(editingQAP.qaps)
+        ? editingQAP.qaps.filter(
+            (q) => q.criteria === "Visual" || q.criteria === "EL"
+          )
+        : editingQAP.specs?.visual || [];
+      setMqpData(existingMqp);
+      setVisualElData(existingVisual);
+      return;
     }
+
+    // NEW QAP: DB-first hydrate with safe fallback to static lists
+    (async () => {
+      resetForm();
+      try {
+        const [mqpRows, visualRows] = await Promise.all([
+          fetchQapFromDb("mqp"),
+          fetchQapFromDb("visual"),
+        ]);
+        const mqp = inflateRows(mqpRows, nextSno);
+        const visual = inflateRows(visualRows, nextSno + mqp.length);
+        setMqpData(mqp);
+        setVisualElData(visual);
+      } catch {
+        // graceful fallback keeps the flow unaffected
+        const mqp = (FALLBACK_MQP || []).map((spec, i) => ({
+          ...spec,
+          sno: nextSno + i,
+          match: undefined,
+          customerSpecification: undefined,
+          selectedForReview: false,
+          reviewBy: [],
+        }));
+        const visual = (FALLBACK_VISUAL || []).map((spec, i) => ({
+          ...spec,
+          sno: nextSno + mqp.length + i,
+          match: undefined,
+          customerSpecification: undefined,
+          selectedForReview: false,
+          reviewBy: [],
+        }));
+        setMqpData(mqp);
+        setVisualElData(visual);
+      }
+    })();
   }, [isOpen, editingQAP, nextSno]);
 
   useEffect(() => {
