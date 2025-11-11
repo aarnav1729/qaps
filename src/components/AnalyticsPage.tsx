@@ -1,13 +1,5 @@
-/* --------------------------------------------------------------------------
- *  AnalyticsPage.tsx  –  Quality‑Assurance analytics dashboard
- * ------------------------------------------------------------------------ */
 import React, { useMemo, useState } from "react";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -105,15 +97,10 @@ const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ qapData }) => {
     if (selectedTimeframe !== "all") {
       const now = Date.now();
       const days =
-        selectedTimeframe === "7d"
-          ? 7
-          : selectedTimeframe === "30d"
-          ? 30
-          : 90;
+        selectedTimeframe === "7d" ? 7 : selectedTimeframe === "30d" ? 30 : 90;
       const cutoff = now - days * 24 * 60 * 60 * 1000;
       data = data.filter(
-        (q) =>
-          q.submittedAt && new Date(q.submittedAt).getTime() >= cutoff
+        (q) => q.submittedAt && new Date(q.submittedAt).getTime() >= cutoff
       );
     }
 
@@ -144,9 +131,8 @@ const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ qapData }) => {
     > = {};
     filteredData.forEach((q) => {
       const p = q.plant.toUpperCase();
-      if (!byPlant[p])
-        byPlant[p] = { approved: 0, rejected: 0, submitted: 0 };
-      byPlant[p][q.status as keyof typeof byPlant[string]]++;
+      if (!byPlant[p]) byPlant[p] = { approved: 0, rejected: 0, submitted: 0 };
+      byPlant[p][q.status as keyof (typeof byPlant)[string]]++;
     });
     return Object.entries(byPlant).map(([plant, counts]) => ({
       plant,
@@ -180,15 +166,13 @@ const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ qapData }) => {
 
   // Quality (pass/fail) – pie
   const qualityChartData = useMemo(() => {
-    const counts = filteredData
-      .flatMap(getAllSpecs)
-      .reduce(
-        (acc: Record<string, number>, spec: any) => {
-          if (spec.match) acc[spec.match] = (acc[spec.match] || 0) + 1;
-          return acc;
-        },
-        { yes: 0, no: 0 }
-      );
+    const counts = filteredData.flatMap(getAllSpecs).reduce(
+      (acc: Record<string, number>, spec: any) => {
+        if (spec.match) acc[spec.match] = (acc[spec.match] || 0) + 1;
+        return acc;
+      },
+      { yes: 0, no: 0 }
+    );
 
     return [
       { match: "Pass", count: counts.yes, fill: "#10b981" },
@@ -313,9 +297,7 @@ const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ qapData }) => {
               <div className="flex items-center space-x-2">
                 {c.icon}
                 <div>
-                  <p className="text-sm font-medium text-gray-600">
-                    {c.label}
-                  </p>
+                  <p className="text-sm font-medium text-gray-600">{c.label}</p>
                   <p className="text-2xl font-bold">{c.value}</p>
                 </div>
               </div>

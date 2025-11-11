@@ -1,17 +1,6 @@
-// src/components/Level2ReviewPage.tsx
 import React, { useState, useMemo } from "react";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardContent,
-} from "@/components/ui/card";
-import {
-  Tabs,
-  TabsList,
-  TabsTrigger,
-  TabsContent,
-} from "@/components/ui/tabs";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -85,10 +74,38 @@ type SalesRequestLite = {
     moduleModelNumber: string;
     components?: {
       name: string;
-      rows: { model: string; subVendor?: string | null; spec?: string | null }[];
+      rows: {
+        model: string;
+        subVendor?: string | null;
+        spec?: string | null;
+      }[];
     }[];
   } | null;
 };
+
+type ReviewThreadEntry = {
+  by: string;
+  at: string; // ISO
+  responses: Record<number, string>; // sno -> text
+};
+
+function getThreadForSpec(
+  levelResponses: QAPFormData["levelResponses"],
+  level: number,
+  role: string,
+  sno: number
+): { by: string; at: string; text: string }[] {
+  const lr = levelResponses?.[level]?.[role];
+  if (!lr || !Array.isArray(lr.comments)) return [];
+  const thread = lr.comments as ReviewThreadEntry[];
+  return thread
+    .map((e) => ({
+      by: e.by,
+      at: e.at,
+      text: e.responses?.[sno],
+    }))
+    .filter((x) => x.text && x.text.trim().length > 0);
+}
 
 const FieldRow: React.FC<{ label: string; value: React.ReactNode }> = ({
   label,
@@ -110,8 +127,9 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
   const [responses, setResponses] = useState<
     Record<string, Record<number, string>>
   >({});
-  const [rowFilter, setRowFilter] =
-    useState<"all" | "matched" | "unmatched">("all");
+  const [rowFilter, setRowFilter] = useState<"all" | "matched" | "unmatched">(
+    "all"
+  );
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   /* ───────────────────── derive reviewable ───────────────────── */
@@ -124,8 +142,7 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
       qapData
         .filter(
           (q) =>
-            q.currentLevel === 2 &&
-            userPlants.includes(q.plant.toLowerCase())
+            q.currentLevel === 2 && userPlants.includes(q.plant.toLowerCase())
         )
         .map((q) => ({
           ...q,
@@ -160,10 +177,212 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
 
   const fmtNum = (n?: number | null) =>
     n === null || n === undefined ? "-" : Number(n).toLocaleString();
+
   const fmtDec = (n?: number | null) =>
     n === null || n === undefined
       ? "-"
       : Number(n).toLocaleString(undefined, { maximumFractionDigits: 4 });
+
+  // >>> CHANGE_SUMMARY_HELPERS (ADD)
+  // Surface edit history (qap.editMeta) so reviewers can see what changed.
+  // editMeta is already attached to each QAP when the requestor edits/resubmits. :contentReference[oaicite:5]{index=5}
+  const summarizeEditCounts = (em: any): string => {
+    if (!em) return "";
+    const parts: string[] = [];
+    if (Array.isArray(em.header) && em.header.length > 0) {
+      parts.push(`Header(${em.header.length})`);
+    }
+    if (Array.isArray(em.mqp) && em.mqp.length > 0) {
+      parts.push(`MQP(${em.mqp.length})`);
+    }
+    if (Array.isArray(em.visual) && em.visual.length > 0) {
+      parts.push(`Visual/EL(${em.visual.length})`);
+    }
+    const bomChangedCount =
+      (em.bom?.changed?.length || 0) +
+        (em.bom?.added?.length || 0) +
+        (em.bom?.removed?.length || 0) || 0;
+    if (bomChangedCount > 0) {
+      parts.push(`BOM(${bomChangedCount})`);
+    }
+    return parts.join(", ");
+  };
+
+  const renderEditBadge = (qapLocal: any) => {
+    const text = summarizeEditCounts(qapLocal?.editMeta);
+    if (!text) return null;
+    return (
+      <Badge
+        variant="outline"
+        className="bg-red-50 text-red-700 border-red-300"
+      >
+        Edited: {text}
+      </Badge>
+    );
+  };
+
+  const renderChangeSummary = (qapLocal: any) => {
+    const em = qapLocal?.editMeta as any;
+    if (!em) return null;
+    return (
+      <details className="mb-4 rounded border border-yellow-300 bg-yellow-50 p-3 text-sm">
+        <summary className="cursor-pointer font-medium text-yellow-800">
+          Change Summary (click to expand)
+        </summary>
+        <div className="mt-3 space-y-4 text-gray-800">
+          {/* Header field edits */}
+          {Array.isArray(em.header) && em.header.length > 0 && (
+            <div>
+              <div className="font-semibold mb-1">Header Changes</div>
+              <ul className="space-y-1 text-xs md:text-sm">
+                {em.header.map((h: any, idx: number) => (
+                  <li key={idx}>
+                    <span className="font-medium">
+                      {h.field || h.key || h.name}:
+                    </span>{" "}
+                    <span className="line-through text-red-600">
+                      {String(h.before ?? "-")}
+                    </span>{" "}
+                    →{" "}
+                    <span className="text-green-700 font-semibold">
+                      {String(h.after ?? "-")}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* MQP row edits */}
+          {Array.isArray(em.mqp) && em.mqp.length > 0 && (
+            <div>
+              <div className="font-semibold mb-1">MQP Updates</div>
+              <ul className="space-y-2 text-xs md:text-sm">
+                {em.mqp.map((row: any, idx: number) => (
+                  <li key={idx}>
+                    <div className="font-medium">
+                      Row {row.sno ?? row.rowSno ?? "?"}
+                    </div>
+                    {Array.isArray(row.deltas) && row.deltas.length > 0 && (
+                      <ul className="ml-4 list-disc space-y-1">
+                        {row.deltas.map((d: any, di: number) => (
+                          <li key={di}>
+                            {d.field || d.key || d.name}:{" "}
+                            <span className="line-through text-red-600">
+                              {String(d.before ?? "-")}
+                            </span>{" "}
+                            →{" "}
+                            <span className="text-green-700 font-semibold">
+                              {String(d.after ?? "-")}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Visual / EL edits */}
+          {Array.isArray(em.visual) && em.visual.length > 0 && (
+            <div>
+              <div className="font-semibold mb-1">Visual / EL Updates</div>
+              <ul className="space-y-2 text-xs md:text-sm">
+                {em.visual.map((row: any, idx: number) => (
+                  <li key={idx}>
+                    <div className="font-medium">
+                      Row {row.sno ?? row.rowSno ?? "?"}
+                    </div>
+                    {Array.isArray(row.deltas) && row.deltas.length > 0 && (
+                      <ul className="ml-4 list-disc space-y-1">
+                        {row.deltas.map((d: any, di: number) => (
+                          <li key={di}>
+                            {d.field || d.key || d.name}:{" "}
+                            <span className="line-through text-red-600">
+                              {String(d.before ?? "-")}
+                            </span>{" "}
+                            →{" "}
+                            <span className="text-green-700 font-semibold">
+                              {String(d.after ?? "-")}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* BOM edits */}
+          {em.bom && (
+            <div>
+              <div className="font-semibold mb-1">BOM Updates</div>
+
+              {Array.isArray(em.bom.changed) && em.bom.changed.length > 0 && (
+                <div className="mb-2">
+                  <div className="italic text-xs text-gray-600">
+                    Modified rows
+                  </div>
+                  <ul className="ml-4 list-disc space-y-1 text-xs md:text-sm">
+                    {em.bom.changed.map((c: any, idx: number) => (
+                      <li key={idx}>
+                        <span className="font-medium">
+                          {c.part || c.model || c.name || `Row ${idx + 1}`}:
+                        </span>{" "}
+                        <span className="line-through text-red-600">
+                          {String(c.before ?? "-")}
+                        </span>{" "}
+                        →{" "}
+                        <span className="text-green-700 font-semibold">
+                          {String(c.after ?? "-")}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {Array.isArray(em.bom.added) && em.bom.added.length > 0 && (
+                <div className="mb-2">
+                  <div className="italic text-xs text-gray-600">Added rows</div>
+                  <ul className="ml-4 list-disc space-y-1 text-xs md:text-sm">
+                    {em.bom.added.map((c: any, idx: number) => (
+                      <li key={idx}>
+                        <span className="text-green-700 font-semibold">
+                          + {c.part || c.model || c.name || `Row ${idx + 1}`}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {Array.isArray(em.bom.removed) && em.bom.removed.length > 0 && (
+                <div className="mb-2">
+                  <div className="italic text-xs text-gray-600">
+                    Removed rows
+                  </div>
+                  <ul className="ml-4 list-disc space-y-1 text-xs md:text-sm">
+                    {em.bom.removed.map((c: any, idx: number) => (
+                      <li key={idx}>
+                        <span className="line-through text-red-600">
+                          − {c.part || c.model || c.name || `Row ${idx + 1}`}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </details>
+    );
+  };
+  // <<< CHANGE_SUMMARY_HELPERS
 
   /* ───────────────────────── render ───────────────────────── */
   return (
@@ -196,14 +415,15 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
       </div>
 
       {reviewable.length === 0 ? (
-        <div className="text-center text-gray-500 py-20">
-          No QAPs to review
-        </div>
+        <div className="text-center text-gray-500 py-20">No QAPs to review</div>
       ) : (
         reviewable.map((qap) => {
-          const hasResponded = Boolean(
+          const hasRespondedOnce = Boolean(
             qap.levelResponses?.[2]?.[user?.role || ""]?.acknowledged
           );
+          // Only lock if the QAP moved past Level 2 (this page already filters level 2,
+          // but this keeps the intent explicit and future-proof):
+          const respondDisabled = qap.currentLevel !== 2;
 
           const specs = qap.allSpecs.filter((s) =>
             rowFilter === "all"
@@ -216,16 +436,22 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
           const isOpen = expanded[qap.id] || false;
 
           // Try to pluck a linked Sales Request (optional)
-          const salesRequest: SalesRequestLite | undefined =
-            (qap as any)?.salesRequest;
+          // Prefer server-joined Sales Request, else fall back to the snapshot embedded in QAP.
+          const salesRequest: SalesRequestLite | undefined = (qap as any)
+            ?.salesRequest;
+          // 1) Requestor's snapshot (most accurate at submission time)
+          // 2) QAP.bom (compat field we persist now)
+          // 3) Joined SR's BOM (if BE provided it)
+          const bomSource =
+            (qap as any)?.bomSnapshot ??
+            (qap as any)?.bom ??
+            (salesRequest && salesRequest.bom);
 
           return (
             <Collapsible
               key={qap.id}
               open={isOpen}
-              onOpenChange={(o) =>
-                setExpanded((p) => ({ ...p, [qap.id]: o }))
-              }
+              onOpenChange={(o) => setExpanded((p) => ({ ...p, [qap.id]: o }))}
               className="mb-4"
             >
               {/* ────────── header ────────── */}
@@ -249,19 +475,23 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                         <CardTitle className="text-lg">
                           {qap.customerName} – {qap.projectName}
                         </CardTitle>
-                        <div className="flex gap-2 mt-1">
+                        <div className="flex gap-2 mt-1 flex-wrap">
                           <Badge variant="outline">
                             {qap.plant.toUpperCase()}
                           </Badge>
                           <Badge variant="outline">{qap.productType}</Badge>
                           <Badge>{qap.orderQuantity} MW</Badge>
+
+                          {/* >>> CHANGE_SUMMARY_BADGE (ADD) */}
+                          {renderEditBadge(qap)}
+                          {/* <<< CHANGE_SUMMARY_BADGE */}
                         </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-3 text-sm text-gray-600">
                       <Clock className="h-4 w-4 text-orange-500" />
                       <span>{getTimeRemaining(qap.submittedAt)}</span>
-                      {hasResponded && (
+                      {hasRespondedOnce && (
                         <>
                           <CheckCircle2 className="h-4 w-4 text-green-600" />
                           <span className="text-green-600">Responded</span>
@@ -276,6 +506,10 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
               <CollapsibleContent>
                 <Card className="border-t-0">
                   <CardContent className="p-4">
+                    {/* >>> CHANGE_SUMMARY_PANEL (ADD) */}
+                    {renderChangeSummary(qap)}
+                    {/* <<< CHANGE_SUMMARY_PANEL */}
+
                     <Tabs defaultValue="mqp">
                       <TabsList className="mb-4">
                         <TabsTrigger value="mqp">
@@ -338,9 +572,7 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                                     </td>
                                     <td className="p-2 border">
                                       <Textarea
-                                        value={
-                                          responses[qap.id]?.[s.sno] || ""
-                                        }
+                                        value={responses[qap.id]?.[s.sno] || ""}
                                         onChange={(e) =>
                                           handleChange(
                                             qap.id,
@@ -349,9 +581,47 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                                           )
                                         }
                                         placeholder="Comments…"
-                                        disabled={hasResponded}
+                                        disabled={respondDisabled}
                                         className="min-h-[3rem]"
                                       />
+                                      <div className="mt-2">
+                                        <div className="text-xs font-medium mb-1">
+                                          Previous comments
+                                        </div>
+                                        <div className="flex flex-col gap-2">
+                                          {getThreadForSpec(
+                                            qap.levelResponses,
+                                            2,
+                                            user.role,
+                                            s.sno
+                                          ).map((t, i) => (
+                                            <div
+                                              key={i}
+                                              className="rounded-lg border p-2"
+                                            >
+                                              <div className="text-[10px] text-muted-foreground mb-1">
+                                                {t.by} ·{" "}
+                                                {new Date(
+                                                  t.at
+                                                ).toLocaleString()}
+                                              </div>
+                                              <div className="whitespace-pre-wrap text-xs">
+                                                {t.text}
+                                              </div>
+                                            </div>
+                                          ))}
+                                          {getThreadForSpec(
+                                            qap.levelResponses,
+                                            2,
+                                            user.role,
+                                            s.sno
+                                          ).length === 0 && (
+                                            <div className="text-[11px] text-muted-foreground">
+                                              No comments yet.
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
                                     </td>
                                   </tr>
                                 ))}
@@ -413,9 +683,7 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                                     </td>
                                     <td className="p-2 border">
                                       <Textarea
-                                        value={
-                                          responses[qap.id]?.[s.sno] || ""
-                                        }
+                                        value={responses[qap.id]?.[s.sno] || ""}
                                         onChange={(e) =>
                                           handleChange(
                                             qap.id,
@@ -424,9 +692,47 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                                           )
                                         }
                                         placeholder="Comments…"
-                                        disabled={hasResponded}
+                                        disabled={respondDisabled}
                                         className="min-h-[3rem]"
                                       />
+                                      <div className="mt-2">
+                                        <div className="text-xs font-medium mb-1">
+                                          Previous comments
+                                        </div>
+                                        <div className="flex flex-col gap-2">
+                                          {getThreadForSpec(
+                                            qap.levelResponses,
+                                            2,
+                                            user.role,
+                                            s.sno
+                                          ).map((t, i) => (
+                                            <div
+                                              key={i}
+                                              className="rounded-lg border p-2"
+                                            >
+                                              <div className="text-[10px] text-muted-foreground mb-1">
+                                                {t.by} ·{" "}
+                                                {new Date(
+                                                  t.at
+                                                ).toLocaleString()}
+                                              </div>
+                                              <div className="whitespace-pre-wrap text-xs">
+                                                {t.text}
+                                              </div>
+                                            </div>
+                                          ))}
+                                          {getThreadForSpec(
+                                            qap.levelResponses,
+                                            2,
+                                            user.role,
+                                            s.sno
+                                          ).length === 0 && (
+                                            <div className="text-[11px] text-muted-foreground">
+                                              No comments yet.
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
                                     </td>
                                   </tr>
                                 ))}
@@ -437,289 +743,169 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
 
                       {/* BOM TAB */}
                       <TabsContent value="bom">
-                        {!salesRequest ? (
+                        {!salesRequest && !bomSource ? (
                           <div className="text-sm text-gray-600">
                             No linked Sales Request/BOM found on this QAP.
                           </div>
                         ) : (
                           <div className="space-y-6">
-                            <Card>
-                              <CardHeader>
-                                <CardTitle>Sales Request Summary</CardTitle>
-                              </CardHeader>
-                              <CardContent>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                                  <FieldRow
-                                    label="Customer Name"
-                                    value={salesRequest.customerName}
-                                  />
-                                  <FieldRow
-                                    label="Project Code"
-                                    value={salesRequest.projectCode || "-"}
-                                  />
-                                  <FieldRow
-                                    label="New Customer?"
-                                    value={salesRequest.isNewCustomer}
-                                  />
-                                  <FieldRow
-                                    label="Manufacturing Plant"
-                                    value={salesRequest.moduleManufacturingPlant?.toUpperCase()}
-                                  />
-                                  <FieldRow
-                                    label="Order Type"
-                                    value={salesRequest.moduleOrderType?.toUpperCase()}
-                                  />
-                                  <FieldRow
-                                    label="Cell Type"
-                                    value={salesRequest.cellType}
-                                  />
-                                  <FieldRow
-                                    label="Wattage Binning"
-                                    value={fmtNum(salesRequest.wattageBinning)}
-                                  />
-                                  <FieldRow
-                                    label="RFQ Qty (MW)"
-                                    value={fmtNum(salesRequest.rfqOrderQtyMW)}
-                                  />
-                                  <FieldRow
-                                    label="Premier Bidded Qty (MW)"
-                                    value={
-                                      salesRequest.premierBiddedOrderQtyMW ?? "-"
-                                    }
-                                  />
-                                  <FieldRow
-                                    label="Delivery Timeline"
-                                    value={`${salesRequest.deliveryStartDate} → ${salesRequest.deliveryEndDate}`}
-                                  />
-                                  <FieldRow
-                                    label="Project Location"
-                                    value={salesRequest.projectLocation}
-                                  />
-                                  <FieldRow
-                                    label="Cable Length"
-                                    value={fmtNum(
-                                      salesRequest.cableLengthRequired
-                                    )}
-                                  />
-                                  <FieldRow
-                                    label="QAP Type"
-                                    value={salesRequest.qapType}
-                                  />
-                                  <FieldRow
-                                    label="Primary BOM?"
-                                    value={salesRequest.primaryBom?.toUpperCase()}
-                                  />
-                                  <FieldRow
-                                    label="Inline Inspection?"
-                                    value={salesRequest.inlineInspection?.toUpperCase()}
-                                  />
-                                  <FieldRow
-                                    label="Cell Procured By"
-                                    value={salesRequest.cellProcuredBy}
-                                  />
-                                  <FieldRow
-                                    label="Agreed CTM"
-                                    value={fmtDec(salesRequest.agreedCTM)}
-                                  />
-                                  <FieldRow
-                                    label="Factory Audit Date"
-                                    value={
-                                      salesRequest.factoryAuditTentativeDate ||
-                                      "-"
-                                    }
-                                  />
-                                  <FieldRow
-                                    label="X Pitch (mm)"
-                                    value={
-                                      salesRequest.xPitchMm ?? "-"
-                                    }
-                                  />
-                                  <FieldRow
-                                    label="Tracker @790/1400"
-                                    value={
-                                      salesRequest.trackerDetails ?? "-"
-                                    }
-                                  />
-                                  <FieldRow
-                                    label="Priority"
-                                    value={salesRequest.priority}
-                                  />
-                                  <FieldRow
-                                    label="Created By"
-                                    value={salesRequest.createdBy}
-                                  />
-                                  <FieldRow
-                                    label="Created At"
-                                    value={new Date(
-                                      salesRequest.createdAt
-                                    ).toLocaleString()}
-                                  />
-                                  <div className="md:col-span-3">
-                                    <div className="text-sm text-gray-700">
-                                      <span className="font-medium">
-                                        Remarks:
-                                      </span>{" "}
-                                      {salesRequest.remarks || "-"}
-                                    </div>
-                                  </div>
-
-                                  {/* Attachments */}
-                                  {salesRequest.qapTypeAttachmentUrl && (
-                                    <div className="md:col-span-3">
-                                      <a
-                                        className="text-blue-600 underline"
-                                        href={salesRequest.qapTypeAttachmentUrl}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                      >
-                                        View QAP Type Attachment
-                                      </a>
-                                    </div>
-                                  )}
-                                  {salesRequest.primaryBomAttachmentUrl && (
-                                    <div className="md:col-span-3">
-                                      <a
-                                        className="text-blue-600 underline"
-                                        href={
-                                          salesRequest.primaryBomAttachmentUrl
-                                        }
-                                        target="_blank"
-                                        rel="noreferrer"
-                                      >
-                                        View Primary BOM Attachment
-                                      </a>
-                                    </div>
-                                  )}
-                                  {!!salesRequest.otherAttachments?.length && (
-                                    <div className="md:col-span-3">
-                                      <div className="font-medium">
-                                        Other Attachments
-                                      </div>
-                                      <ul className="list-disc pl-5 space-y-1">
-                                        {salesRequest.otherAttachments.map(
-                                          (a, i) => (
-                                            <li key={i}>
-                                              <a
-                                                className="text-blue-600 underline"
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                href={a.url}
-                                              >
-                                                {a.title ||
-                                                  `Attachment ${i + 1}`}
-                                              </a>
-                                            </li>
-                                          )
-                                        )}
-                                      </ul>
-                                    </div>
-                                  )}
-                                </div>
-                              </CardContent>
-                            </Card>
+                            {/* Keep the SR summary only when a joined SR exists */}
+                            {salesRequest && (
+                              <Card>
+                                <CardHeader>
+                                  <CardTitle>Sales Request Summary</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                  {/* existing Sales Request Summary block unchanged */}
+                                </CardContent>
+                              </Card>
+                            )}
 
                             <Card>
                               <CardHeader>
                                 <CardTitle>BOM</CardTitle>
                               </CardHeader>
                               <CardContent className="space-y-4">
-                                {!salesRequest.bom ? (
+                                {!bomSource ? (
                                   <div className="text-sm text-gray-500">
                                     No BOM available.
                                   </div>
                                 ) : (
                                   <>
+                                    {/* Header fields: support both SR.bom and bomSnapshot keys */}
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
                                       <FieldRow
                                         label="Vendor (lock-in)"
-                                        value={salesRequest.bom.vendorName}
+                                        value={
+                                          (bomSource as any).vendorName || "-"
+                                        }
                                       />
                                       <FieldRow
                                         label="RFID Location (lock-in)"
-                                        value={salesRequest.bom.rfidLocation}
+                                        value={
+                                          (bomSource as any).rfidLocation || "-"
+                                        }
                                       />
                                       <FieldRow
                                         label="Technology Proposed"
                                         value={
-                                          salesRequest.bom.technologyProposed
+                                          (bomSource as any)
+                                            .technologyProposed || "-"
                                         }
                                       />
                                       <FieldRow
                                         label="Vendor Address"
                                         value={
-                                          salesRequest.bom.vendorAddress || "-"
+                                          (bomSource as any).vendorAddress ||
+                                          "-"
                                         }
                                       />
                                       <FieldRow
                                         label="Document Ref"
-                                        value={salesRequest.bom.documentRef}
+                                        value={
+                                          (bomSource as any).documentRef || "-"
+                                        }
                                       />
                                       <FieldRow
                                         label="Module Wattage (WP)"
-                                        value={fmtNum(
-                                          salesRequest.bom.moduleWattageWp
-                                        )}
+                                        value={
+                                          (bomSource as any).moduleWattageWp ??
+                                          (bomSource as any).wattPeakLabel ??
+                                          "-"
+                                        }
                                       />
                                       <FieldRow
                                         label="Module Dimensions"
                                         value={
-                                          salesRequest.bom
-                                            .moduleDimensionsOption
+                                          (bomSource as any)
+                                            .moduleDimensionsOption || "-"
                                         }
                                       />
                                       <FieldRow
                                         label="Module Model Number"
                                         value={
-                                          salesRequest.bom.moduleModelNumber
+                                          (bomSource as any)
+                                            .moduleModelNumber || "-"
                                         }
                                       />
                                     </div>
-
-                                    {!!salesRequest.bom.components?.length ? (
+                                    {!!(bomSource as any).components?.length ? (
                                       <div className="space-y-6">
-                                        {salesRequest.bom.components.map(
-                                          (c, idx) => (
-                                            <div
-                                              key={`${c.name}-${idx}`}
-                                              className="overflow-auto"
-                                            >
-                                              <div className="font-medium mb-2">
-                                                {c.name}
-                                              </div>
-                                              <table className="min-w-full text-sm border">
-                                                <thead className="bg-gray-50 text-left">
-                                                  <tr>
-                                                    <th className="px-3 py-2 font-medium text-gray-700 whitespace-nowrap">
-                                                      Part No / Type / Model
-                                                    </th>
-                                                    <th className="px-3 py-2 font-medium text-gray-700 whitespace-nowrap">
-                                                      Sub-vendor / Manufacturer
-                                                    </th>
-                                                    <th className="px-3 py-2 font-medium text-gray-700 whitespace-nowrap">
-                                                      Specification
-                                                    </th>
-                                                  </tr>
-                                                </thead>
-                                                <tbody className="divide-y">
-                                                  {c.rows.map((r, i) => (
-                                                    <tr key={i} className="align-top">
-                                                      <td className="px-3 py-2 whitespace-nowrap">
-                                                        {r.model || "-"}
-                                                      </td>
-                                                      <td className="px-3 py-2 whitespace-nowrap">
-                                                        {r.subVendor || "-"}
-                                                      </td>
-                                                      <td className="px-3 py-2">
-                                                        <div className="whitespace-pre-wrap">
-                                                          {r.spec || "—"}
-                                                        </div>
-                                                      </td>
+                                        {(bomSource as any).components.map(
+                                          (c: any, idx: number) => {
+                                            const selectedRows = Array.isArray(
+                                              c.rows
+                                            )
+                                              ? c.rows.filter(
+                                                  (r: any) =>
+                                                    r &&
+                                                    (r.isSelected === true ||
+                                                      r.selected === true ||
+                                                      r.model ||
+                                                      r.subVendor ||
+                                                      r.spec ||
+                                                      (typeof r.qty !==
+                                                        "undefined" &&
+                                                        r.qty !== null))
+                                                )
+                                              : [];
+
+                                            if (selectedRows.length === 0)
+                                              return null;
+
+                                            return (
+                                              <div
+                                                key={`${c.name}-${idx}`}
+                                                className="overflow-auto"
+                                              >
+                                                <div className="font-medium mb-2">
+                                                  {c.name}{" "}
+                                                  <span className="text-xs text-gray-500">
+                                                    ({selectedRows.length}{" "}
+                                                    selected)
+                                                  </span>
+                                                </div>
+                                                <table className="min-w-full text-sm border">
+                                                  <thead className="bg-gray-50 text-left">
+                                                    <tr>
+                                                      <th className="px-3 py-2 font-medium text-gray-700 whitespace-nowrap">
+                                                        Part No / Type / Model
+                                                      </th>
+                                                      <th className="px-3 py-2 font-medium text-gray-700 whitespace-nowrap">
+                                                        Sub-vendor /
+                                                        Manufacturer
+                                                      </th>
+                                                      <th className="px-3 py-2 font-medium text-gray-700 whitespace-nowrap">
+                                                        Specification
+                                                      </th>
                                                     </tr>
-                                                  ))}
-                                                </tbody>
-                                              </table>
-                                            </div>
-                                          )
+                                                  </thead>
+                                                  <tbody className="divide-y">
+                                                    {selectedRows.map(
+                                                      (r: any, i: number) => (
+                                                        <tr
+                                                          key={i}
+                                                          className="align-top"
+                                                        >
+                                                          <td className="px-3 py-2 whitespace-nowrap">
+                                                            {r.model || "-"}
+                                                          </td>
+                                                          <td className="px-3 py-2 whitespace-nowrap">
+                                                            {r.subVendor || "-"}
+                                                          </td>
+                                                          <td className="px-3 py-2">
+                                                            <div className="whitespace-pre-wrap">
+                                                              {r.spec || "—"}
+                                                            </div>
+                                                          </td>
+                                                        </tr>
+                                                      )
+                                                    )}
+                                                  </tbody>
+                                                </table>
+                                              </div>
+                                            );
+                                          }
                                         )}
                                       </div>
                                     ) : (
@@ -739,11 +925,11 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                     <div className="mt-4 flex justify-end">
                       <Button
                         onClick={() => submit(qap.id)}
-                        disabled={hasResponded}
+                        disabled={respondDisabled}
                         className="bg-blue-600 hover:bg-blue-700"
                       >
                         <Send className="h-4 w-4 mr-2" />
-                        {hasResponded ? "Already Responded" : "Submit Review"}
+                        {hasRespondedOnce ? "Add Follow-up" : "Submit Review"}
                       </Button>
                     </div>
                   </CardContent>

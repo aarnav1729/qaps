@@ -1,4 +1,3 @@
-// src/components/FinalCommentsPage.tsx
 import React, { useMemo, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import {
@@ -68,7 +67,11 @@ type SalesRequestLite = {
     moduleModelNumber: string;
     components?: {
       name: string;
-      rows: { model: string; subVendor?: string | null; spec?: string | null }[];
+      rows: {
+        model: string;
+        subVendor?: string | null;
+        spec?: string | null;
+      }[];
     }[];
   } | null;
 };
@@ -265,7 +268,8 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
           const isOpen = expanded[qap.id] || false;
 
           // Optional embedded Sales Request (server embeds this on /api/qaps)
-          const salesRequest: SalesRequestLite | undefined = (qap as any)?.salesRequest;
+          const salesRequest: SalesRequestLite | undefined = (qap as any)
+            ?.salesRequest;
 
           return (
             <Collapsible
@@ -579,7 +583,8 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                                   <FieldRow
                                     label="Premier Bidded Qty (MW)"
                                     value={
-                                      salesRequest.premierBiddedOrderQtyMW ?? "-"
+                                      salesRequest.premierBiddedOrderQtyMW ??
+                                      "-"
                                     }
                                   />
                                   <FieldRow
@@ -793,7 +798,10 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                                                 </thead>
                                                 <tbody className="divide-y">
                                                   {c.rows.map((r, i) => (
-                                                    <tr key={i} className="align-top">
+                                                    <tr
+                                                      key={i}
+                                                      className="align-top"
+                                                    >
                                                       <td className="px-3 py-2 whitespace-nowrap">
                                                         {r.model || "-"}
                                                       </td>
@@ -868,7 +876,8 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                       <Button
                         onClick={() => submit(qap.id)}
                         disabled={
-                          submitting[qap.id] || !readyToSubmit(qap.id, unmatchedAll)
+                          submitting[qap.id] ||
+                          !readyToSubmit(qap.id, unmatchedAll)
                         }
                         className="bg-green-600 hover:bg-green-700"
                       >

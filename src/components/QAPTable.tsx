@@ -1,4 +1,3 @@
-// src/components/QAPTable.tsx
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,8 +14,10 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { QAPFormData } from "@/types/qap";
-import { Eye, Edit, Trash2, Share, ArrowRight } from "lucide-react";
+import { Clock, Eye, Edit, Trash2, Share, ArrowRight } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+// add with your other imports at top
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface QAPTableProps {
   qapData: QAPFormData[];
@@ -66,9 +67,9 @@ const QAPTable: React.FC<QAPTableProps> = ({
     onDelete(qap);
   };
 
+  // Requestor can edit their own QAP at all times (regardless of status)
   const canEdit = (qap: QAPFormData) =>
-    user?.username === qap.submittedBy &&
-    ["draft", "edit-requested"].includes(qap.status);
+    user?.role === "requestor" && user?.username === qap.submittedBy;
 
   const canDelete = (qap: QAPFormData) =>
     user?.username === qap.submittedBy && qap.status === "draft";
@@ -239,7 +240,12 @@ const QAPTable: React.FC<QAPTableProps> = ({
               </thead>
               <tbody>
                 {qapData.map((qap) => {
-                  const items = Array.isArray(qap.qaps) ? qap.qaps : [];
+                  const mqp = (qap as any)?.specs?.mqp ?? [];
+                  const visual = (qap as any)?.specs?.visual ?? [];
+                  const legacy = Array.isArray((qap as any)?.qaps)
+                    ? (qap as any).qaps
+                    : [];
+                  const items = legacy.length ? legacy : [...mqp, ...visual];
                   const matchedItems = items.filter(
                     (i) => i.match === "yes"
                   ).length;
@@ -317,7 +323,7 @@ const QAPTable: React.FC<QAPTableProps> = ({
                             <Eye className="h-4 w-4" />
                           </Button>
 
-                          {showActions && canEdit(qap) && (
+                          {canEdit(qap) && (
                             <Button
                               variant="ghost"
                               size="sm"
@@ -348,8 +354,8 @@ const QAPTable: React.FC<QAPTableProps> = ({
                                   </AlertDialogTitle>
                                   <AlertDialogDescription>
                                     Are you sure you want to delete this QAP for
-                                    “{qap.customerName} - {qap.projectName}
-                                    ”? This action cannot be undone.
+                                    “{qap.customerName} - {qap.projectName}”?
+                                    This action cannot be undone.
                                   </AlertDialogDescription>
                                 </AlertDialogHeader>
                                 <AlertDialogFooter>

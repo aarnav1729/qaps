@@ -27,9 +27,9 @@ const Index: React.FC<IndexProps> = ({ qapData, onSave, onDelete }) => {
 
   // Requestor can edit only when QAP is still in creator's court
   const canEditSelected =
-    isRequestor &&
-    (!selectedQAP ||
-      ["draft", "edit-requested"].includes(selectedQAP.status));
+    user?.role === "requestor" &&
+    (!selectedQAP || // new QAP
+      user?.username === selectedQAP.submittedBy); // I’m the owner of this QAP
 
   // QAPs current user can see
   const accessibleQAPs = user ? getUserAccessibleQAPs(user, qapData) : [];
@@ -214,9 +214,7 @@ const Index: React.FC<IndexProps> = ({ qapData, onSave, onDelete }) => {
       {/* ─── QAP table ─── */}
       <Card>
         <CardHeader>
-          <CardTitle>
-            {isRequestor ? "Your QAPs" : "QAPs for Review"}
-          </CardTitle>
+          <CardTitle>{isRequestor ? "Your QAPs" : "QAPs for Review"}</CardTitle>
         </CardHeader>
         <CardContent>
           <QAPTable
@@ -240,6 +238,7 @@ const Index: React.FC<IndexProps> = ({ qapData, onSave, onDelete }) => {
         /** 👉 The modal will hide “Save Draft / Next / Send for Review”
          *  whenever canEdit === false  */
         canEdit={canEditSelected}
+        allowAssignL2={true}
       />
     </div>
   );

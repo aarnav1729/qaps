@@ -1,22 +1,11 @@
-// src/components/Level5ApprovalPage.tsx
 import React, { useState, useMemo } from "react";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardContent,
-} from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import {
   Collapsible,
   CollapsibleTrigger,
   CollapsibleContent,
 } from "@/components/ui/collapsible";
-import {
-  Tabs,
-  TabsList,
-  TabsTrigger,
-  TabsContent,
-} from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +19,8 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { QAPFormData, QAPSpecification } from "@/types/qap";
+
+import ExtraAdditions from "@/components/ExtraAdditions";
 
 /* ───────────────────────────────────────────────────────────── */
 /* Local lightweight types just for rendering the BOM tab        */
@@ -77,10 +68,23 @@ type SalesRequestLite = {
     moduleModelNumber: string;
     components?: {
       name: string;
-      rows: { model: string; subVendor?: string | null; spec?: string | null }[];
+      rows: {
+        model: string;
+        subVendor?: string | null;
+        spec?: string | null;
+      }[];
     }[];
   } | null;
 };
+
+const splitPhaseRoles = (obj: Record<string, any> | undefined) => {
+  const r1: string[] = [],
+    r2: string[] = [];
+  if (!obj) return [r1, r2] as const;
+  for (const k of Object.keys(obj)) (/^-?\w.*-2$/.test(k) ? r2 : r1).push(k);
+  return [r1.sort(), r2.sort()] as const;
+};
+const prettyRole = (r: string) => r.replace(/-2$/, "");
 
 const FieldRow: React.FC<{ label: string; value: React.ReactNode }> = ({
   label,
@@ -107,8 +111,9 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
 
   /* ───────── state ───────── */
   const [searchTerm, setSearchTerm] = useState("");
-  const [rowFilter, setRowFilter] =
-    useState<"all" | "matched" | "unmatched">("all");
+  const [rowFilter, setRowFilter] = useState<"all" | "matched" | "unmatched">(
+    "all"
+  );
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [decision, setDecision] = useState<{
     [qapId: string]: "approve" | "reject" | null;
@@ -222,14 +227,14 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
           const L2 = qap.levelResponses?.[2] || {};
           const L3 = qap.levelResponses?.[3] || {};
           const L4 = qap.levelResponses?.[4] || {};
-          const l3Roles = Object.keys(L3);
-          const l4Roles = Object.keys(L4);
+          const [l3R1, l3R2] = splitPhaseRoles(L3);
+          const [l4R1, l4R2] = splitPhaseRoles(L4);
 
           const isOpen = expanded[qap.id] || false;
 
           // Optional Sales Request with BOM (embedded by backend)
-          const salesRequest: SalesRequestLite | undefined =
-            (qap as any)?.salesRequest;
+          const salesRequest: SalesRequestLite | undefined = (qap as any)
+            ?.salesRequest;
 
           return (
             <Collapsible
@@ -302,23 +307,39 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
                                 <th className="p-2 border">Prod L2</th>
                                 <th className="p-2 border">Qual L2</th>
                                 <th className="p-2 border">Tech L2</th>
-                                {l3Roles.map((r) => (
+                                {l3R1.map((r) => (
                                   <th
                                     key={`mqp-l3-h-${r}`}
                                     className="p-2 border capitalize"
                                   >
-                                    {r} L3
+                                    {prettyRole(r)} L3
                                   </th>
                                 ))}
-                                {l4Roles.map((r) => (
+                                {l4R1.map((r) => (
                                   <th
                                     key={`mqp-l4-h-${r}`}
                                     className="p-2 border capitalize"
                                   >
-                                    {r} L4
+                                    {prettyRole(r)} L4
                                   </th>
                                 ))}
                                 <th className="p-2 border">Final Comment</th>
+                                {l3R2.map((r) => (
+                                  <th
+                                    key={`mqp-l3b-h-${r}`}
+                                    className="p-2 border capitalize"
+                                  >
+                                    {prettyRole(r)} L3 (2nd)
+                                  </th>
+                                ))}
+                                {l4R2.map((r) => (
+                                  <th
+                                    key={`mqp-l4b-h-${r}`}
+                                    className="p-2 border capitalize"
+                                  >
+                                    {prettyRole(r)} L4 (2nd)
+                                  </th>
+                                ))}
                               </tr>
                             </thead>
                             <tbody>
@@ -353,25 +374,45 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
                                     <td className="p-2 border">
                                       {L2.technical?.comments?.[s.sno] || "—"}
                                     </td>
-                                    {l3Roles.map((r) => (
+                                    {l3R1.map((r) => (
                                       <td
                                         key={`mqp-l3-${r}-${s.sno}`}
                                         className="p-2 border"
                                       >
-                                        {L3[r]?.comments?.[s.sno] || "—"}
+                                        {L3?.[r]?.comments?.[s.sno] || "—"}
                                       </td>
                                     ))}
-                                    {l4Roles.map((r) => (
+                                    {l4R1.map((r) => (
                                       <td
                                         key={`mqp-l4-${r}-${s.sno}`}
                                         className="p-2 border"
                                       >
-                                        {L4[r]?.comments?.[s.sno] || "—"}
+                                        {L4?.[r]?.comments?.[s.sno] || "—"}
                                       </td>
                                     ))}
                                     <td className="p-2 border">
                                       {qap.finalCommentsPerItem?.[s.sno] || "—"}
                                     </td>
+
+                                    {/* L3 2nd */}
+                                    {l3R2.map((r) => (
+                                      <td
+                                        key={`mqp-l3b-${r}-${s.sno}`}
+                                        className="p-2 border"
+                                      >
+                                        {L3?.[r]?.comments?.[s.sno] || "—"}
+                                      </td>
+                                    ))}
+
+                                    {/* L4 2nd */}
+                                    {l4R2.map((r) => (
+                                      <td
+                                        key={`mqp-l4b-${r}-${s.sno}`}
+                                        className="p-2 border"
+                                      >
+                                        {L4?.[r]?.comments?.[s.sno] || "—"}
+                                      </td>
+                                    ))}
                                   </tr>
                                 ))}
                             </tbody>
@@ -393,23 +434,39 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
                                 <th className="p-2 border">Prod L2</th>
                                 <th className="p-2 border">Qual L2</th>
                                 <th className="p-2 border">Tech L2</th>
-                                {l3Roles.map((r) => (
+                                {l3R1.map((r) => (
                                   <th
                                     key={`vis-l3-h-${r}`}
                                     className="p-2 border capitalize"
                                   >
-                                    {r} L3
+                                    {prettyRole(r)} L3
                                   </th>
                                 ))}
-                                {l4Roles.map((r) => (
+                                {l4R1.map((r) => (
                                   <th
                                     key={`vis-l4-h-${r}`}
                                     className="p-2 border capitalize"
                                   >
-                                    {r} L4
+                                    {prettyRole(r)} L4
                                   </th>
                                 ))}
                                 <th className="p-2 border">Final Comment</th>
+                                {l3R2.map((r) => (
+                                  <th
+                                    key={`vis-l3b-h-${r}`}
+                                    className="p-2 border capitalize"
+                                  >
+                                    {prettyRole(r)} L3 (2nd)
+                                  </th>
+                                ))}
+                                {l4R2.map((r) => (
+                                  <th
+                                    key={`vis-l4b-h-${r}`}
+                                    className="p-2 border capitalize"
+                                  >
+                                    {prettyRole(r)} L4 (2nd)
+                                  </th>
+                                ))}
                               </tr>
                             </thead>
                             <tbody>
@@ -446,25 +503,41 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
                                     <td className="p-2 border">
                                       {L2.technical?.comments?.[s.sno] || "—"}
                                     </td>
-                                    {l3Roles.map((r) => (
+                                    {l3R1.map((r) => (
                                       <td
                                         key={`vis-l3-${r}-${s.sno}`}
                                         className="p-2 border"
                                       >
-                                        {L3[r]?.comments?.[s.sno] || "—"}
+                                        {L3?.[r]?.comments?.[s.sno] || "—"}
                                       </td>
                                     ))}
-                                    {l4Roles.map((r) => (
+                                    {l4R1.map((r) => (
                                       <td
                                         key={`vis-l4-${r}-${s.sno}`}
                                         className="p-2 border"
                                       >
-                                        {L4[r]?.comments?.[s.sno] || "—"}
+                                        {L4?.[r]?.comments?.[s.sno] || "—"}
                                       </td>
                                     ))}
                                     <td className="p-2 border">
                                       {qap.finalCommentsPerItem?.[s.sno] || "—"}
                                     </td>
+                                    {l3R2.map((r) => (
+                                      <td
+                                        key={`vis-l3b-${r}-${s.sno}`}
+                                        className="p-2 border"
+                                      >
+                                        {L3?.[r]?.comments?.[s.sno] || "—"}
+                                      </td>
+                                    ))}
+                                    {l4R2.map((r) => (
+                                      <td
+                                        key={`vis-l4b-${r}-${s.sno}`}
+                                        className="p-2 border"
+                                      >
+                                        {L4?.[r]?.comments?.[s.sno] || "—"}
+                                      </td>
+                                    ))}
                                   </tr>
                                 ))}
                             </tbody>
@@ -521,7 +594,8 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
                                   <FieldRow
                                     label="Premier Bidded Qty (MW)"
                                     value={
-                                      salesRequest.premierBiddedOrderQtyMW ?? "-"
+                                      salesRequest.premierBiddedOrderQtyMW ??
+                                      "-"
                                     }
                                   />
                                   <FieldRow
@@ -738,7 +812,10 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
                                                 </thead>
                                                 <tbody className="divide-y">
                                                   {c.rows.map((r, i) => (
-                                                    <tr key={i} className="align-top">
+                                                    <tr
+                                                      key={i}
+                                                      className="align-top"
+                                                    >
                                                       <td className="px-3 py-2 whitespace-nowrap">
                                                         {r.model || "-"}
                                                       </td>
@@ -784,7 +861,9 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
                             }))
                           }
                           variant={
-                            decision[qap.id] === "approve" ? "default" : "outline"
+                            decision[qap.id] === "approve"
+                              ? "default"
+                              : "outline"
                           }
                           className={
                             decision[qap.id] === "approve"

@@ -1,17 +1,6 @@
-// src/components/Level4ReviewPage.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -71,7 +60,11 @@ type SalesRequestLite = {
     moduleModelNumber: string;
     components?: {
       name: string;
-      rows: { model: string; subVendor?: string | null; spec?: string | null }[];
+      rows: {
+        model: string;
+        subVendor?: string | null;
+        spec?: string | null;
+      }[];
     }[];
   } | null;
 };
@@ -170,7 +163,10 @@ const SalesBOMPanel: React.FC<{
               value={sr.moduleOrderType?.toUpperCase()}
             />
             <FieldRow label="Cell Type" value={sr.cellType} />
-            <FieldRow label="Wattage Binning" value={fmtNum(sr.wattageBinning)} />
+            <FieldRow
+              label="Wattage Binning"
+              value={fmtNum(sr.wattageBinning)}
+            />
             <FieldRow label="RFQ Qty (MW)" value={fmtNum(sr.rfqOrderQtyMW)} />
             <FieldRow
               label="Premier Bidded Qty (MW)"
@@ -186,7 +182,10 @@ const SalesBOMPanel: React.FC<{
               value={fmtNum(sr.cableLengthRequired)}
             />
             <FieldRow label="QAP Type" value={sr.qapType} />
-            <FieldRow label="Primary BOM?" value={sr.primaryBom?.toUpperCase()} />
+            <FieldRow
+              label="Primary BOM?"
+              value={sr.primaryBom?.toUpperCase()}
+            />
             <FieldRow
               label="Inline Inspection?"
               value={sr.inlineInspection?.toUpperCase()}
@@ -273,7 +272,10 @@ const SalesBOMPanel: React.FC<{
             <>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
                 <FieldRow label="Vendor (lock-in)" value={sr.bom.vendorName} />
-                <FieldRow label="RFID Location (lock-in)" value={sr.bom.rfidLocation} />
+                <FieldRow
+                  label="RFID Location (lock-in)"
+                  value={sr.bom.rfidLocation}
+                />
                 <FieldRow
                   label="Technology Proposed"
                   value={sr.bom.technologyProposed}
@@ -353,25 +355,38 @@ interface Level4ReviewPageProps {
   onNext: (qapId: string, comments: Record<number, string>) => void;
 }
 
-const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({ qapData, onNext }) => {
+const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
+  qapData,
+  onNext,
+}) => {
   const { user } = useAuth();
 
   /* ───────────────────────── state ───────────────────────── */
   const [searchTerm, setSearchTerm] = useState("");
-  const [rowFilter, setRowFilter] = useState<"all" | "matched" | "unmatched">("all");
-  const [responses, setResponses] = useState<{ [qapId: string]: Record<number, string>}>({});
-  const [acknowledged, setAcknowledged] = useState<{ [qapId: string]: Record<number, boolean>}>({});
+  const [rowFilter, setRowFilter] = useState<"all" | "matched" | "unmatched">(
+    "all"
+  );
+  const [responses, setResponses] = useState<{
+    [qapId: string]: Record<number, string>;
+  }>({});
+  const [acknowledged, setAcknowledged] = useState<{
+    [qapId: string]: Record<number, boolean>;
+  }>({});
   const [expanded, setExpanded] = useState<{ [qapId: string]: boolean }>({});
 
   /* ────────────────────── derive QAP list ────────────────── */
   const plantRaw = user?.plant || "";
-  const userPlants = plantRaw.split(",").map((p) => p.trim().toLowerCase()).filter(Boolean);
+  const userPlants = plantRaw
+    .split(",")
+    .map((p) => p.trim().toLowerCase())
+    .filter(Boolean);
 
   const reviewable = useMemo(() => {
     return qapData
       .filter((q) => {
         if (q.currentLevel !== 4) return false;
-        const allow = plantRaw === "" || userPlants.includes(q.plant.toLowerCase());
+        const allow =
+          plantRaw === "" || userPlants.includes(q.plant.toLowerCase());
         if (!allow) return false;
         if (!searchTerm) return true;
         const s = searchTerm.toLowerCase();
@@ -392,7 +407,10 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({ qapData, onNext }) 
 
   /* ────────────────────── helpers ────────────────────────── */
   const handleResponseChange = (qapId: string, sno: number, val: string) =>
-    setResponses((p) => ({ ...p, [qapId]: { ...(p[qapId] || {}), [sno]: val } }));
+    setResponses((p) => ({
+      ...p,
+      [qapId]: { ...(p[qapId] || {}), [sno]: val },
+    }));
 
   const handleAck = (qapId: string, sno: number) =>
     setAcknowledged((p) => ({
@@ -416,7 +434,10 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({ qapData, onNext }) 
   return (
     <div className="container mx-auto px-4 py-6">
       <h1 className="text-3xl font-bold mb-4">
-        Level 4 Review – {user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : ""}
+        Level 4 Review –{" "}
+        {user?.role
+          ? user.role.charAt(0).toUpperCase() + user.role.slice(1)
+          : ""}
       </h1>
 
       {/* Top controls */}
@@ -428,7 +449,9 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({ qapData, onNext }) 
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-64"
           />
-          <label htmlFor="rowFilter" className="font-medium">Show Rows:</label>
+          <label htmlFor="rowFilter" className="font-medium">
+            Show Rows:
+          </label>
           <select
             id="rowFilter"
             value={rowFilter}
@@ -440,7 +463,9 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({ qapData, onNext }) 
             <option value="unmatched">Unmatched (Red)</option>
           </select>
         </div>
-        <span className="text-sm text-gray-600">Pending QAPs: {reviewable.length}</span>
+        <span className="text-sm text-gray-600">
+          Pending QAPs: {reviewable.length}
+        </span>
       </div>
 
       {reviewable.length === 0 ? (
@@ -448,9 +473,15 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({ qapData, onNext }) 
       ) : (
         reviewable.map((qap) => {
           const specs = qap.allSpecs.filter((s) =>
-            rowFilter === "all" ? true : rowFilter === "matched" ? s.match === "yes" : s.match === "no"
+            rowFilter === "all"
+              ? true
+              : rowFilter === "matched"
+              ? s.match === "yes"
+              : s.match === "no"
           );
-          const allAck = Object.values(acknowledged[qap.id] || {}).every(Boolean);
+          const allAck = Object.values(acknowledged[qap.id] || {}).every(
+            Boolean
+          );
 
           /* Pull L2 & L3 comments */
           const l2 = qap.levelResponses?.[2] || {};
@@ -458,13 +489,25 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({ qapData, onNext }) 
           const prodL2 = l2.production?.comments || {};
           const qualL2 = l2.quality?.comments || {};
           const techL2 = l2.technical?.comments || {};
-          const l3Roles = Object.keys(l3);
+          // Separate first-pass L3 vs post-final L3b (roles stored as "<role>-2")
+          const l3FirstKeys = Object.keys(l3).filter((k) => !k.endsWith("-2"));
+          const l3bKeys = Object.keys(l3).filter((k) => k.endsWith("-2"));
+
+          const isPostFinal = (qap as any).status === "level-4b";
+
+          // Final comments: prefer per-item JSON map if present, else fall back to whole-string
+          const finalPerItem = ((qap as any).finalCommentsPerItem ||
+            {}) as Record<number, string>;
+          const finalAll = (qap as any).finalComments as string | undefined;
 
           const isOpen = expanded[qap.id] || false;
 
           // Optional embedded Sales Request from server (fallback to lazy fetch in BOM tab)
-          const salesRequestEmbedded: SalesRequestLite | undefined = (qap as any)?.salesRequest;
-          const salesRequestId: string | undefined = (qap as any)?.salesRequestId;
+          const salesRequestEmbedded: SalesRequestLite | undefined = (
+            qap as any
+          )?.salesRequest;
+          const salesRequestId: string | undefined = (qap as any)
+            ?.salesRequestId;
 
           return (
             <Collapsible
@@ -478,15 +521,26 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({ qapData, onNext }) 
                 <Card className="cursor-pointer hover:bg-gray-50">
                   <CardHeader className="flex justify-between items-center p-4">
                     <div className="flex items-center gap-3">
-                      <Button variant="ghost" size="icon" className="h-6 w-6 p-0" tabIndex={-1}>
-                        {isOpen ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 p-0"
+                        tabIndex={-1}
+                      >
+                        {isOpen ? (
+                          <ChevronUp className="h-5 w-5" />
+                        ) : (
+                          <ChevronDown className="h-5 w-5" />
+                        )}
                       </Button>
                       <div>
                         <CardTitle className="text-lg">
                           {qap.customerName} – {qap.projectName}
                         </CardTitle>
                         <div className="flex space-x-2 mt-1">
-                          <Badge variant="outline">{qap.plant.toUpperCase()}</Badge>
+                          <Badge variant="outline">
+                            {qap.plant.toUpperCase()}
+                          </Badge>
                           <Badge variant="outline">{qap.productType}</Badge>
                           <Badge>{qap.orderQuantity} MW</Badge>
                         </div>
@@ -506,8 +560,12 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({ qapData, onNext }) 
                   <CardContent className="p-4">
                     <Tabs defaultValue="mqp">
                       <TabsList className="mb-4">
-                        <TabsTrigger value="mqp">MQP ({qap.specs.mqp.length})</TabsTrigger>
-                        <TabsTrigger value="visual">Visual ({qap.specs.visual.length})</TabsTrigger>
+                        <TabsTrigger value="mqp">
+                          MQP ({qap.specs.mqp.length})
+                        </TabsTrigger>
+                        <TabsTrigger value="visual">
+                          Visual ({qap.specs.visual.length})
+                        </TabsTrigger>
                         <TabsTrigger value="bom">BOM</TabsTrigger>
                       </TabsList>
 
@@ -525,11 +583,31 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({ qapData, onNext }) 
                                 <th className="p-2 border">Prod&nbsp;L2</th>
                                 <th className="p-2 border">Qual&nbsp;L2</th>
                                 <th className="p-2 border">Tech&nbsp;L2</th>
-                                {l3Roles.map((r) => (
-                                  <th key={`mqp-head-${r}`} className="p-2 border capitalize">
-                                    {r}&nbsp;L3
+                                {/* L3 (first pass) */}
+                                {l3FirstKeys.map((r) => (
+                                  <th
+                                    key={`mqp-head-l3-${r}`}
+                                    className="p-2 border capitalize"
+                                  >
+                                    {r.replace(/-2$/, "")}&nbsp;L3
                                   </th>
                                 ))}
+
+                                {/* Final (post-final only) */}
+                                {isPostFinal && (
+                                  <th className="p-2 border">Final</th>
+                                )}
+
+                                {/* L3b (post-final only) */}
+                                {isPostFinal &&
+                                  l3bKeys.map((r) => (
+                                    <th
+                                      key={`mqp-head-l3b-${r}`}
+                                      className="p-2 border capitalize"
+                                    >
+                                      {r.replace(/-2$/, "")}&nbsp;L3b
+                                    </th>
+                                  ))}
                                 <th className="p-2 border">Match</th>
                                 <th className="p-2 border">Your Comment</th>
                                 <th className="p-2 border">Ack</th>
@@ -541,23 +619,67 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({ qapData, onNext }) 
                                 .map((s) => (
                                   <tr
                                     key={s.sno}
-                                    className={`border-b ${s.match === "yes" ? "bg-green-50" : "bg-red-50"}`}
+                                    className={`border-b ${
+                                      s.match === "yes"
+                                        ? "bg-green-50"
+                                        : "bg-red-50"
+                                    }`}
                                   >
                                     <td className="p-2 border">{s.sno}</td>
                                     <td className="p-2 border">{s.criteria}</td>
-                                    <td className="p-2 border">{s.subCriteria}</td>
-                                    <td className="p-2 border">{s.specification}</td>
-                                    <td className="p-2 border">{s.customerSpecification}</td>
-                                    <td className="p-2 border">{prodL2[s.sno] || "—"}</td>
-                                    <td className="p-2 border">{qualL2[s.sno] || "—"}</td>
-                                    <td className="p-2 border">{techL2[s.sno] || "—"}</td>
-                                    {l3Roles.map((r) => (
-                                      <td key={`mqp-l3-${r}-${s.sno}`} className="p-2 border">
-                                        {l3[r]?.comments?.[s.sno] || "—"}
+                                    <td className="p-2 border">
+                                      {s.subCriteria}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {s.specification}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {s.customerSpecification}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {prodL2[s.sno] || "—"}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {qualL2[s.sno] || "—"}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {techL2[s.sno] || "—"}
+                                    </td>
+                                    {l3FirstKeys.map((k) => (
+                                      <td
+                                        key={`mqp-l3-${k}-${s.sno}`}
+                                        className="p-2 border"
+                                      >
+                                        {l3[k]?.comments?.[s.sno] || "—"}
                                       </td>
                                     ))}
+
+                                    {/* Final (post-final only) */}
+                                    {isPostFinal && (
+                                      <td className="p-2 border">
+                                        {finalPerItem[s.sno] ?? finalAll ?? "—"}
+                                      </td>
+                                    )}
+
+                                    {/* L3b (post-final only) */}
+                                    {isPostFinal &&
+                                      l3bKeys.map((k) => (
+                                        <td
+                                          key={`mqp-l3b-${k}-${s.sno}`}
+                                          className="p-2 border"
+                                        >
+                                          {l3[k]?.comments?.[s.sno] || "—"}
+                                        </td>
+                                      ))}
+
                                     <td className="p-2 border">
-                                      <Badge variant={s.match === "yes" ? "success" : "destructive"}>
+                                      <Badge
+                                        variant={
+                                          s.match === "yes"
+                                            ? "success"
+                                            : "destructive"
+                                        }
+                                      >
                                         {s.match?.toUpperCase()}
                                       </Badge>
                                     </td>
@@ -565,7 +687,11 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({ qapData, onNext }) 
                                       <Textarea
                                         value={responses[qap.id]?.[s.sno] || ""}
                                         onChange={(e) =>
-                                          handleResponseChange(qap.id, s.sno, e.target.value)
+                                          handleResponseChange(
+                                            qap.id,
+                                            s.sno,
+                                            e.target.value
+                                          )
                                         }
                                         placeholder="Comments…"
                                         className="min-h-[3rem]"
@@ -574,8 +700,12 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({ qapData, onNext }) 
                                     <td className="p-2 border text-center">
                                       <input
                                         type="checkbox"
-                                        checked={acknowledged[qap.id]?.[s.sno] || false}
-                                        onChange={() => handleAck(qap.id, s.sno)}
+                                        checked={
+                                          acknowledged[qap.id]?.[s.sno] || false
+                                        }
+                                        onChange={() =>
+                                          handleAck(qap.id, s.sno)
+                                        }
                                         className="rounded"
                                       />
                                     </td>
@@ -600,11 +730,32 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({ qapData, onNext }) 
                                 <th className="p-2 border">Prod&nbsp;L2</th>
                                 <th className="p-2 border">Qual&nbsp;L2</th>
                                 <th className="p-2 border">Tech&nbsp;L2</th>
-                                {l3Roles.map((r) => (
-                                  <th key={`vis-head-${r}`} className="p-2 border capitalize">
-                                    {r}&nbsp;L3
+                                {/* L3 (first pass) */}
+                                {l3FirstKeys.map((r) => (
+                                  <th
+                                    key={`vis-head-l3-${r}`}
+                                    className="p-2 border capitalize"
+                                  >
+                                    {r.replace(/-2$/, "")}&nbsp;L3
                                   </th>
                                 ))}
+
+                                {/* Final (post-final only) */}
+                                {isPostFinal && (
+                                  <th className="p-2 border">Final</th>
+                                )}
+
+                                {/* L3b (post-final only) */}
+                                {isPostFinal &&
+                                  l3bKeys.map((r) => (
+                                    <th
+                                      key={`vis-head-l3b-${r}`}
+                                      className="p-2 border capitalize"
+                                    >
+                                      {r.replace(/-2$/, "")}&nbsp;L3b
+                                    </th>
+                                  ))}
+
                                 <th className="p-2 border">Match</th>
                                 <th className="p-2 border">Your Comment</th>
                                 <th className="p-2 border">Ack</th>
@@ -612,27 +763,74 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({ qapData, onNext }) 
                             </thead>
                             <tbody>
                               {specs
-                                .filter((s) => qap.specs.visual.includes(s as any))
+                                .filter((s) =>
+                                  qap.specs.visual.includes(s as any)
+                                )
                                 .map((s) => (
                                   <tr
                                     key={s.sno}
-                                    className={`border-b ${s.match === "yes" ? "bg-green-50" : "bg-red-50"}`}
+                                    className={`border-b ${
+                                      s.match === "yes"
+                                        ? "bg-green-50"
+                                        : "bg-red-50"
+                                    }`}
                                   >
                                     <td className="p-2 border">{s.sno}</td>
                                     <td className="p-2 border">{s.criteria}</td>
-                                    <td className="p-2 border">{s.subCriteria}</td>
-                                    <td className="p-2 border">{s.criteriaLimits}</td>
-                                    <td className="p-2 border">{s.customerSpecification}</td>
-                                    <td className="p-2 border">{prodL2[s.sno] || "—"}</td>
-                                    <td className="p-2 border">{qualL2[s.sno] || "—"}</td>
-                                    <td className="p-2 border">{techL2[s.sno] || "—"}</td>
-                                    {l3Roles.map((r) => (
-                                      <td key={`vis-l3-${r}-${s.sno}`} className="p-2 border">
-                                        {l3[r]?.comments?.[s.sno] || "—"}
+                                    <td className="p-2 border">
+                                      {s.subCriteria}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {s.criteriaLimits}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {s.customerSpecification}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {prodL2[s.sno] || "—"}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {qualL2[s.sno] || "—"}
+                                    </td>
+                                    <td className="p-2 border">
+                                      {techL2[s.sno] || "—"}
+                                    </td>
+                                    {/* L3 (first pass) */}
+                                    {l3FirstKeys.map((k) => (
+                                      <td
+                                        key={`vis-l3-${k}-${s.sno}`}
+                                        className="p-2 border"
+                                      >
+                                        {l3[k]?.comments?.[s.sno] || "—"}
                                       </td>
                                     ))}
+
+                                    {/* Final (post-final only) */}
+                                    {isPostFinal && (
+                                      <td className="p-2 border">
+                                        {finalPerItem[s.sno] ?? finalAll ?? "—"}
+                                      </td>
+                                    )}
+
+                                    {/* L3b (post-final only) */}
+                                    {isPostFinal &&
+                                      l3bKeys.map((k) => (
+                                        <td
+                                          key={`vis-l3b-${k}-${s.sno}`}
+                                          className="p-2 border"
+                                        >
+                                          {l3[k]?.comments?.[s.sno] || "—"}
+                                        </td>
+                                      ))}
+
                                     <td className="p-2 border">
-                                      <Badge variant={s.match === "yes" ? "success" : "destructive"}>
+                                      <Badge
+                                        variant={
+                                          s.match === "yes"
+                                            ? "success"
+                                            : "destructive"
+                                        }
+                                      >
                                         {s.match?.toUpperCase()}
                                       </Badge>
                                     </td>
@@ -640,7 +838,11 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({ qapData, onNext }) 
                                       <Textarea
                                         value={responses[qap.id]?.[s.sno] || ""}
                                         onChange={(e) =>
-                                          handleResponseChange(qap.id, s.sno, e.target.value)
+                                          handleResponseChange(
+                                            qap.id,
+                                            s.sno,
+                                            e.target.value
+                                          )
                                         }
                                         placeholder="Comments…"
                                         className="min-h-[3rem]"
@@ -649,8 +851,12 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({ qapData, onNext }) 
                                     <td className="p-2 border text-center">
                                       <input
                                         type="checkbox"
-                                        checked={acknowledged[qap.id]?.[s.sno] || false}
-                                        onChange={() => handleAck(qap.id, s.sno)}
+                                        checked={
+                                          acknowledged[qap.id]?.[s.sno] || false
+                                        }
+                                        onChange={() =>
+                                          handleAck(qap.id, s.sno)
+                                        }
                                         className="rounded"
                                       />
                                     </td>
@@ -673,7 +879,10 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({ qapData, onNext }) 
                     <div className="mt-4 flex justify-end">
                       <Button
                         onClick={() => submit(qap.id)}
-                        disabled={!allAck || Object.keys(responses[qap.id] || {}).length === 0}
+                        disabled={
+                          !allAck ||
+                          Object.keys(responses[qap.id] || {}).length === 0
+                        }
                         className="bg-blue-600 hover:bg-blue-700"
                       >
                         <Send className="h-4 w-4 mr-2" />

@@ -1,17 +1,6 @@
-// src/components/Level3ReviewPage.tsx
 import React, { useState, useMemo } from "react";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardContent,
-} from "@/components/ui/card";
-import {
-  Tabs,
-  TabsList,
-  TabsTrigger,
-  TabsContent,
-} from "@/components/ui/tabs";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -71,7 +60,11 @@ type SalesRequestLite = {
     moduleModelNumber: string;
     components?: {
       name: string;
-      rows: { model: string; subVendor?: string | null; spec?: string | null }[];
+      rows: {
+        model: string;
+        subVendor?: string | null;
+        spec?: string | null;
+      }[];
     }[];
   } | null;
 };
@@ -106,8 +99,9 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
 
   /* ───────────────────────── state ───────────────────────── */
   const [searchTerm, setSearchTerm] = useState("");
-  const [rowFilter, setRowFilter] =
-    useState<"all" | "matched" | "unmatched">("all");
+  const [rowFilter, setRowFilter] = useState<"all" | "matched" | "unmatched">(
+    "all"
+  );
   const [responses, setResponses] = useState<{
     [qapId: string]: Record<number, string>;
   }>({});
@@ -148,11 +142,7 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
   }, [qapData, userPlants, searchTerm, user]);
 
   /* ───────────────────────── helpers ───────────────────────── */
-  const handleResponseChange = (
-    qapId: string,
-    sno: number,
-    text: string
-  ) =>
+  const handleResponseChange = (qapId: string, sno: number, text: string) =>
     setResponses((prev) => ({
       ...prev,
       [qapId]: { ...(prev[qapId] || {}), [sno]: text },
@@ -217,9 +207,7 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
       </div>
 
       {reviewable.length === 0 ? (
-        <div className="text-center text-gray-500 py-20">
-          No QAPs to review
-        </div>
+        <div className="text-center text-gray-500 py-20">No QAPs to review</div>
       ) : (
         reviewable.map((qap) => {
           const specs = qap.allSpecs.filter((s) =>
@@ -249,9 +237,7 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
             <Collapsible
               key={qap.id}
               open={isOpen}
-              onOpenChange={(o) =>
-                setExpanded((p) => ({ ...p, [qap.id]: o }))
-              }
+              onOpenChange={(o) => setExpanded((p) => ({ ...p, [qap.id]: o }))}
               className="mb-4"
             >
               {/* header */}
@@ -375,9 +361,7 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
                                     </td>
                                     <td className="p-2 border">
                                       <Textarea
-                                        value={
-                                          responses[qap.id]?.[s.sno] || ""
-                                        }
+                                        value={responses[qap.id]?.[s.sno] || ""}
                                         onChange={(e) =>
                                           handleResponseChange(
                                             qap.id,
@@ -478,9 +462,7 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
                                     </td>
                                     <td className="p-2 border">
                                       <Textarea
-                                        value={
-                                          responses[qap.id]?.[s.sno] || ""
-                                        }
+                                        value={responses[qap.id]?.[s.sno] || ""}
                                         onChange={(e) =>
                                           handleResponseChange(
                                             qap.id,
@@ -560,7 +542,8 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
                                   <FieldRow
                                     label="Premier Bidded Qty (MW)"
                                     value={
-                                      salesRequest.premierBiddedOrderQtyMW ?? "-"
+                                      salesRequest.premierBiddedOrderQtyMW ??
+                                      "-"
                                     }
                                   />
                                   <FieldRow
@@ -774,7 +757,10 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
                                                 </thead>
                                                 <tbody className="divide-y">
                                                   {c.rows.map((r, i) => (
-                                                    <tr key={i} className="align-top">
+                                                    <tr
+                                                      key={i}
+                                                      className="align-top"
+                                                    >
                                                       <td className="px-3 py-2 whitespace-nowrap">
                                                         {r.model || "-"}
                                                       </td>

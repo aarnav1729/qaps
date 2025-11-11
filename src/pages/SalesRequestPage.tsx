@@ -1,19 +1,14 @@
-// src/pages/SalesRequestsPage.tsx
 import React, { useMemo, useState, useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-// src/pages/SalesRequestsPage.tsx
-// src/pages/SalesRequestPage.tsx
-// src/pages/SalesRequestPage.tsx
 import {
   BOM_MASTER,
   getOptionsFor,
   VENDOR_NAME_LOCKIN,
   RFID_LOCATION_LOCKIN,
-  TECHNOLOGIES,
   BomComponentName,
   BomComponentOption,
 } from "@/data/bomMaster";
@@ -21,34 +16,143 @@ import {
 const API = window.location.origin;
 
 type YesNo = "yes" | "no";
-type Plant = "P2" | "P5" | "P6";
-type OrderType = "m10" | "g12r" | "g12";
+type Plant = "P2" | "P4" | "P5" | "P6";
+
 // DCR/NDCR flag (keeps the same field name 'cellType' on the object)
 type DcrCompliance = "DCR" | "NDCR";
 
 // New sub-dropdowns under Module Order Type
-type CellType = "M10" | "M10R" | "G12" | "G12R";
+type CellType = "M10" | "G12" | "G12R";
 type CellTech = "PERC" | "TOPCon";
 type CutCells = "60" | "66" | "72" | "78";
 type QapType = "Customer" | "Premier Energies";
 type Priority = "high" | "low";
-type Technology = (typeof TECHNOLOGIES)[number];
+
+// ── Product Category (dropdown) ─────────────────────────────────────────────
+type ProductCategory =
+  | "MonoPERC Monofacial-M10- 515-555Wp"
+  | "MonoPERC Bifacial – TBS-M10-525-555Wp"
+  | "MonoPERC Bifacial – G2G-M10-530-560Wp"
+  | "TOPCON Bifacial -G2G-M10-10BB-560-590Wp"
+  | "TOPCON Bifacial -G2G-M10-16BB-560-590Wp"
+  | "TOPCON Bifacial -G2G-G12R-16BB-600-630Wp"
+  | "TOPCON Bifacial -G2G-G12-18BB-680-710Wp";
+
+const PRODUCT_CATEGORY_OPTIONS: ProductCategory[] = [
+  "MonoPERC Monofacial-M10- 515-555Wp",
+  "MonoPERC Bifacial – TBS-M10-525-555Wp",
+  "MonoPERC Bifacial – G2G-M10-530-560Wp",
+  "TOPCON Bifacial -G2G-M10-10BB-560-590Wp",
+  "TOPCON Bifacial -G2G-M10-16BB-560-590Wp",
+  "TOPCON Bifacial -G2G-G12R-16BB-600-630Wp",
+  "TOPCON Bifacial -G2G-G12-18BB-680-710Wp",
+];
+
+// One record drives ALL 6 derived fields (no separate watt options).
+const PRODUCT_CATEGORY_MATRIX: Record<
+  ProductCategory,
+  {
+    // 6 derived fields
+    cellTech: "PERC" | "TOPCon";
+    moduleCellType: "M10" | "G12" | "G12R";
+    cutCells: "60" | "66" | "72" | "78";
+    model: string;
+    dimOptions: string[]; // keep as array for future variability
+    minWattPeak: number; // numeric (from CSV)
+    // convenience for UI/BOM labels
+    wattPeakLabel?: string; // computed "MIN {minWattPeak} WP"
+  }
+> = {
+  "MonoPERC Monofacial-M10- 515-555Wp": {
+    cellTech: "PERC",
+    moduleCellType: "M10",
+    cutCells: "72",
+    model: "PE-XXX-HM",
+    dimOptions: ["2278x1134x35x33/18 mm"],
+    minWattPeak: 515,
+  },
+  "MonoPERC Bifacial – TBS-M10-525-555Wp": {
+    cellTech: "PERC",
+    moduleCellType: "M10",
+    cutCells: "72",
+    model: "PE-XXX-HB",
+    dimOptions: ["2278x1134x35x33/18 mm"],
+    minWattPeak: 525,
+  },
+  "MonoPERC Bifacial – G2G-M10-530-560Wp": {
+    cellTech: "PERC",
+    moduleCellType: "M10",
+    cutCells: "72",
+    model: "PEI-144-XXX-HGB-M10",
+    dimOptions: ["2278x1134x35x33/18 mm"],
+    minWattPeak: 530,
+  },
+  "TOPCON Bifacial -G2G-M10-10BB-560-590Wp": {
+    cellTech: "TOPCon",
+    moduleCellType: "M10",
+    cutCells: "72",
+    model: "PEI-144-XXX-THGB-M10",
+    dimOptions: ["2278x1134x35x33/18 mm"],
+    minWattPeak: 560,
+  },
+  "TOPCON Bifacial -G2G-M10-16BB-560-590Wp": {
+    cellTech: "TOPCon",
+    moduleCellType: "M10",
+    cutCells: "72",
+    model: "PEI-144-XXX-THGB-M10",
+    dimOptions: ["2278x1134x35x33/18 mm"],
+    minWattPeak: 560,
+  },
+  "TOPCON Bifacial -G2G-G12R-16BB-600-630Wp": {
+    cellTech: "TOPCon",
+    moduleCellType: "G12R",
+    cutCells: "66",
+    model: "PEI-132-XXX-THGB-G12R",
+    dimOptions: ["2382x1134x35x35 mm"],
+    minWattPeak: 600,
+  },
+  "TOPCON Bifacial -G2G-G12-18BB-680-710Wp": {
+    cellTech: "TOPCon",
+    moduleCellType: "G12",
+    cutCells: "66",
+    model: "PEI-132-XXX-THGB-G12",
+    dimOptions: ["2382x1303x30x30/15 mm"],
+    minWattPeak: 680,
+  },
+};
+
+// helper for label
+const labelForMin = (n: number) => (Number.isFinite(n) ? `MIN ${n} WP` : "");
+
+// Use Model No. (preferred) or sanitized category as the Document-Ref tag
+const categoryDocTag = (cat?: ProductCategory | "") => {
+  if (!cat) return "";
+  const row = PRODUCT_CATEGORY_MATRIX[cat as ProductCategory];
+  const base = row?.model || String(cat);
+  return base.replace(/\s+/g, "").replace(/[–—]/g, "-"); // keep hyphens in model codes
+};
 
 export interface SalesRequest {
   id: string;
   projectCode: string;
   customerName: string;
-  isNewCustomer: YesNo;
+
   moduleManufacturingPlant: Plant;
-  moduleOrderType: OrderType;
+
   // Existing field kept; now represents DCR/NDCR compliance (label changed in UI)
   cellType: DcrCompliance;
   // NEW: optional sub-fields (frontend-safe, optional until backend persists them)
   moduleCellType?: CellType | null; // M10/M10R/G12/G12R
   cellTech?: CellTech | null; // PERC/TOPCon
-  cutCells?: number | null; // 60/66/72/78
-  certificationRequired?: "BIS" | "IEC" | "BIS + IEC" | "Not Required";
-  wattageBinning: number;
+  cutCells?: string | null; // "60" | "66" | "72" | "78"
+  // in interface SalesRequest
+  certificationRequired?:
+    | "BIS"
+    | "IEC"
+    | "BIS + IEC"
+    | "BIS + IEC + 3xIEC"
+    | "Not Required";
+
   wattageBinningDist?: { range: string; pct: number }[];
   rfqOrderQtyMW: number;
   premierBiddedOrderQtyMW?: number | null;
@@ -58,9 +162,10 @@ export interface SalesRequest {
   cableLengthRequired: number;
   qapType: QapType;
   qapTypeAttachmentUrl?: string | null;
-  primaryBom: YesNo;
+  bomFrom?: "Customer" | "Premier Energies";
   primaryBomAttachmentUrl?: string | null;
   inlineInspection: YesNo;
+  pdi?: YesNo;
   cellProcuredBy: "Customer" | "Premier Energies" | "Financed By Customer";
   agreedCTM: number;
   factoryAuditTentativeDate?: string | null; // YYYY-MM-DD
@@ -90,14 +195,12 @@ type BomComponent = {
 type BomPayload = {
   vendorName: string; // lock-in
   rfidLocation: string; // lock-in
-  technologyProposed: Technology;
   vendorAddress: string;
   documentRef: string; // auto
-  moduleWattageWp: number;
   moduleDimensionsOption: string;
   moduleModelNumber: string;
   components: BomComponent[];
-  wattPeakLabel: string;
+  wattPeakLabel?: string;
 };
 
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -113,65 +216,13 @@ type HistoryItem = {
   changes?: HistoryChange[] | null;
 };
 
-// Plant-driven options
-const PLANT_CONFIG = {
-  p2: {
-    models: [
-      "PEI-144-590 THGB-M10",
-      "PEI-144-585THGB-M10",
-      "PEI-144-580THGB-M10",
-      "PEI-144-575THGB-M10",
-      "PEI-144-570THGB-M10",
-    ],
-    wattLocked: "MIN 575 WP",
-    wattOpts: [] as string[],
-    wattNumeric: 575,
-    dimLocked: "2278x1134x35x33/18",
-    dimOpts: [] as string[],
-  },
-  p5: {
-    models: Array.from(
-      new Set([
-        "PE-132-630THGB-G12R",
-        "PE-132-625THGB-G12R",
-        "PE-132-620THGB-G12R",
-        "PE-132-615THGB-G12R",
-        "PE-132-610THGB-G12R",
-        "PE-132-605THGB-G12R",
-        "PE-132-710THGB-G12",
-        "PE-132-705THGB-G12",
-        "PE-132-700THGB-G12",
-        "PE-132-695THGB-G12",
-        "PE-132-690THGB-G12",
-        "PE-132-685THGB-G12",
-      ])
-    ),
-    wattLocked: null,
-    wattOpts: ["MIN 605 WP", "MIN 700 WP"],
-    wattMap: { "MIN 605 WP": 605, "MIN 700 WP": 700 } as Record<string, number>,
-    dimLocked: null,
-    dimOpts: [
-      "2382x1134x35x33/18mm",
-      "2382x1134x30x30/15mm",
-      "2384x1303x30x30/15mm",
-    ],
-  },
-  p6: {
-    models: [
-      "PE-132-710THGB-G12",
-      "PE-132-705THGB-G12",
-      "PE-132-700THGB-G12",
-      "PE-132-695THGB-G12",
-      "PE-132-690THGB-G12",
-      "PE-132-685THGB-G12",
-    ],
-    wattLocked: "MIN 700 WP",
-    wattOpts: [] as string[],
-    wattNumeric: 700,
-    dimLocked: "2384x1303x30x30/15mm",
-    dimOpts: [] as string[],
-  },
-} as const;
+// Link Module Manufacturing Plant => Solar Module Vendor Address
+const PLANT_VENDOR_ADDRESS: Record<Plant, string> = {
+  P2: "PEPPL",
+  P4: "PEIPL",
+  P5: "PEGEPL I",
+  P6: "PEGEPL II",
+};
 
 const SalesRequestsPage: React.FC = () => {
   const location = useLocation();
@@ -275,24 +326,23 @@ const SalesRequestsPage: React.FC = () => {
                     <Th>Actions</Th>
                     <Th>Customer Name</Th>
                     <Th>Project Code</Th>
-                    <Th>New Customer?</Th>
                     <Th>Plant</Th>
-                    <Th>Order Type</Th>
                     <Th>DCR Compliance?</Th>
-                    <Th>Wattage Binning</Th>
+                    <Th>Tentative Wattage Binning</Th>
                     <Th>RFQ Qty (MW)</Th>
                     <Th>Premier Bidded Qty (MW)</Th>
                     <Th>Delivery Timeline</Th>
                     <Th>Project Location</Th>
                     <Th>JB Cable Length</Th>
-                    <Th>QAP Type</Th>
-                    <Th>Primary BOM?</Th>
-                    <Th>Inline Inspection?</Th>
+                    <Th>QAP From</Th>
+                    <Th>BOM From</Th>
+                    <Th>Inline Inspection</Th>
+                    <Th>PDI</Th>
                     <Th>Cell Procured By</Th>
                     <Th>Agreed CTM</Th>
                     <Th>Audit Date</Th>
                     <Th>X Pitch (mm)</Th>
-                    <Th>Tracker @790/1400</Th>
+                    <Th>Tracker (790/1400mm)</Th>
                     <Th>Priority</Th>
                     <Th>Remarks</Th>
                     <Th>Attachments</Th>
@@ -325,12 +375,9 @@ const SalesRequestsPage: React.FC = () => {
                       <Td className="font-mono text-xs">
                         {row.projectCode || "-"}
                       </Td>{" "}
-                      {/* ← NEW */}
-                      <Td className="capitalize">{row.isNewCustomer}</Td>
                       <Td className="uppercase">
                         {row.moduleManufacturingPlant}
                       </Td>
-                      <Td className="uppercase">{row.moduleOrderType}</Td>
                       <Td>{row.cellType}</Td>
                       <Td>
                         {row.wattageBinningDist?.length ? (
@@ -342,7 +389,7 @@ const SalesRequestsPage: React.FC = () => {
                             ))}
                           </ul>
                         ) : (
-                          fmtNum(row.wattageBinning)
+                          "-"
                         )}
                       </Td>
                       <Td>{fmtNum(row.rfqOrderQtyMW)}</Td>
@@ -363,13 +410,13 @@ const SalesRequestsPage: React.FC = () => {
                               rel="noreferrer"
                               className="text-blue-600 underline"
                             >
-                              View QAP Type file
+                              View QAP From Attachment
                             </a>
                           </>
                         )}
                       </Td>
                       <Td>
-                        {row.primaryBom}
+                        {row.bomFrom || "-"}
                         {row.primaryBomAttachmentUrl && (
                           <>
                             <br />
@@ -385,6 +432,7 @@ const SalesRequestsPage: React.FC = () => {
                         )}
                       </Td>
                       <Td className="capitalize">{row.inlineInspection}</Td>
+                      <Td className="capitalize">{row.pdi ?? "-"}</Td>{" "}
                       <Td>{row.cellProcuredBy}</Td>
                       <Td>{fmtDec(row.agreedCTM)}</Td>
                       <Td>{row.factoryAuditTentativeDate || "-"}</Td>
@@ -515,7 +563,7 @@ function genProjectCode({
 }: {
   customerName: string;
   plant: string; // "P2" | "P5" | "P6"
-  orderTag: string; // "M10" | "M10R" | "G12" | "G12R" (or "m10"/"g12r"/"g12")
+  orderTag: string; // "M10" | "G12" | "G12R"
   date?: string; // YYYY-MM-DD (optional; falls back to today)
 }) {
   const cus3 =
@@ -560,26 +608,30 @@ const SalesRequestModal: React.FC<{
   const [state, setState] = useState({
     customerName: prefillCustomerName || "",
     moduleManufacturingPlant: "P2" as Plant,
-    moduleOrderType: "m10" as OrderType,
+
     cellType: "DCR" as DcrCompliance, // relabeled to "DCR Compliance?" in UI+    // NEW (all optional → empty string means "unset"; no save blocker)
+    productCategory: "" as "" | ProductCategory,
     moduleCellType: "" as "" | CellType,
     cellTech: "" as "" | CellTech,
     cutCells: "" as "" | CutCells,
+    // in useState for modal state (SalesRequestModal)
     certificationRequired: "Not Required" as
       | "BIS"
       | "IEC"
       | "BIS + IEC"
+      | "BIS + IEC + 3xIEC"
       | "Not Required",
-    wattageBinning: "" as string,
+
     rfqOrderQtyMW: "" as string,
     premierBiddedOrderQtyMW: "" as string,
     deliveryStartDate: "",
     deliveryEndDate: "",
     projectLocation: "",
     cableLengthRequired: "" as string,
-    qapType: "Customer" as QapType,
-    primaryBom: "no" as YesNo,
+    qapType: "Premier Energies" as QapType,
+    bomFrom: "Premier Energies" as "Customer" | "Premier Energies",
     inlineInspection: "no" as YesNo,
+    pdi: "no" as YesNo,
     cellProcuredBy: "Customer" as
       | "Customer"
       | "Premier Energies"
@@ -599,6 +651,40 @@ const SalesRequestModal: React.FC<{
     { title: string; file: File | null }[]
   >([]);
 
+  // 🔗 Blob URLs for preview links
+  const [qapPreviewUrl, setQapPreviewUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (qapTypeFile) {
+      const u = URL.createObjectURL(qapTypeFile);
+      setQapPreviewUrl(u);
+      return () => URL.revokeObjectURL(u);
+    }
+    setQapPreviewUrl(null);
+  }, [qapTypeFile]);
+
+  const [bomPreviewUrl, setBomPreviewUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (primaryBomFile) {
+      const u = URL.createObjectURL(primaryBomFile);
+      setBomPreviewUrl(u);
+      return () => URL.revokeObjectURL(u);
+    }
+    setBomPreviewUrl(null);
+  }, [primaryBomFile]);
+
+  const [otherPreviewUrls, setOtherPreviewUrls] = useState<(string | null)[]>(
+    []
+  );
+  useEffect(() => {
+    const urls = otherFiles.map((o) =>
+      o.file ? URL.createObjectURL(o.file) : null
+    );
+    setOtherPreviewUrls(urls);
+    return () => {
+      urls.forEach((u) => u && URL.revokeObjectURL(u));
+    };
+  }, [otherFiles]);
+
   // Wattage binning/distribution rows (string form for smooth typing)
   const [wattBins, setWattBins] = useState<{ range: string; pct: string }[]>([
     { range: "", pct: "" },
@@ -606,10 +692,8 @@ const SalesRequestModal: React.FC<{
     { range: "", pct: "" },
   ]);
 
-  // BOM editor state
-  const [tech, setTech] = useState<Technology>("M10");
   const [vendorAddress, setVendorAddress] = useState("");
-  const [moduleWattageWp, setModuleWattageWp] = useState<string>(""); // numeric string; driven by Watt-peak
+
   const [moduleDimensionsOption, setModuleDimensionsOption] =
     useState<string>(""); // dimension string
   const [moduleModelNumber, setModuleModelNumber] = useState("");
@@ -630,6 +714,7 @@ const SalesRequestModal: React.FC<{
 
   // Preview toggle
   const [showPreview, setShowPreview] = useState(false);
+  const [bomOpen, setBomOpen] = useState(false);
 
   // Pre-populate all components by default on create
   useEffect(() => {
@@ -659,8 +744,9 @@ const SalesRequestModal: React.FC<{
       setProjectCode(initial.projectCode);
       return;
     }
-    // Prefer the new Cell Type (M10/M10R/G12/G12R); fall back to legacy orderType
-    const orderTag = state.moduleCellType || state.moduleOrderType;
+    // Use Cell Type (M10/G12/G12R) for order tag
+    const orderTag = state.moduleCellType || "M10";
+
     // Use deliveryStartDate if present so it's stable across a session
     setProjectCode(
       genProjectCode({
@@ -676,7 +762,6 @@ const SalesRequestModal: React.FC<{
     state.customerName,
     state.moduleManufacturingPlant,
     state.moduleCellType,
-    state.moduleOrderType,
     state.deliveryStartDate,
   ]);
 
@@ -688,8 +773,8 @@ const SalesRequestModal: React.FC<{
         moduleManufacturingPlant: String(
           initial.moduleManufacturingPlant
         ).toUpperCase() as Plant,
-        moduleOrderType: initial.moduleOrderType || "m10",
         cellType: initial.cellType || "DCR",
+        productCategory: "",
         // NEW: hydrate if backend starts returning them; else stay ""
         moduleCellType:
           (initial as any).moduleCellType &&
@@ -711,10 +796,10 @@ const SalesRequestModal: React.FC<{
                 | "BIS"
                 | "IEC"
                 | "BIS + IEC"
+                | "BIS + IEC + 3xIEC"
                 | "Not Required")
             : "Not Required",
-        wattageBinning:
-          initial.wattageBinning != null ? String(initial.wattageBinning) : "",
+
         rfqOrderQtyMW:
           initial.rfqOrderQtyMW != null ? String(initial.rfqOrderQtyMW) : "",
         premierBiddedOrderQtyMW:
@@ -728,9 +813,10 @@ const SalesRequestModal: React.FC<{
           initial.cableLengthRequired != null
             ? String(initial.cableLengthRequired)
             : "",
-        qapType: initial.qapType || "Customer",
-        primaryBom: initial.primaryBom || "no",
+        qapType: initial.qapType || "Premier Energies",
+        bomFrom: initial.bomFrom || "Premier Energies",
         inlineInspection: initial.inlineInspection || "no",
+        pdi: (initial as any).pdi || "no",
         cellProcuredBy: initial.cellProcuredBy || "Customer",
         agreedCTM: initial.agreedCTM != null ? String(initial.agreedCTM) : "",
         factoryAuditTentativeDate:
@@ -742,26 +828,6 @@ const SalesRequestModal: React.FC<{
         remarks: initial.remarks || "",
       });
 
-      const b = initial.bom;
-      if (b) {
-        setTech(b.technologyProposed);
-        setVendorAddress(b.vendorAddress || "");
-        setDocRef(b.documentRef || "");
-        setModuleWattageWp(
-          b.moduleWattageWp != null ? String(b.moduleWattageWp) : ""
-        );
-        setModuleDimensionsOption(b.moduleDimensionsOption || "");
-        setModuleModelNumber(b.moduleModelNumber || "");
-        setComponents(Array.isArray(b.components) ? b.components : []);
-      } else {
-        // fallback to orderType map if no bom
-        const map: Record<OrderType, Technology> = {
-          m10: "M10",
-          g12r: "G12R",
-          g12: "G12",
-        };
-        setTech(map[initial.moduleOrderType]);
-      }
       // Wattage distribution: prefer new array, else map legacy number -> one row @100%
       if (initial.wattageBinningDist && initial.wattageBinningDist.length) {
         setWattBins(
@@ -771,122 +837,83 @@ const SalesRequestModal: React.FC<{
           }))
         );
       } else {
-        const legacy =
-          initial.wattageBinning != null ? String(initial.wattageBinning) : "";
-        setWattBins([{ range: legacy ? `${legacy}` : "", pct: "100" }]);
+        setWattBins([{ range: "", pct: "" }]);
       }
     }
   }, [mode, initial]);
 
+  // ✅ hydrate BOM editor when opening Edit
+  useEffect(() => {
+    if (mode !== "edit") return;
+
+    if (!initial?.bom) {
+      // keep a visible skeleton so the editor isn't blank
+      setComponents((prev) =>
+        prev.length
+          ? prev
+          : (Object.keys(BOM_MASTER) as BomComponentName[]).map((name) => ({
+              name,
+              rows: [],
+            }))
+      );
+      return;
+    }
+
+    const b = initial.bom;
+    setVendorAddress(b.vendorAddress || "");
+    setModuleDimensionsOption(b.moduleDimensionsOption || "");
+    setModuleModelNumber(b.moduleModelNumber || "");
+    setWattPeakLabel(b.wattPeakLabel || "");
+    setDocRef(b.documentRef || "");
+    setComponents(
+      b.components && b.components.length
+        ? b.components
+        : (Object.keys(BOM_MASTER) as BomComponentName[]).map((name) => ({
+            name,
+            rows: [],
+          }))
+    );
+  }, [mode, initial]);
+
   // Auto-generate Document Ref when customer/tech/date change (only if docRef not prefilled)
   useEffect(() => {
-    if (mode === "edit" && initial?.bom?.documentRef) return; // keep existing docRef unless user changes
+    // Preserve an existing docRef during edit
+    if (mode === "edit" && initial?.bom?.documentRef) return;
+
     const today = new Date();
     const dd = String(today.getDate()).padStart(2, "0");
     const mm = String(today.getMonth() + 1).padStart(2, "0");
     const yyyy = today.getFullYear();
     const dateStr = `${dd}-${mm}-${yyyy}`;
+
     const cus3 =
       (state.customerName || "CUS")
         .replace(/[^A-Za-z]/g, "")
         .slice(0, 3)
         .toUpperCase() || "CUS";
+
     const seq = "0001"; // FE placeholder; BE can override
-    const ref = `BOM_${cus3}_${tech} Rev.0, ${dateStr}: BOM-${cus3}-${seq}-${yyyy}${mm}${dd}`;
+
+    // ✅ derive from Product Category (use Model code if available)
+    const catTag = categoryDocTag(state.productCategory) || "GEN";
+
+    const ref = `BOM_${cus3}_${catTag} Rev.0, ${dateStr}: BOM-${cus3}-${seq}-${yyyy}${mm}${dd}`;
     setDocRef(ref);
-  }, [state.customerName, tech, mode, initial?.bom?.documentRef]);
 
-  // Sync technology with selected Cell Type (create only; in edit we respect BOM tech initially)
-  useEffect(() => {
-    if (mode === "edit" && initial?.bom) return;
-    if (!state.moduleCellType) return;
-    const map: Record<CellType, Technology> = {
-      M10: "M10",
-      M10R: "M10", // map M10R to M10 technology
-      G12: "G12",
-      G12R: "G12R",
-    };
-    setTech(map[state.moduleCellType]);
-  }, [state.moduleCellType, mode, initial?.bom]);
-
-  // Backfill missing BOM defaults (edit & legacy rows) so UI shows valid defaults
-  useEffect(() => {
-    const p = state.moduleManufacturingPlant.toLowerCase() as
-      | "p2"
-      | "p5"
-      | "p6";
-    const cfg = PLANT_CONFIG[p];
-
-    // Dimensions
-    if (!moduleDimensionsOption) {
-      if (cfg.dimLocked) setModuleDimensionsOption(cfg.dimLocked);
-      else if (cfg.dimOpts.length) setModuleDimensionsOption(cfg.dimOpts[0]);
-    }
-
-    // Watt-peak label
-    if (!wattPeakLabel) {
-      if (cfg.wattLocked) setWattPeakLabel(cfg.wattLocked as string);
-      else if (cfg.wattOpts.length) setWattPeakLabel(cfg.wattOpts[0]);
-    }
-
-    // Module wattage (numeric)
-    if (!moduleWattageWp) {
-      if ("wattNumeric" in cfg && typeof cfg.wattNumeric === "number") {
-        setModuleWattageWp(String(cfg.wattNumeric));
-      } else if ((cfg as any).wattMap) {
-        const label = (cfg.wattLocked as string) || cfg.wattOpts[0];
-        const num = (cfg as any).wattMap?.[label];
-        if (num) setModuleWattageWp(String(num));
-      }
-    }
-
-    // Module model number
-    if (!moduleModelNumber && cfg.models.length) {
-      setModuleModelNumber(cfg.models[0]);
-    }
+    // depend on category & customer (no need for 'tech' anymore)
   }, [
+    state.customerName,
+    state.productCategory,
     mode,
-    initial,
-    state.moduleManufacturingPlant,
-    moduleDimensionsOption,
-    moduleWattageWp,
-    moduleModelNumber,
-    wattPeakLabel,
+    initial?.bom?.documentRef,
   ]);
 
-  // reset/lock BOM fields when plant changes
+  // When plant changes: set vendor address from matrix; keep dim behavior.
+  // NOTE: Plant no longer influences Watt Peak or Module Model Number.
+  // When plant changes: set vendor address only (do NOT override category-driven dims)
   useEffect(() => {
-    const p = state.moduleManufacturingPlant.toLowerCase() as
-      | "p2"
-      | "p5"
-      | "p6";
-    const cfg = PLANT_CONFIG[p];
-
-    // reset model on plant change
-    setModuleModelNumber("");
-
-    // Dimensions: lock or clear (widen tuple -> string[] for includes)
-    if (cfg.dimLocked) {
-      setModuleDimensionsOption(cfg.dimLocked);
-    } else {
-      const dimOpts = cfg.dimOpts as readonly string[];
-      if (!dimOpts.includes(moduleDimensionsOption)) {
-        setModuleDimensionsOption("");
-      }
-    }
-
-    // Watt-peak: lock (and set numeric) or reset to choose
-    if (cfg.wattLocked) {
-      setWattPeakLabel(cfg.wattLocked);
-      if ("wattNumeric" in cfg && typeof cfg.wattNumeric === "number") {
-        setModuleWattageWp(String(cfg.wattNumeric));
-      } else {
-        setModuleWattageWp(""); // safety for plants without numeric mapping
-      }
-    } else {
-      setWattPeakLabel("");
-      setModuleWattageWp("");
-    }
+    const plant = state.moduleManufacturingPlant as Plant;
+    setVendorAddress(PLANT_VENDOR_ADDRESS[plant] || "");
   }, [state.moduleManufacturingPlant]);
 
   const canSubmit = useMemo(() => {
@@ -901,14 +928,8 @@ const SalesRequestModal: React.FC<{
       state.projectLocation.trim() &&
       Number(state.rfqOrderQtyMW) > 0;
 
-    const wattOk = moduleWattageWp !== "" && Number(moduleWattageWp) > 0;
-    const bomOk =
-      !!moduleModelNumber.trim() &&
-      wattOk &&
-      components.length > 0 &&
-      components.every(
-        (c) => c.rows.length > 0 && c.rows.every((r) => !!r.model)
-      );
+    // Low-friction share: components may be empty/placeholder.
+    const bomOk = !!moduleModelNumber.trim() && !!wattPeakLabel;
 
     const hasQapAttachment = state.qapType !== "Customer" || !!qapTypeFile;
 
@@ -924,6 +945,7 @@ const SalesRequestModal: React.FC<{
     return !!(basicsOk && bomOk && hasQapAttachment && distOk);
   }, [
     mode,
+    wattPeakLabel,
     qapTypeFile,
     state.qapType,
     state.customerName,
@@ -932,8 +954,6 @@ const SalesRequestModal: React.FC<{
     state.projectLocation,
     state.rfqOrderQtyMW,
     moduleModelNumber,
-    moduleWattageWp,
-    components,
     wattBins,
   ]);
 
@@ -952,15 +972,6 @@ const SalesRequestModal: React.FC<{
     setOtherFiles((p) => p.filter((_, i) => i !== idx));
 
   // BOM handlers
-  const availableComponents = Object.keys(BOM_MASTER) as BomComponentName[];
-  const addComponent = (name: BomComponentName) => {
-    setComponents((prev) =>
-      prev.find((c) => c.name === name) ? prev : [...prev, { name, rows: [] }]
-    );
-  };
-  const removeComponent = (name: BomComponentName) => {
-    setComponents((prev) => prev.filter((c) => c.name !== name));
-  };
   const addRow = (name: BomComponentName) => {
     setComponents((prev) =>
       prev.map((c) =>
@@ -997,20 +1008,16 @@ const SalesRequestModal: React.FC<{
     () => ({
       vendorName: VENDOR_NAME_LOCKIN,
       rfidLocation: RFID_LOCATION_LOCKIN,
-      technologyProposed: tech,
       vendorAddress,
       documentRef: docRef,
-      moduleWattageWp: Number(moduleWattageWp || 0),
       moduleDimensionsOption,
       moduleModelNumber: moduleModelNumber.trim(),
       components,
       wattPeakLabel: wattPeakLabel || undefined,
     }),
     [
-      tech,
       vendorAddress,
       docRef,
-      moduleWattageWp,
       moduleDimensionsOption,
       moduleModelNumber,
       components,
@@ -1104,7 +1111,6 @@ const SalesRequestModal: React.FC<{
       !qapTypeFile &&
       !(mode === "edit" && initial?.qapTypeAttachmentUrl)
     ) {
-      alert("QAP Type attachment is required when QAP Type = Customer.");
       return;
     }
 
@@ -1116,22 +1122,18 @@ const SalesRequestModal: React.FC<{
       fd.append("customerName", state.customerName.trim());
     }
     fd.append("projectCode", projectCode); // ← add this
-    fd.append(
-      "isNewCustomer",
-      mode === "edit" && initial ? initial.isNewCustomer : "no"
-    );
-    fd.append(
-      "moduleManufacturingPlant",
-      state.moduleManufacturingPlant.toLowerCase()
-    );
-    fd.append("moduleOrderType", state.moduleOrderType);
+
+    fd.append("moduleManufacturingPlant", state.moduleManufacturingPlant);
+
+    if (state.productCategory)
+      fd.append("productCategory", state.productCategory);
     fd.append("cellType", state.cellType); // DCR/NDCR
     fd.append("certificationRequired", state.certificationRequired);
     // NEW optional sub-fields (server can ignore safely if not supported)
     if (state.moduleCellType) fd.append("moduleCellType", state.moduleCellType);
     if (state.cellTech) fd.append("cellTech", state.cellTech);
     if (state.cutCells) fd.append("cutCells", state.cutCells);
-    fd.append("wattageBinning", String(Number(state.wattageBinning || 0)));
+
     fd.append("rfqOrderQtyMW", String(Number(state.rfqOrderQtyMW || 0)));
     if (state.premierBiddedOrderQtyMW !== "") {
       fd.append(
@@ -1147,8 +1149,9 @@ const SalesRequestModal: React.FC<{
       String(Number(state.cableLengthRequired || 0))
     );
     fd.append("qapType", state.qapType);
-    fd.append("primaryBom", state.primaryBom);
+    fd.append("bomFrom", state.bomFrom);
     fd.append("inlineInspection", state.inlineInspection);
+    fd.append("pdi", state.pdi);
     fd.append("cellProcuredBy", state.cellProcuredBy);
     fd.append("agreedCTM", String(Number(state.agreedCTM || 0)));
     if (state.factoryAuditTentativeDate)
@@ -1167,48 +1170,31 @@ const SalesRequestModal: React.FC<{
       .map((r) => ({ range: r.range.trim(), pct: Number(r.pct || 0) }));
     fd.append("wattageBinningDist", JSON.stringify(distPayload));
 
-    // BOM JSON payload — ensure defaults are applied even if untouched
+    // BOM JSON payload — ensure defaults are applied even if untouched (plant-independent for model/watt)
     {
-      const plantKey = state.moduleManufacturingPlant.toLowerCase() as
-        | "p2"
-        | "p5"
-        | "p6";
-      const cfg = PLANT_CONFIG[plantKey];
-
-      const finalModel =
-        (moduleModelNumber || "").trim() || cfg.models[0] || "";
-
-      const finalDims =
-        moduleDimensionsOption || cfg.dimLocked || cfg.dimOpts[0] || "";
-
-      const finalWattLabel =
-        wattPeakLabel || cfg.wattLocked || cfg.wattOpts[0] || "";
-
-      let finalWattNum = Number(moduleWattageWp || 0);
-      if (!finalWattNum) {
-        if ("wattNumeric" in cfg && typeof cfg.wattNumeric === "number") {
-          finalWattNum = cfg.wattNumeric;
-        } else if ((cfg as any).wattMap && finalWattLabel) {
-          const mapped = (cfg as any).wattMap[finalWattLabel];
-          if (mapped) finalWattNum = Number(mapped);
-        }
-      }
+      const finalComponents =
+        components && components.length
+          ? components
+          : initial?.bom?.components || [];
 
       const bomForSave = {
         ...bomPayload,
-        moduleModelNumber: finalModel,
-        moduleDimensionsOption: finalDims,
-        moduleWattageWp: finalWattNum,
-        wattPeakLabel: finalWattLabel || undefined,
+        moduleModelNumber,
+        moduleDimensionsOption,
+        wattPeakLabel: wattPeakLabel || undefined,
+        components: finalComponents, // <- preserve if local editor is empty
       };
 
       fd.append("bom", JSON.stringify(bomForSave));
     }
 
     // attachments: if provided, back-end will replace existing (for edit) or set new (for create)
-    if (qapTypeFile) fd.append("qapTypeAttachment", qapTypeFile);
-    if (state.primaryBom === "yes" && primaryBomFile)
+    if (state.qapType === "Customer" && qapTypeFile) {
+      fd.append("qapTypeAttachment", qapTypeFile);
+    }
+    if (state.bomFrom === "Customer" && primaryBomFile) {
       fd.append("primaryBomAttachment", primaryBomFile);
+    }
     if (otherFiles.length) {
       fd.append(
         "otherAttachmentTitles",
@@ -1226,9 +1212,24 @@ const SalesRequestModal: React.FC<{
     }
   };
 
+  const catCfg = useMemo(
+    () =>
+      state.productCategory
+        ? PRODUCT_CATEGORY_MATRIX[state.productCategory]
+        : null,
+    [state.productCategory]
+  );
+  const catDimOpts = catCfg?.dimOptions ?? [];
+  const modelOptions = useMemo(() => {
+    const base = catCfg?.model ? [catCfg.model] : [];
+    return moduleModelNumber && !base.includes(moduleModelNumber)
+      ? [...base, moduleModelNumber]
+      : base;
+  }, [catCfg, moduleModelNumber]);
+
   return (
     <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-xl max-h-[92vh] w-full max-w-6xl overflow-auto">
+      <div className="bg-white rounded-lg shadow-xl max-h-[92vh] w-full max-w-[95vw] md:max-w-screen-2xl overflow-auto">
         <div className="p-4 border-b flex items-center justify-between sticky top-0 bg-white z-10">
           <h2 className="text-lg font-semibold">
             {mode === "edit" ? "Edit Sales Request" : "Create Sales Request"}
@@ -1257,7 +1258,6 @@ const SalesRequestModal: React.FC<{
                 onChange={(v) => setState((s) => ({ ...s, customerName: v }))}
                 readOnly={mode === "edit" || !!prefillCustomerName}
               />
-
               <Select
                 label="Module Manufacturing Plant"
                 required
@@ -1265,16 +1265,37 @@ const SalesRequestModal: React.FC<{
                 onChange={(v: any) =>
                   setState((s) => ({ ...s, moduleManufacturingPlant: v }))
                 }
-                options={["P2", "P5", "P6"]}
+                options={["P2", "P4", "P5", "P6"]}
               />
+              <Select
+                label="Product Category"
+                value={state.productCategory}
+                onChange={(v: any) => {
+                  const cat = v as ProductCategory;
+                  const m = PRODUCT_CATEGORY_MATRIX[cat];
 
-              {/* Module Order Type is now a header only (no input) */}
-              <div className="md:col-span-2">
-                <div className="text-sm font-medium text-gray-700">
-                  Module Order Type
-                </div>
-              </div>
+                  // 6 derived fields in one go
+                  setState((s) => ({
+                    ...s,
+                    productCategory: cat,
+                    moduleCellType: m.moduleCellType,
+                    cellTech: m.cellTech,
+                    cutCells: m.cutCells,
+                  }));
 
+                  setModuleModelNumber(m.model);
+
+                  // technology proposed = cell type
+                  const label = labelForMin(m.minWattPeak);
+                  setWattPeakLabel(label);
+
+                  // min watt (single value) now comes from matrix
+
+                  // dimensions (single-option today, array ready for future)
+                  setModuleDimensionsOption(m.dimOptions[0] || "");
+                }}
+                options={PRODUCT_CATEGORY_OPTIONS}
+              />
               {/* NEW sub-dropdowns under "Module Order Type" */}
               <Select
                 label="Cell Type"
@@ -1282,7 +1303,8 @@ const SalesRequestModal: React.FC<{
                 onChange={(v: any) =>
                   setState((s) => ({ ...s, moduleCellType: v as CellType }))
                 }
-                options={["M10", "M10R", "G12", "G12R"]}
+                // ⬇️ remove M10R here
+                options={["M10", "G12", "G12R"]}
               />
               <Select
                 label="Cell Tech"
@@ -1293,14 +1315,48 @@ const SalesRequestModal: React.FC<{
                 options={["PERC", "TOPCon"]}
               />
               <Select
-                label="No. of Cut Cells"
+                label="No. of Cells"
                 value={state.cutCells}
                 onChange={(v: any) =>
                   setState((s) => ({ ...s, cutCells: v as CutCells }))
                 }
                 options={["60", "66", "72", "78"]}
               />
-
+              {/* NEW: Min Watt Peak (moved up from BOM) */}
+              <ReadOnly label="Min Watt Peak" value={wattPeakLabel || "-"} />
+              <Select
+                label="Module Model Number"
+                required
+                value={moduleModelNumber}
+                onChange={(v) => {
+                  setModuleModelNumber(v);
+                }}
+                options={modelOptions}
+              />
+              <ReadOnly
+                label="Solar Module Vendor Name (lock-in)"
+                value={VENDOR_NAME_LOCKIN}
+              />
+              <ReadOnly
+                label="Location of RFID in module (lock-in)"
+                value={RFID_LOCATION_LOCKIN}
+              />
+              {/* 3) Module Dimensions (matrix-driven; M10 auto-picked) */}
+              <Select
+                label="Module Dimensions"
+                required
+                value={moduleDimensionsOption}
+                onChange={(v: string) => setModuleDimensionsOption(v)}
+                options={catDimOpts}
+              />
+              {/* 4) Module Model Number (auto-selected by Watt Peak) */}
+              {/* Keep the rest as-is */}
+              <Text
+                label="Solar Module Vendor Address"
+                value={vendorAddress}
+                onChange={setVendorAddress}
+              />
+              <ReadOnly label="Document Ref (auto)" value={docRef} />{" "}
               <Select
                 label="DCR Compliance?"
                 required
@@ -1308,17 +1364,14 @@ const SalesRequestModal: React.FC<{
                 onChange={(v: any) => setState((s) => ({ ...s, cellType: v }))}
                 options={["DCR", "NDCR"]}
               />
-
               <WattageDistTable rows={wattBins} onChange={setWattBins} />
-
               <IntField
-                label="RFQ Order Quantity in MW"
+                label="RFQ Order Quantity (MW)"
                 required
                 value={state.rfqOrderQtyMW}
                 onChange={(v) => setState((s) => ({ ...s, rfqOrderQtyMW: v }))}
                 placeholder="e.g., 20"
               />
-
               <IntField
                 label="Premier Bidded Actual Order Quantity in MW"
                 value={state.premierBiddedOrderQtyMW}
@@ -1327,7 +1380,6 @@ const SalesRequestModal: React.FC<{
                 }
                 placeholder="optional"
               />
-
               <DateRange
                 label="Delivery Timeline"
                 start={state.deliveryStartDate}
@@ -1340,7 +1392,6 @@ const SalesRequestModal: React.FC<{
                   }))
                 }
               />
-
               <Text
                 label="Project Location"
                 required
@@ -1349,57 +1400,30 @@ const SalesRequestModal: React.FC<{
                   setState((s) => ({ ...s, projectLocation: v }))
                 }
               />
-
-              <IntField
-                label="JB Cable Length in mm"
-                required
-                value={state.cableLengthRequired}
-                onChange={(v) =>
-                  setState((s) => ({ ...s, cableLengthRequired: v }))
-                }
-                placeholder="in mm"
-              />
-
               {/* Right column */}
               <Select
-                label="QAP Type"
+                label="QAP From"
                 required
                 value={state.qapType}
                 onChange={(v: any) => setState((s) => ({ ...s, qapType: v }))}
                 options={["Customer", "Premier Energies"]}
               />
-
-              <File
-                label={
-                  state.qapType === "Customer"
-                    ? "QAP Type attachment * (Required when QAP Type = Customer)"
-                    : "QAP Type attachment (optional)"
-                }
-                onChange={setQapTypeFile}
-              />
               {state.qapType === "Customer" && (
-                <div className="text-xs text-red-600 mt-1">
-                  Required when QAP Type = Customer
-                </div>
+                <File label="QAP From Attachment" onChange={setQapTypeFile} />
               )}
-
               <Select
-                label="Primary Technical Document - Primary BOM"
+                label="BOM From"
                 required
-                value={state.primaryBom}
-                onChange={(v: any) =>
-                  setState((s) => ({ ...s, primaryBom: v }))
-                }
-                options={["yes", "no"]}
+                value={state.bomFrom}
+                onChange={(v: any) => setState((s) => ({ ...s, bomFrom: v }))}
+                options={["Premier Energies", "Customer"]}
               />
-
-              {state.primaryBom === "yes" && (
+              {state.bomFrom === "Customer" && (
                 <File
-                  label="Primary BOM attachment (optional)"
+                  label="BOM From Attachment"
                   onChange={setPrimaryBomFile}
                 />
               )}
-
               <Select
                 label="Inline Inspection"
                 required
@@ -1409,7 +1433,13 @@ const SalesRequestModal: React.FC<{
                 }
                 options={["yes", "no"]}
               />
-
+              <Select
+                label="Pre-Dispatch Inspection (PDI)"
+                required
+                value={state.pdi}
+                onChange={(v: any) => setState((s) => ({ ...s, pdi: v }))}
+                options={["yes", "no"]}
+              />
               <Select
                 label="Certification Required?"
                 value={state.certificationRequired}
@@ -1420,12 +1450,18 @@ const SalesRequestModal: React.FC<{
                       | "BIS"
                       | "IEC"
                       | "BIS + IEC"
+                      | "BIS + IEC + 3xIEC"
                       | "Not Required",
                   }))
                 }
-                options={["BIS", "IEC", "BIS + IEC", "Not Required"]}
+                options={[
+                  "BIS",
+                  "IEC",
+                  "BIS + IEC",
+                  "BIS + IEC + 3xIEC",
+                  "Not Required",
+                ]}
               />
-
               <Select
                 label="Cell Procured By"
                 required
@@ -1439,15 +1475,12 @@ const SalesRequestModal: React.FC<{
                   "Financed By Customer",
                 ]}
               />
-
               <FloatField
                 label="Agreed CTM"
-                required
                 value={state.agreedCTM}
                 onChange={(v) => setState((s) => ({ ...s, agreedCTM: v }))}
                 placeholder="e.g., 0.9925"
               />
-
               <DateSingle
                 label="Factory Audit Tentative Date"
                 value={state.factoryAuditTentativeDate}
@@ -1455,21 +1488,27 @@ const SalesRequestModal: React.FC<{
                   setState((s) => ({ ...s, factoryAuditTentativeDate: v }))
                 }
               />
-
               <IntField
-                label="X Pitch (in mm) if any special req"
+                label="JB Cable Length (mm)"
+                required
+                value={state.cableLengthRequired}
+                onChange={(v) =>
+                  setState((s) => ({ ...s, cableLengthRequired: v }))
+                }
+                placeholder="in mm"
+              />
+              <IntField
+                label="X Pitch (mm)"
                 value={state.xPitchMm}
                 onChange={(v) => setState((s) => ({ ...s, xPitchMm: v }))}
                 placeholder="optional"
               />
-
               <IntField
-                label="Tracker Details @790mm/1400mm"
+                label="Tracker Details (790/1400mm)"
                 value={state.trackerDetails}
                 onChange={(v) => setState((s) => ({ ...s, trackerDetails: v }))}
                 placeholder="optional"
               />
-
               <Select
                 label="Priority"
                 required
@@ -1477,13 +1516,11 @@ const SalesRequestModal: React.FC<{
                 onChange={(v: any) => setState((s) => ({ ...s, priority: v }))}
                 options={["high", "low"]}
               />
-
               <Textarea
                 label="Remarks (optional)"
                 value={state.remarks}
                 onChange={(v) => setState((s) => ({ ...s, remarks: v }))}
               />
-
               {/* Multi file attachments with titles */}
               <div className="md:col-span-2">
                 <div className="flex items-center justify-between mb-2">
@@ -1549,222 +1586,178 @@ const SalesRequestModal: React.FC<{
             {/* BOM section */}
             <div className="px-4 pb-4">
               <Card>
-                <CardHeader>
+                <CardHeader className="flex items-center justify-between">
                   <CardTitle>BOM (Bill of Materials)</CardTitle>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setBomOpen((v) => !v)}
+                    aria-expanded={bomOpen}
+                    aria-controls="bom-editor"
+                  >
+                    {bomOpen ? "Collapse" : "Expand"}
+                  </Button>
                 </CardHeader>
-                <CardContent className="space-y-6">
-                  {/* Lock-ins & Header fields */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <ReadOnly
-                      label="Solar Module Vendor Name (lock-in)"
-                      value={VENDOR_NAME_LOCKIN}
-                    />
-                    <ReadOnly
-                      label="Location of RFID in module (lock-in)"
-                      value={RFID_LOCATION_LOCKIN}
-                    />
-                    <Select
-                      label="Technology Proposed"
-                      value={tech}
-                      onChange={(v: any) => setTech(v as Technology)}
-                      options={TECHNOLOGIES}
-                      required
-                    />
-                    <Text
-                      label="Solar Module Vendor Address"
-                      value={vendorAddress}
-                      onChange={setVendorAddress}
-                    />
-                    <ReadOnly label="Document Ref (auto)" value={docRef} />{" "}
-                    {/* Module Model Number (dropdown by plant) */}
-                    <Select
-                      label="Module Model Number"
-                      required
-                      value={moduleModelNumber}
-                      onChange={setModuleModelNumber}
-                      options={
-                        PLANT_CONFIG[
-                          state.moduleManufacturingPlant.toLowerCase() as
-                            | "p2"
-                            | "p5"
-                            | "p6"
-                        ].models
-                      }
-                    />
-                    {/* Watt-peak (lock or dropdown by plant). Also sets numeric moduleWattageWp */}
-                    {PLANT_CONFIG[
-                      state.moduleManufacturingPlant.toLowerCase() as
-                        | "p2"
-                        | "p5"
-                        | "p6"
-                    ].wattLocked ? (
-                      <ReadOnly
-                        label="Watt-peak"
-                        value={wattPeakLabel || "—"}
-                      />
-                    ) : (
-                      <Select
-                        label="Watt-peak"
-                        required
-                        value={wattPeakLabel}
-                        onChange={(v: string) => {
-                          setWattPeakLabel(v);
-                          const cfg =
-                            PLANT_CONFIG[
-                              state.moduleManufacturingPlant.toLowerCase() as
-                                | "p2"
-                                | "p5"
-                                | "p6"
-                            ];
-                          const num = (cfg as any).wattMap?.[v];
-                          setModuleWattageWp(num ? String(num) : "");
-                        }}
-                        options={
-                          PLANT_CONFIG[
-                            state.moduleManufacturingPlant.toLowerCase() as
-                              | "p2"
-                              | "p5"
-                              | "p6"
-                          ].wattOpts
-                        }
-                      />
-                    )}
-                    {/* Dimensions (lock or dropdown by plant) */}
-                    {PLANT_CONFIG[
-                      state.moduleManufacturingPlant.toLowerCase() as
-                        | "p2"
-                        | "p5"
-                        | "p6"
-                    ].dimLocked ? (
-                      <ReadOnly
-                        label="Module Dimensions"
-                        value={moduleDimensionsOption || "—"}
-                      />
-                    ) : (
-                      <Select
-                        label="Module Dimensions"
-                        required
-                        value={moduleDimensionsOption}
-                        onChange={(v: string) => setModuleDimensionsOption(v)}
-                        options={
-                          PLANT_CONFIG[
-                            state.moduleManufacturingPlant.toLowerCase() as
-                              | "p2"
-                              | "p5"
-                              | "p6"
-                          ].dimOpts
-                        }
-                      />
-                    )}
-                  </div>
-                  {/* Component tables */}
 
-                  <div className="space-y-6">
-                    {components.map((c) => (
-                      <div key={c.name} className="border rounded-md">
-                        <div className="px-3 py-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b bg-gray-50">
-                          <div className="font-medium">{c.name}</div>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => addRow(c.name)}
-                            >
-                              + Add Row
-                            </Button>
-                          </div>
+                {bomOpen && (
+                  <CardContent id="bom-editor" className="space-y-6">
+                    {/* Lock-ins & Header fields */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Module Model Number (dropdown by plant) */}
+                    </div>
+
+                    {/* Component tables */}
+                    <div className="space-y-6">
+                      {components.length === 0 ? (
+                        <div className="text-sm text-gray-500 p-3 border rounded">
+                          BOM has no components.
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="ml-2"
+                            onClick={() => {
+                              const all = (
+                                Object.keys(BOM_MASTER) as BomComponentName[]
+                              ).map((name) => {
+                                const opts = getOptionsFor(
+                                  name
+                                ) as readonly BomComponentOption[];
+                                const defaultRow: BomRow =
+                                  opts.length === 1
+                                    ? {
+                                        model: opts[0].model,
+                                        subVendor: opts[0].subVendor ?? null,
+                                        spec: opts[0].spec ?? null,
+                                      }
+                                    : {
+                                        model: "",
+                                        subVendor: null,
+                                        spec: null,
+                                      };
+                                return { name, rows: [defaultRow] };
+                              });
+                              setComponents(all);
+                            }}
+                          >
+                            Reset to defaults
+                          </Button>
                         </div>
+                      ) : (
+                        components.map((c) => (
+                          <div key={c.name} className="border rounded-md">
+                            <div className="px-3 py-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b bg-gray-50">
+                              <div className="font-medium">{c.name}</div>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => addRow(c.name)}
+                                >
+                                  + Add Row
+                                </Button>
+                              </div>
+                            </div>
 
-                        <div className="overflow-auto">
-                          <table className="min-w-full text-sm">
-                            <thead>
-                              <tr className="bg-gray-50 text-left">
-                                <Th>Part No / Type / Model</Th>
-                                <Th>Name of Sub-vendor / Manufacturer</Th>
-                                <Th>Specification</Th>
-                                <Th>Action</Th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y">
-                              {c.rows.length === 0 ? (
-                                <tr>
-                                  <td
-                                    colSpan={4}
-                                    className="px-3 py-3 text-gray-500"
-                                  >
-                                    No rows yet. Click “Add Row”.
-                                  </td>
-                                </tr>
-                              ) : (
-                                c.rows.map((r, idx) => {
-                                  const opts = getOptionsFor(c.name);
-                                  return (
-                                    <tr key={idx} className="align-top">
-                                      <td className="px-3 py-2 min-w-[28rem]">
-                                        <div className="space-y-2">
-                                          <input
-                                            className="w-full border rounded px-3 py-2 bg-gray-50 font-mono"
-                                            value={r.model || ""}
-                                            placeholder="No model chosen"
-                                            readOnly
-                                          />
-                                          <div className="flex items-center gap-2">
-                                            <Button
-                                              size="sm"
-                                              variant="outline"
-                                              onClick={() =>
-                                                openModelDialog(c.name, idx)
-                                              }
-                                            >
-                                              {r.model ? "Change" : "Choose"}
-                                            </Button>
-                                            {r.model && (
-                                              <Button
-                                                size="sm"
-                                                variant="destructive"
-                                                onClick={() =>
-                                                  setRowModel(c.name, idx, "")
-                                                }
-                                              >
-                                                Clear
-                                              </Button>
-                                            )}
-                                          </div>
-                                        </div>
-                                      </td>
-
-                                      <td className="px-3 py-2 min-w-[16rem]">
-                                        <input
-                                          className="w-full border rounded px-3 py-2 bg-gray-50"
-                                          value={r.subVendor ?? ""}
-                                          readOnly
-                                        />
-                                      </td>
-                                      <td className="px-3 py-2 min-w-[24rem]">
-                                        <div className="border rounded px-3 py-2 bg-gray-50 whitespace-pre-wrap">
-                                          {r.spec || "—"}
-                                        </div>
-                                      </td>
-                                      <td className="px-3 py-2">
-                                        <Button
-                                          size="sm"
-                                          variant="destructive"
-                                          onClick={() => removeRow(c.name, idx)}
-                                        >
-                                          Remove
-                                        </Button>
+                            <div className="overflow-auto">
+                              <table className="min-w-full text-sm">
+                                <thead>
+                                  <tr className="bg-gray-50 text-left">
+                                    <Th>Part No / Type / Model</Th>
+                                    <Th>Name of Sub-vendor / Manufacturer</Th>
+                                    <Th>Specification</Th>
+                                    <Th>Action</Th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y">
+                                  {c.rows.length === 0 ? (
+                                    <tr>
+                                      <td
+                                        colSpan={4}
+                                        className="px-3 py-3 text-gray-500"
+                                      >
+                                        No rows yet. Click “Add Row”.
                                       </td>
                                     </tr>
-                                  );
-                                })
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
+                                  ) : (
+                                    c.rows.map((r, idx) => {
+                                      return (
+                                        <tr key={idx} className="align-top">
+                                          <td className="px-3 py-2 min-w-[28rem]">
+                                            <div className="space-y-2">
+                                              <input
+                                                className="w-full border rounded px-3 py-2 bg-gray-50 font-mono"
+                                                value={r.model || ""}
+                                                placeholder="No model chosen"
+                                                readOnly
+                                              />
+                                              <div className="flex items-center gap-2">
+                                                <Button
+                                                  size="sm"
+                                                  variant="outline"
+                                                  onClick={() =>
+                                                    openModelDialog(c.name, idx)
+                                                  }
+                                                >
+                                                  {r.model
+                                                    ? "Change"
+                                                    : "Choose"}
+                                                </Button>
+                                                {r.model && (
+                                                  <Button
+                                                    size="sm"
+                                                    variant="destructive"
+                                                    onClick={() =>
+                                                      setRowModel(
+                                                        c.name,
+                                                        idx,
+                                                        ""
+                                                      )
+                                                    }
+                                                  >
+                                                    Clear
+                                                  </Button>
+                                                )}
+                                              </div>
+                                            </div>
+                                          </td>
+
+                                          <td className="px-3 py-2 min-w-[16rem]">
+                                            <input
+                                              className="w-full border rounded px-3 py-2 bg-gray-50"
+                                              value={r.subVendor ?? ""}
+                                              readOnly
+                                            />
+                                          </td>
+                                          <td className="px-3 py-2 min-w-[24rem]">
+                                            <div className="border rounded px-3 py-2 bg-gray-50 whitespace-pre-wrap">
+                                              {r.spec || "—"}
+                                            </div>
+                                          </td>
+                                          <td className="px-3 py-2">
+                                            <Button
+                                              size="sm"
+                                              variant="destructive"
+                                              onClick={() =>
+                                                removeRow(c.name, idx)
+                                              }
+                                            >
+                                              Remove
+                                            </Button>
+                                          </td>
+                                        </tr>
+                                      );
+                                    })
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </CardContent>
+                )}
               </Card>
             </div>
 
@@ -1809,22 +1802,55 @@ const SalesRequestModal: React.FC<{
                     value={state.customerName}
                   />
                   <PreviewRow
-                    label="Project Code"
-                    value={projectCode || initial?.projectCode || "-"}
-                  />
-
-                  <PreviewRow
-                    label="Manufacturing Plant"
+                    label="Module Manufacturing Plant"
                     value={state.moduleManufacturingPlant.toUpperCase()}
                   />
                   <PreviewRow
-                    label="Order Type"
-                    value={state.moduleOrderType.toUpperCase()}
+                    label="Product Category"
+                    value={state.productCategory || "-"}
                   />
+
+                  <PreviewRow
+                    label="Cell Type"
+                    value={state.moduleCellType || "-"}
+                  />
+                  <PreviewRow label="Cell Tech" value={state.cellTech || "-"} />
+                  <PreviewRow
+                    label="No. of Cells"
+                    value={state.cutCells || "-"}
+                  />
+
+                  <PreviewRow
+                    label="Min Watt Peak"
+                    value={wattPeakLabel || "-"}
+                  />
+                  <PreviewRow
+                    label="Module Model Number"
+                    value={moduleModelNumber}
+                  />
+                  <PreviewRow
+                    label="Solar Module Vendor Name (lock-in)"
+                    value={VENDOR_NAME_LOCKIN}
+                  />
+                  <PreviewRow
+                    label="RFID Location (lock-in)"
+                    value={RFID_LOCATION_LOCKIN}
+                  />
+                  <PreviewRow
+                    label="Module Dimensions"
+                    value={moduleDimensionsOption}
+                  />
+                  <PreviewRow
+                    label="Solar Module Vendor Address"
+                    value={vendorAddress || "-"}
+                  />
+                  <PreviewRow label="Document Ref" value={docRef} />
+
                   <PreviewRow label="DCR Compliance?" value={state.cellType} />
+
                   <div className="flex flex-col md:col-span-3">
                     <span className="text-gray-500">
-                      Wattage Binning / Distribution
+                      Tentative Wattage Binning / Distribution
                     </span>
                     {wattBins.filter((r) => r.range.trim() || r.pct.trim())
                       .length ? (
@@ -1841,12 +1867,13 @@ const SalesRequestModal: React.FC<{
                       <span className="font-medium text-gray-900">-</span>
                     )}
                   </div>
+
                   <PreviewRow
-                    label="RFQ Qty (MW)"
+                    label="RFQ Order Quantity (MW)"
                     value={displayInt(state.rfqOrderQtyMW)}
                   />
                   <PreviewRow
-                    label="Premier Bidded Qty (MW)"
+                    label="Premier Bidded Actual Order Quantity in MW"
                     value={
                       state.premierBiddedOrderQtyMW !== ""
                         ? displayInt(state.premierBiddedOrderQtyMW)
@@ -1863,18 +1890,111 @@ const SalesRequestModal: React.FC<{
                     label="Project Location"
                     value={state.projectLocation}
                   />
+                  <PreviewRow label="QAP From" value={state.qapType} />
+                  <PreviewRow label="BOM From" value={state.bomFrom} />
+                  {/* QAP From attachment as a single-line field */}
+                  {state.qapType === "Customer" &&
+                    (qapPreviewUrl || initial?.qapTypeAttachmentUrl) && (
+                      <PreviewRow
+                        label="QAP From Attachment"
+                        value={
+                          <a
+                            className="text-blue-600 underline"
+                            href={
+                              qapPreviewUrl ||
+                              (initial?.qapTypeAttachmentUrl as string)
+                            }
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Open QAP file
+                          </a>
+                        }
+                      />
+                    )}
+
+                  {/* BOM From attachment as a single-line field */}
+                  {state.bomFrom === "Customer" &&
+                    (bomPreviewUrl || initial?.primaryBomAttachmentUrl) && (
+                      <PreviewRow
+                        label="BOM From Attachment"
+                        value={
+                          <a
+                            className="text-blue-600 underline"
+                            href={
+                              bomPreviewUrl ||
+                              (initial?.primaryBomAttachmentUrl as string)
+                            }
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Open BOM file
+                          </a>
+                        }
+                      />
+                    )}
+
+                  {/* Any Other Attachments as a single-line field with inline links */}
+                  {(() => {
+                    const links: { href: string; title: string }[] = [];
+
+                    // Existing (edit mode)
+                    if (initial?.otherAttachments?.length) {
+                      initial.otherAttachments.forEach((a, i) => {
+                        if (a?.url)
+                          links.push({
+                            href: a.url,
+                            title: a.title || `Attachment ${i + 1}`,
+                          });
+                      });
+                    }
+
+                    // Newly picked (create/edit)
+                    otherFiles.forEach((o, idx) => {
+                      const href = otherPreviewUrls[idx];
+                      if (href) {
+                        links.push({
+                          href,
+                          title:
+                            (o.title && o.title.trim()) ||
+                            `Attachment ${idx + 1}`,
+                        });
+                      }
+                    });
+
+                    return (
+                      <PreviewRow
+                        label="Any Other Attachments"
+                        value={
+                          links.length ? (
+                            <span className="flex flex-wrap gap-x-2">
+                              {links.map((l, i) => (
+                                <a
+                                  key={`${l.href}-${i}`}
+                                  className="text-blue-600 underline"
+                                  href={l.href}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {l.title}
+                                </a>
+                              ))}
+                            </span>
+                          ) : (
+                            "-"
+                          )
+                        }
+                      />
+                    );
+                  })()}
+
                   <PreviewRow
-                    label="JB Cable Length"
-                    value={displayInt(state.cableLengthRequired)}
-                  />
-                  <PreviewRow label="QAP Type" value={state.qapType} />
-                  <PreviewRow
-                    label="Primary BOM?"
-                    value={state.primaryBom.toUpperCase()}
-                  />
-                  <PreviewRow
-                    label="Inline Inspection?"
+                    label="Inline Inspection"
                     value={state.inlineInspection.toUpperCase()}
+                  />
+                  <PreviewRow
+                    label="Pre-Dispatch Inspection (PDI)"
+                    value={state.pdi.toUpperCase()}
                   />
                   <PreviewRow
                     label="Certification Required?"
@@ -1889,20 +2009,25 @@ const SalesRequestModal: React.FC<{
                     value={displayFloat(state.agreedCTM)}
                   />
                   <PreviewRow
-                    label="Factory Audit Date"
+                    label="Factory Audit Tentative Date"
                     value={state.factoryAuditTentativeDate || "-"}
+                  />
+                  <PreviewRow
+                    label="JB Cable Length (mm)"
+                    value={displayInt(state.cableLengthRequired)}
                   />
                   <PreviewRow
                     label="X Pitch (mm)"
                     value={state.xPitchMm !== "" ? state.xPitchMm : "-"}
                   />
                   <PreviewRow
-                    label="Tracker @790/1400"
+                    label="Tracker (790/1400mm)"
                     value={
                       state.trackerDetails !== "" ? state.trackerDetails : "-"
                     }
                   />
                   <PreviewRow label="Priority" value={state.priority} />
+
                   <div className="md:col-span-3">
                     <div className="text-sm text-gray-700">
                       <span className="font-medium">Remarks:</span>{" "}
@@ -1918,35 +2043,7 @@ const SalesRequestModal: React.FC<{
                 <CardTitle>BOM Preview</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                  <PreviewRow
-                    label="Vendor (lock-in)"
-                    value={VENDOR_NAME_LOCKIN}
-                  />
-                  <PreviewRow
-                    label="RFID Location (lock-in)"
-                    value={RFID_LOCATION_LOCKIN}
-                  />
-                  <PreviewRow label="Technology Proposed" value={tech} />
-                  <PreviewRow
-                    label="Vendor Address"
-                    value={vendorAddress || "-"}
-                  />
-                  <PreviewRow label="Document Ref" value={docRef} />
-                  <PreviewRow label="Watt-peak" value={wattPeakLabel || "-"} />
-                  <PreviewRow
-                    label="Module Wattage (WP)"
-                    value={moduleWattageWp ? displayInt(moduleWattageWp) : "-"}
-                  />
-                  <PreviewRow
-                    label="Module Dimensions"
-                    value={moduleDimensionsOption}
-                  />
-                  <PreviewRow
-                    label="Module Model Number"
-                    value={moduleModelNumber}
-                  />
-                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm"></div>
 
                 {components.length === 0 ? (
                   <div className="text-gray-500 text-sm">
@@ -2112,22 +2209,14 @@ const ViewSalesRequestModal: React.FC<{
                       value={data.customerName}
                     />
                     <PreviewRow
-                      label="Project Code"
-                      value={data.projectCode || "-"}
-                    />
-                    <PreviewRow
-                      label="New Customer?"
-                      value={data.isNewCustomer}
-                    />
-                    <PreviewRow
-                      label="Manufacturing Plant"
+                      label="Module Manufacturing Plant"
                       value={data.moduleManufacturingPlant.toUpperCase()}
                     />
                     <PreviewRow
-                      label="Order Type"
-                      value={data.moduleOrderType.toUpperCase()}
+                      label="Product Category"
+                      value={(data as any).productCategory || "-"}
                     />
-                    {/* NEW preview rows */}
+
                     <PreviewRow
                       label="Cell Type"
                       value={data.moduleCellType || "-"}
@@ -2137,14 +2226,45 @@ const ViewSalesRequestModal: React.FC<{
                       value={data.cellTech || "-"}
                     />
                     <PreviewRow
-                      label="No. of Cut Cells"
+                      label="No. of Cells"
                       value={data.cutCells || "-"}
                     />
+
+                    <PreviewRow
+                      label="Min Watt Peak"
+                      value={data.bom?.wattPeakLabel || "-"}
+                    />
+                    <PreviewRow
+                      label="Module Model Number"
+                      value={data.bom?.moduleModelNumber || "-"}
+                    />
+                    <PreviewRow
+                      label="Solar Module Vendor Name (lock-in)"
+                      value={data.bom?.vendorName || "-"}
+                    />
+                    <PreviewRow
+                      label="RFID Location (lock-in)"
+                      value={data.bom?.rfidLocation || "-"}
+                    />
+                    <PreviewRow
+                      label="Module Dimensions"
+                      value={data.bom?.moduleDimensionsOption || "-"}
+                    />
+                    <PreviewRow
+                      label="Solar Module Vendor Address"
+                      value={data.bom?.vendorAddress || "-"}
+                    />
+                    <PreviewRow
+                      label="Document Ref"
+                      value={data.bom?.documentRef || "-"}
+                    />
+
                     <PreviewRow label="DCR Compliance?" value={data.cellType} />
+
                     {data.wattageBinningDist?.length ? (
                       <div className="flex flex-col md:col-span-3">
                         <span className="text-gray-500">
-                          Wattage Binning / Distribution
+                          Tentative Wattage Binning / Distribution
                         </span>
                         <ul className="list-disc pl-5">
                           {data.wattageBinningDist.map((b, i) => (
@@ -2156,16 +2276,17 @@ const ViewSalesRequestModal: React.FC<{
                       </div>
                     ) : (
                       <PreviewRow
-                        label="Wattage Binning"
-                        value={fmtNum(data.wattageBinning)}
+                        label="Tentative Wattage Binning / Distribution"
+                        value="-"
                       />
                     )}
+
                     <PreviewRow
-                      label="RFQ Qty (MW)"
+                      label="RFQ Order Quantity (MW)"
                       value={fmtNum(data.rfqOrderQtyMW)}
                     />
                     <PreviewRow
-                      label="Premier Bidded Qty (MW)"
+                      label="Premier Bidded Actual Order Quantity in MW"
                       value={data.premierBiddedOrderQtyMW ?? "-"}
                     />
                     <PreviewRow
@@ -2176,18 +2297,71 @@ const ViewSalesRequestModal: React.FC<{
                       label="Project Location"
                       value={data.projectLocation}
                     />
+
+                    <PreviewRow label="QAP From" value={data.qapType} />
+                    <PreviewRow label="BOM From" value={data.bomFrom || "-"} />
+
+                    {/* Single-line attachment links like Preview */}
+                    {data.qapTypeAttachmentUrl && (
+                      <PreviewRow
+                        label="QAP From Attachment"
+                        value={
+                          <a
+                            className="text-blue-600 underline"
+                            href={data.qapTypeAttachmentUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Open QAP file
+                          </a>
+                        }
+                      />
+                    )}
+                    {data.primaryBomAttachmentUrl && (
+                      <PreviewRow
+                        label="BOM From Attachment"
+                        value={
+                          <a
+                            className="text-blue-600 underline"
+                            href={data.primaryBomAttachmentUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Open BOM file
+                          </a>
+                        }
+                      />
+                    )}
                     <PreviewRow
-                      label="JB Cable Length"
-                      value={fmtNum(data.cableLengthRequired)}
+                      label="Any Other Attachments"
+                      value={
+                        data.otherAttachments?.length ? (
+                          <span className="flex flex-wrap gap-x-2">
+                            {data.otherAttachments.map((a, i) => (
+                              <a
+                                key={i}
+                                className="text-blue-600 underline"
+                                href={a.url}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {a.title || `Attachment ${i + 1}`}
+                              </a>
+                            ))}
+                          </span>
+                        ) : (
+                          "-"
+                        )
+                      }
                     />
-                    <PreviewRow label="QAP Type" value={data.qapType} />
+
                     <PreviewRow
-                      label="Primary BOM?"
-                      value={data.primaryBom.toUpperCase()}
-                    />
-                    <PreviewRow
-                      label="Inline Inspection?"
+                      label="Inline Inspection"
                       value={data.inlineInspection.toUpperCase()}
+                    />
+                    <PreviewRow
+                      label="Pre-Dispatch Inspection (PDI)"
+                      value={data.pdi ? data.pdi.toUpperCase() : "-"}
                     />
                     <PreviewRow
                       label="Certification Required?"
@@ -2202,72 +2376,40 @@ const ViewSalesRequestModal: React.FC<{
                       value={fmtDec(data.agreedCTM)}
                     />
                     <PreviewRow
-                      label="Factory Audit Date"
+                      label="Factory Audit Tentative Date"
                       value={data.factoryAuditTentativeDate || "-"}
+                    />
+                    <PreviewRow
+                      label="JB Cable Length (mm)"
+                      value={fmtNum(data.cableLengthRequired)}
                     />
                     <PreviewRow
                       label="X Pitch (mm)"
                       value={data.xPitchMm ?? "-"}
                     />
                     <PreviewRow
-                      label="Tracker @790/1400"
+                      label="Tracker (790/1400mm)"
                       value={data.trackerDetails ?? "-"}
                     />
                     <PreviewRow label="Priority" value={data.priority} />
-                    <PreviewRow label="Created By" value={data.createdBy} />
-                    <PreviewRow
-                      label="Created At"
-                      value={new Date(data.createdAt).toLocaleString()}
-                    />
+
                     <div className="md:col-span-3">
                       <div className="text-sm text-gray-700">
                         <span className="font-medium">Remarks:</span>{" "}
                         {data.remarks || "-"}
                       </div>
                     </div>
-                    {data.qapTypeAttachmentUrl && (
-                      <div className="md:col-span-3">
-                        <a
-                          className="text-blue-600 underline"
-                          href={data.qapTypeAttachmentUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          View QAP Type Attachment
-                        </a>
-                      </div>
-                    )}
-                    {data.primaryBomAttachmentUrl && (
-                      <div className="md:col-span-3">
-                        <a
-                          className="text-blue-600 underline"
-                          href={data.primaryBomAttachmentUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          View Primary BOM Attachment
-                        </a>
-                      </div>
-                    )}
-                    {!!data.otherAttachments?.length && (
-                      <div className="md:col-span-3">
-                        <div className="font-medium">Other Attachments</div>
-                        <ul className="list-disc pl-5 space-y-1">
-                          {data.otherAttachments.map((a, i) => (
-                            <li key={i}>
-                              <a
-                                className="text-blue-600 underline"
-                                target="_blank"
-                                rel="noreferrer"
-                                href={a.url}
-                              >
-                                {a.title || `Attachment ${i + 1}`}
-                              </a>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
+
+                    {/* (Optional meta; not shown in Preview, but handy to keep at the end) */}
+                    <PreviewRow
+                      label="Project Code"
+                      value={data.projectCode || "-"}
+                    />
+                    <PreviewRow label="Created By" value={data.createdBy} />
+                    <PreviewRow
+                      label="Created At"
+                      value={new Date(data.createdAt).toLocaleString()}
+                    />
                   </div>
                 </CardContent>
               </Card>
@@ -2277,81 +2419,36 @@ const ViewSalesRequestModal: React.FC<{
                   <CardTitle>BOM</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {data.bom ? (
-                    <>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                        <PreviewRow
-                          label="Vendor (lock-in)"
-                          value={data.bom.vendorName}
-                        />
-                        <PreviewRow
-                          label="RFID Location (lock-in)"
-                          value={data.bom.rfidLocation}
-                        />
-                        <PreviewRow
-                          label="Technology Proposed"
-                          value={data.bom.technologyProposed}
-                        />
-                        <PreviewRow
-                          label="Vendor Address"
-                          value={data.bom.vendorAddress || "-"}
-                        />
-                        <PreviewRow
-                          label="Document Ref"
-                          value={data.bom.documentRef}
-                        />
-                        <PreviewRow
-                          label="Module Wattage (WP)"
-                          value={fmtNum(data.bom.moduleWattageWp)}
-                        />
-                        <PreviewRow
-                          label="Module Dimensions"
-                          value={data.bom.moduleDimensionsOption}
-                        />
-                        <PreviewRow
-                          label="Module Model Number"
-                          value={data.bom.moduleModelNumber}
-                        />
-                      </div>
-                      {!!data.bom.components?.length ? (
-                        <div className="space-y-6">
-                          {data.bom.components.map((c, idx) => (
-                            <div
-                              key={`${c.name}-${idx}`}
-                              className="overflow-auto"
-                            >
-                              <div className="font-medium mb-2">{c.name}</div>
-                              <table className="min-w-full text-sm border">
-                                <thead className="bg-gray-50 text-left">
-                                  <tr>
-                                    <Th>Part No / Type / Model</Th>
-                                    <Th>Sub-vendor / Manufacturer</Th>
-                                    <Th>Specification</Th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y">
-                                  {c.rows.map((r, i) => (
-                                    <tr key={i} className="align-top">
-                                      <Td>{r.model || "-"}</Td>
-                                      <Td>{r.subVendor || "-"}</Td>
-                                      <Td>
-                                        <div className="whitespace-pre-wrap">
-                                          {r.spec || "—"}
-                                        </div>
-                                      </Td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          ))}
+                  {data.bom && data.bom.components?.length ? (
+                    <div className="space-y-6">
+                      {data.bom.components.map((c, idx) => (
+                        <div key={`${c.name}-${idx}`} className="overflow-auto">
+                          <div className="font-medium mb-2">{c.name}</div>
+                          <table className="min-w-full text-sm border">
+                            <thead className="bg-gray-50 text-left">
+                              <tr>
+                                <Th>Part No / Type / Model</Th>
+                                <Th>Sub-vendor / Manufacturer</Th>
+                                <Th>Specification</Th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y">
+                              {c.rows.map((r, i) => (
+                                <tr key={i} className="align-top">
+                                  <Td>{r.model || "-"}</Td>
+                                  <Td>{r.subVendor || "-"}</Td>
+                                  <Td>
+                                    <div className="whitespace-pre-wrap">
+                                      {r.spec || "—"}
+                                    </div>
+                                  </Td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
                         </div>
-                      ) : (
-                        <div className="text-sm text-gray-500">
-                          No BOM components.
-                        </div>
-                      )}
-                    </>
+                      ))}
+                    </div>
                   ) : (
                     <div className="text-sm text-gray-500">
                       No BOM available.
@@ -2446,137 +2543,6 @@ function stringifyForView(v: any) {
     return String(v);
   }
 }
-
-// ────────────────────────────────────────────────────────────────────────────
-// ModelPicker: table-styled dropdown for BOM "Model No." selection
-// ────────────────────────────────────────────────────────────────────────────
-const ModelPicker: React.FC<{
-  value: string;
-  options: readonly BomComponentOption[];
-  onChange: (model: string) => void;
-  placeholder?: string;
-}> = ({ value, options, onChange, placeholder = "Select model…" }) => {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const ref = React.useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const onDoc = (e: MouseEvent) => {
-      if (!ref.current) return;
-      if (!ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, []);
-
-  const selected = value
-    ? options.find((o) => o.model === value) || null
-    : null;
-
-  const filtered = q
-    ? options.filter(
-        (o) =>
-          (o.model || "").toLowerCase().includes(q.toLowerCase()) ||
-          (o.subVendor || "").toLowerCase().includes(q.toLowerCase()) ||
-          (o.spec || "").toLowerCase().includes(q.toLowerCase())
-      )
-    : options;
-
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        type="button"
-        className="w-full border rounded px-3 py-2 text-left hover:bg-gray-50 focus:outline-none focus:ring"
-        onClick={() => setOpen((v) => !v)}
-        title={
-          selected
-            ? `${selected.model} | ${selected.subVendor || "-"} | ${
-                selected.spec || "-"
-              }`
-            : placeholder
-        }
-      >
-        {!selected ? (
-          <span className="text-gray-500">{placeholder}</span>
-        ) : (
-          <div className="grid grid-cols-[minmax(12rem,1fr)_minmax(10rem,1fr)_minmax(14rem,2fr)] gap-3 font-mono text-sm">
-            <span className="truncate">{selected.model}</span>
-            <span className="truncate">{selected.subVendor || "-"}</span>
-            <span className="truncate">{selected.spec || "-"}</span>
-          </div>
-        )}
-      </button>
-
-      {open && (
-        <div className="absolute z-30 mt-1 w-[48rem] max-w-[90vw] bg-white border rounded shadow-lg">
-          <div className="p-2 border-b bg-gray-50">
-            <input
-              autoFocus
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Type to filter by model / sub-vendor / spec"
-              className="w-full border rounded px-2 py-1.5 text-sm"
-            />
-          </div>
-
-          <div className="max-h-72 overflow-auto">
-            <table className="min-w-full text-sm">
-              <thead className="bg-gray-50 sticky top-0">
-                <tr className="text-left">
-                  <th className="px-3 py-2 font-medium">Model</th>
-                  <th className="px-3 py-2 font-medium">Sub-vendor</th>
-                  <th className="px-3 py-2 font-medium">Specification</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {filtered.length === 0 ? (
-                  <tr>
-                    <td colSpan={3} className="px-3 py-3 text-gray-500">
-                      No matches.
-                    </td>
-                  </tr>
-                ) : (
-                  filtered.map((o) => (
-                    <tr
-                      key={o.model}
-                      className="cursor-pointer hover:bg-blue-50"
-                      onClick={() => {
-                        onChange(o.model);
-                        setOpen(false);
-                        setQ("");
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          onChange(o.model);
-                          setOpen(false);
-                          setQ("");
-                        }
-                      }}
-                      tabIndex={0}
-                    >
-                      <td className="px-3 py-2 font-mono">{o.model}</td>
-                      <td className="px-3 py-2">{o.subVendor || "-"}</td>
-                      <td className="px-3 py-2 whitespace-pre-wrap">
-                        {o.spec || "-"}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
 
 // ────────────────────────────────────────────────────────────────────────────
 // ModelPickerModal: full-screen-ish modal for BOM "Model No." selection
@@ -2697,7 +2663,7 @@ const WattageDistTable: React.FC<{
     <div className="md:col-span-2">
       <div className="flex items-center justify-between mb-1">
         <label className="block text-sm text-gray-700">
-          Wattage Binning / Distribution *
+          Tentative Wattage Binning / Distribution *
         </label>
         <Button type="button" variant="outline" onClick={addRow}>
           +
@@ -2831,29 +2797,32 @@ const Select: React.FC<{
   onChange: (v: string) => void;
   options: string[];
   required?: boolean;
-}> = ({ label, value, onChange, options, required }) => (
-  <div>
-    <label className="block text-sm text-gray-700 mb-1">
-      {label}
-      {required && " *"}
-    </label>
-    <select
-      className="w-full border rounded px-3 py-2"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    >
-      {/* Show a consistent default placeholder across all dropdowns */}
-      <option value="" disabled={!!required} hidden>
-        select {label}
-      </option>
-      {options.map((o) => (
-        <option key={o} value={o}>
-          {o}
+}> = ({ label, value, onChange, options, required }) => {
+  const opts =
+    value && !options.includes(value) ? [...options, value] : options;
+  return (
+    <div>
+      <label className="block text-sm text-gray-700 mb-1">
+        {label}
+        {required && " *"}
+      </label>
+      <select
+        className="w-full border rounded px-3 py-2"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="" disabled={!!required} hidden>
+          select {label}
         </option>
-      ))}
-    </select>
-  </div>
-);
+        {opts.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+};
 
 /** Integer input (string-based) that allows free typing and clearing. */
 const IntField: React.FC<{
