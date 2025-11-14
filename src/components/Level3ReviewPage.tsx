@@ -69,6 +69,78 @@ type SalesRequestLite = {
   } | null;
 };
 
+// helpers (put near your other helpers)
+type ThreadEntry = {
+  by: string;
+  at: string;
+  responses: Record<number, string>;
+};
+
+/* add under your ThreadEntry type */
+type ThreadBubble = { by: string; at: string; text: string };
+
+/** Normalize comments to a per-sno chronological thread (oldest → newest) */
+/** Normalize comments to a per-sno thread (newest → oldest) */
+const threadForSno = (
+  comments: ThreadEntry[] | Record<number, string> | undefined,
+  sno: number
+): ThreadBubble[] => {
+  if (!comments) return [];
+  const arr: ThreadEntry[] = Array.isArray(comments)
+    ? comments
+    : [{ by: "unknown", at: new Date().toISOString(), responses: comments }];
+
+  return arr
+    .map((e) => ({
+      by: e.by,
+      at: e.at,
+      text: e.responses?.[sno],
+    }))
+    .filter((e) => e.text && String(e.text).trim().length > 0)
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()); // ← newest first
+};
+
+/** Compact renderer for a comment thread inside a table cell */
+const ThreadCell: React.FC<{
+  comments: ThreadEntry[] | Record<number, string> | undefined;
+  sno: number;
+}> = ({ comments, sno }) => {
+  const entries = threadForSno(comments, sno);
+  if (!entries.length) return <span>—</span>;
+  return (
+    <div className="min-w-0 w-full space-y-1 max-h-28 overflow-y-auto overflow-x-hidden pr-1">
+      {entries.map((e, i) => (
+        <div key={i} className="rounded-md border bg-white/60 p-1">
+          <div className="flex items-center justify-between gap-2 text-[10px] text-gray-500">
+            <span className="font-medium truncate">{e.by}</span>
+            <time className="shrink-0">{new Date(e.at).toLocaleString()}</time>
+          </div>
+          {/* preserve newlines + wrap long words/URLs */}
+          <div className="text-xs whitespace-pre-wrap break-words">
+            {e.text}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const latestForSno = (
+  comments: ThreadEntry[] | Record<number, string> | undefined,
+  sno: number
+) => {
+  if (Array.isArray(comments)) {
+    // walk newest → oldest looking for a response for this sno
+    for (let i = comments.length - 1; i >= 0; i--) {
+      const txt = comments[i]?.responses?.[sno];
+      if (txt) return txt;
+    }
+    return "—";
+  }
+  // legacy shape
+  return comments?.[sno] ?? "—";
+};
+
 const FieldRow: React.FC<{ label: string; value: React.ReactNode }> = ({
   label,
   value,
@@ -169,6 +241,18 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
 
   const submit = (qapId: string) => {
     onNext(qapId, responses[qapId] || {});
+  };
+
+  const latestMetaForSno = (
+    comments: ThreadEntry[] | undefined,
+    sno: number
+  ) => {
+    if (!Array.isArray(comments)) return null;
+    for (let i = comments.length - 1; i >= 0; i--) {
+      const txt = comments[i]?.responses?.[sno];
+      if (txt) return { by: comments[i].by, at: comments[i].at, text: txt };
+    }
+    return null;
   };
 
   /* ───────────────────────── render ───────────────────────── */
@@ -339,15 +423,25 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
                                     <td className="p-2 border">
                                       {s.customerSpecification}
                                     </td>
-                                    <td className="p-2 border">
-                                      {prodComments[s.sno] || "—"}
+                                    <td className="p-2 border align-top">
+                                      <ThreadCell
+                                        comments={l2.production?.comments}
+                                        sno={s.sno}
+                                      />
                                     </td>
-                                    <td className="p-2 border">
-                                      {qualComments[s.sno] || "—"}
+                                    <td className="p-2 border align-top">
+                                      <ThreadCell
+                                        comments={l2.quality?.comments}
+                                        sno={s.sno}
+                                      />
                                     </td>
-                                    <td className="p-2 border">
-                                      {techComments[s.sno] || "—"}
+                                    <td className="p-2 border align-top">
+                                      <ThreadCell
+                                        comments={l2.technical?.comments}
+                                        sno={s.sno}
+                                      />
                                     </td>
+
                                     <td className="p-2 border">
                                       <Badge
                                         variant={
@@ -440,14 +534,23 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
                                     <td className="p-2 border">
                                       {s.customerSpecification}
                                     </td>
-                                    <td className="p-2 border">
-                                      {prodComments[s.sno] || "—"}
+                                    <td className="p-2 border align-top">
+                                      <ThreadCell
+                                        comments={l2.production?.comments}
+                                        sno={s.sno}
+                                      />
                                     </td>
-                                    <td className="p-2 border">
-                                      {qualComments[s.sno] || "—"}
+                                    <td className="p-2 border align-top">
+                                      <ThreadCell
+                                        comments={l2.quality?.comments}
+                                        sno={s.sno}
+                                      />
                                     </td>
-                                    <td className="p-2 border">
-                                      {techComments[s.sno] || "—"}
+                                    <td className="p-2 border align-top">
+                                      <ThreadCell
+                                        comments={l2.technical?.comments}
+                                        sno={s.sno}
+                                      />
                                     </td>
                                     <td className="p-2 border">
                                       <Badge

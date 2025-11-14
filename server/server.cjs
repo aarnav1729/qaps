@@ -510,8 +510,10 @@ function diffSpecs(oldArr = [], newArr = [], kind /* 'mqp' | 'visual' */) {
   const rowsChanged = [];
   const fields =
     kind === "mqp"
-      ? ["match", "customerSpecification", "reviewBy"]
-      : ["match", "customerSpecification", "reviewBy"];
+      ? // add 'specification' so MQP Premier Spec cells can highlight
+        ["match", "customerSpecification", "specification", "reviewBy"]
+      : // add 'criteriaLimits' so Visual 'Limits' cells can highlight
+        ["match", "customerSpecification", "criteriaLimits", "reviewBy"];
   for (const sno of new Set([...idxOld.keys(), ...idxNew.keys()])) {
     const deltas = diffRowFields(
       idxOld.get(sno) || {},
@@ -664,6 +666,145 @@ function coerceCommentsToThread(raw, fallbackBy, fallbackAt) {
   }
 }
 
+// CMD+F: NEST_RESPONSES_HELPER
+function nestResponses(rows = []) {
+  return rows.reduce((o, r) => {
+    o[r.level] = o[r.level] || {};
+    o[r.level][r.role] = {
+      username: r.username,
+      acknowledged: r.acknowledged === 1 || r.acknowledged === true,
+      comments: coerceCommentsToThread(r.comments, r.username, r.respondedAt),
+      respondedAt: r.respondedAt,
+    };
+    return o;
+  }, {});
+}
+
+// CMD+F: L2_FEED_HELPER
+function flattenLevel2Feed(rows = []) {
+  // a flat, UI-friendly feed of all Level-2 comment entries across roles
+  const out = [];
+  for (const r of rows) {
+    if (Number(r.level) !== 2) continue;
+    const thread = coerceCommentsToThread(
+      r.comments,
+      r.username,
+      r.respondedAt
+    );
+    for (const entry of thread) {
+      out.push({
+        role: r.role,
+        by: entry.by,
+        at: entry.at,
+        responses: entry.responses || {},
+      });
+    }
+  }
+  // sort by time, oldest first
+  out.sort((a, b) => new Date(a.at) - new Date(b.at));
+  return out;
+}
+
+// CMD+F: EDIT_CHANGES_HELPER
+function parseEditChanges(masterRow) {
+  try {
+    return JSON.parse(masterRow?.editChanges || "[]");
+  } catch {
+    return [];
+  }
+}
+
+// CMD+F: EDIT_SNOS_HELPER
+function deriveEditedSnos(editHistory /* from parseEditChanges(...) */) {
+  try {
+    const last =
+      Array.isArray(editHistory) && editHistory.length
+        ? editHistory[editHistory.length - 1]
+        : null;
+    const pickSnos = (arr) =>
+      Array.from(
+        new Set(
+          (Array.isArray(arr) ? arr : [])
+            .map((x) => Number(x?.sno))
+            .filter((n) => Number.isFinite(n))
+        )
+      );
+
+    return {
+      mqp: pickSnos(last?.mqp),
+      visual: pickSnos(last?.visual),
+    };
+  } catch {
+    return { mqp: [], visual: [] };
+  }
+}
+
+// CMD+F: QAP_BOM_EDIT_EVENT_HELPER
+async function appendBomEditAndReopenL2(qapId, by, bomDiff) {
+  // 1) Load current history
+  const r = await mssqlPool
+    .request()
+    .input("id", sql.UniqueIdentifier, qapId)
+    .query("SELECT editChanges FROM QAPs WHERE id=@id");
+  const history = (() => {
+    try {
+      return JSON.parse(r.recordset[0]?.editChanges || "[]");
+    } catch {
+      return [];
+    }
+  })();
+
+  // 2) Push a BOM-only edit event
+  history.push({
+    by: by || "system",
+    at: new Date().toISOString(),
+    header: [],
+    mqp: [],
+    visual: [],
+    bom: bomDiff || { changed: [], added: [], removed: [] },
+    scope: "reset-level-2",
+  });
+
+  // 3) Stamp edit fields
+  await mssqlPool
+    .request()
+    .input("id", sql.UniqueIdentifier, qapId)
+    .input("editedBy", sql.NVarChar, by || "system")
+    .input("editChanges", sql.NVarChar, JSON.stringify(history)).query(`
+      UPDATE QAPs
+      SET editedBy=@editedBy,
+          editedAt=SYSUTCDATETIME(),
+          lastModifiedAt=SYSUTCDATETIME(),
+          editChanges=@editChanges
+      WHERE id=@id
+    `);
+
+  // 4) Reset L2 acks and push back to Level-2
+  await mssqlPool
+    .request()
+    .input("id", sql.UniqueIdentifier, qapId)
+    .query(
+      `UPDATE LevelResponses SET acknowledged=0 WHERE qapId=@id AND level=2`
+    );
+
+  await mssqlPool.request().input("id", sql.UniqueIdentifier, qapId).query(`
+      UPDATE QAPs
+      SET status='level-2',
+          currentLevel=2,
+          lastModifiedAt=SYSUTCDATETIME()
+      WHERE id=@id
+    `);
+
+  await mssqlPool
+    .request()
+    .input("qapId", sql.UniqueIdentifier, qapId)
+    .input("user", sql.NVarChar, by || "system")
+    .input("ts", sql.DateTime2, new Date()).query(`
+      INSERT INTO TimelineEntries (qapId, level, action, [user], timestamp)
+      VALUES (@qapId, 2, 'BOM updated; reopened Level 2', @user, @ts)
+    `);
+}
+
 // ensure uploads directory exists
 const uploadDir = path.join(__dirname, "../uploads");
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
@@ -801,6 +942,64 @@ function buildDiff(before, after, fields) {
     if (norm(b) !== norm(a))
       out.push({ field: f, before: b ?? null, after: a ?? null });
   }
+  return out;
+}
+
+// CMD+F: BOM_DIFF_HELPER
+function computeBomDiff(prev, next) {
+  const out = { changed: [], added: [], removed: [] };
+  try {
+    const a = prev || {};
+    const b = next || {};
+
+    // Track a few top-level fields (prefix with __ to mark non-component)
+    const topFields = [
+      "vendorName",
+      "rfidLocation",
+      "technologyProposed",
+      "vendorAddress",
+      "documentRef",
+      "moduleWattageWp",
+      "moduleDimensionsOption",
+      "moduleModelNumber",
+    ];
+    for (const f of topFields) {
+      if (JSON.stringify(a[f]) !== JSON.stringify(b[f])) {
+        out.changed.push({
+          component: `__${f}`,
+          before: a[f] ?? null,
+          after: b[f] ?? null,
+        });
+      }
+    }
+
+    const ai = new Map((a.components || []).map((c) => [c.name, c]));
+    const bi = new Map((b.components || []).map((c) => [c.name, c]));
+
+    // Added components
+    for (const name of bi.keys()) {
+      if (!ai.has(name))
+        out.added.push({ component: name, after: bi.get(name) });
+    }
+    // Removed components
+    for (const name of ai.keys()) {
+      if (!bi.has(name))
+        out.removed.push({ component: name, before: ai.get(name) });
+    }
+    // Changed component rows
+    for (const name of bi.keys()) {
+      if (!ai.has(name)) continue;
+      const ar = JSON.stringify(ai.get(name).rows || []);
+      const br = JSON.stringify(bi.get(name).rows || []);
+      if (ar !== br) {
+        out.changed.push({
+          component: name,
+          before: JSON.parse(ar),
+          after: JSON.parse(br),
+        });
+      }
+    }
+  } catch {}
   return out;
 }
 
@@ -1229,43 +1428,72 @@ app.get("/api/qaps", authenticateToken, async (req, res) => {
     const respMap = groupBy(allResp, (r) => r.qapId);
 
     // 5) assemble final result (embed salesRequest)
-    const result = masters.map((m) => ({
-      ...m,
+    // 5) assemble final result (embed salesRequest)
+    const result = masters.map((m) => {
+      const editCommentsParsed = parseEditChanges(m);
+      const editedSnos = deriveEditedSnos(editCommentsParsed);
+      const editedBomComponents = (() => {
+        const evts = Array.isArray(editCommentsParsed)
+          ? editCommentsParsed
+          : [];
+        const last = evts.length ? evts[evts.length - 1] : null;
+        if (!last || !last.bom) return [];
+        const { changed = [], added = [], removed = [] } = last.bom || {};
+        return Array.from(
+          new Set(
+            [...changed, ...added, ...removed]
+              .map((x) => x && x.component)
+              .filter(Boolean)
+          )
+        );
+      })();
 
-      // ── nest specs ──────────────────────────────────────────────
-      specs: {
-        mqp: mqpMap[m.id] || [],
-        visual: visMap[m.id] || [],
-      },
+      return {
+        ...m,
 
-      // ── level-responses as level → role → details ───────────────
-      levelResponses: (respMap[m.id] || []).reduce((o, r) => {
-        o[r.level] = o[r.level] || {};
-        o[r.level][r.role] = {
-          username: r.username,
-          acknowledged: r.acknowledged === 1 || r.acknowledged === true,
-          comments: coerceCommentsToThread(
-            r.comments,
-            r.username,
-            r.respondedAt
-          ),
-          respondedAt: r.respondedAt,
-        };
-        return o;
-      }, {}),
+        // ── nest specs ──────────────────────────────────────────────
+        specs: {
+          mqp: mqpMap[m.id] || [],
+          visual: visMap[m.id] || [],
+        },
 
-      // ── convenience: parsed per-item final comments ─────────────
-      finalCommentsPerItem:
-        m.finalComments && m.finalComments.trim().startsWith("{")
-          ? JSON.parse(m.finalComments)
-          : {},
+        // ── level-responses as level → role → details ───────────────
+        levelResponses: (respMap[m.id] || []).reduce((o, r) => {
+          o[r.level] = o[r.level] || {};
+          o[r.level][r.role] = {
+            username: r.username,
+            acknowledged: r.acknowledged === 1 || r.acknowledged === true,
+            comments: coerceCommentsToThread(
+              r.comments,
+              r.username,
+              r.respondedAt
+            ),
+            respondedAt: r.respondedAt,
+          };
+          return o;
+        }, {}),
 
-      // ── new: embed the linked Sales Request (if any) ────────────
-      salesRequest:
-        m.salesRequestId && srById[m.salesRequestId]
-          ? srById[m.salesRequestId]
-          : undefined,
-    }));
+        // ── convenience: parsed per-item final comments ─────────────
+        finalCommentsPerItem:
+          m.finalComments && m.finalComments.trim().startsWith("{")
+            ? JSON.parse(m.finalComments)
+            : {},
+
+        // ── expose edit history + latest deltas to FE ───────────────
+        editCommentsParsed,
+        editedSnos,
+        editedBomComponents,
+
+        // (optional) a flat L2 feed for parity with /api/qaps/:id and /for-review
+        level2CommentFeed: flattenLevel2Feed(respMap[m.id] || []),
+
+        // ── embed the linked Sales Request (if any) ─────────────────
+        salesRequest:
+          m.salesRequestId && srById[m.salesRequestId]
+            ? srById[m.salesRequestId]
+            : undefined,
+      };
+    });
 
     res.json(result);
   } catch (err) {
@@ -1398,23 +1626,33 @@ app.get("/api/qaps/for-review", authenticateToken, async (req, res) => {
     const respMap = groupBy(allResp, "qapId");
 
     // 6) Assemble + filter out any QAP with NO unmatched items for this role
+    // CMD+F: FOR_REVIEW_L3_VISIBILITY — expose L2 comments + edit changes to Level-3 list
     const reviewable = masters
       .map((m) => {
         const specs = [...(mqpMap[m.id] || []), ...(visMap[m.id] || [])];
-        const lrsp = (respMap[m.id] || []).reduce((o, r) => {
-          o[r.level] = o[r.level] || {};
-          o[r.level][r.role] = {
-            username: r.username,
-            acknowledged: !!r.acknowledged,
-            comments: coerceCommentsToThread(
-              r.comments,
-              r.username,
-              r.respondedAt
-            ),
-            respondedAt: r.respondedAt,
-          };
-          return o;
-        }, {});
+
+        const rawResp = respMap[m.id] || [];
+        const levelResponsesNested = nestResponses(rawResp);
+        const level2CommentFeed = flattenLevel2Feed(rawResp);
+        const editCommentsParsed = parseEditChanges(m);
+        // CMD+F: INCLUDE_EDIT_SNOS_CONST_FOR_REVIEW
+        const editedSnos = deriveEditedSnos(editCommentsParsed);
+        // NEW: list of BOM component names touched in the latest edit event
+        const editedBomComponents = (() => {
+          const evts = Array.isArray(editCommentsParsed)
+            ? editCommentsParsed
+            : [];
+          const last = evts.length ? evts[evts.length - 1] : null;
+          if (!last || !last.bom) return [];
+          const { changed = [], added = [], removed = [] } = last.bom || {};
+          return Array.from(
+            new Set(
+              [...changed, ...added, ...removed]
+                .map((x) => x && x.component)
+                .filter(Boolean)
+            )
+          );
+        })();
 
         return {
           ...m,
@@ -1422,7 +1660,10 @@ app.get("/api/qaps/for-review", authenticateToken, async (req, res) => {
             mqp: mqpMap[m.id] || [],
             visual: visMap[m.id] || [],
           },
-          levelResponses: lrsp,
+          levelResponses: levelResponsesNested,
+          level2CommentFeed,
+          editCommentsParsed,
+          editedSnos,
           // embed SR for the UI BOM tab
           salesRequest:
             m.salesRequestId && srById[m.salesRequestId]
@@ -1550,11 +1791,44 @@ app.get(
         }
       }
 
-      res.json({
+      // CMD+F: SHOW_L2_COMMENTS_TO_L3
+      const levelResponsesNested = nestResponses(resp || []);
+      const level2CommentFeed = flattenLevel2Feed(resp || []);
+      const editCommentsParsed = parseEditChanges(master);
+      const editedSnos = deriveEditedSnos(editCommentsParsed);
+      const editedBomComponents = (() => {
+        const evts = Array.isArray(editCommentsParsed)
+          ? editCommentsParsed
+          : [];
+        const last = evts.length ? evts[evts.length - 1] : null;
+        if (!last || !last.bom) return [];
+        const { changed = [], added = [], removed = [] } = last.bom || {};
+        return Array.from(
+          new Set(
+            [...changed, ...added, ...removed]
+              .map((x) => x && x.component)
+              .filter(Boolean)
+          )
+        );
+      })();
+      return res.json({
         ...master,
         specs: { mqp, visual },
-        levelResponses: resp,
+        // parsed & nested for consistent UI usage
+        levelResponses: levelResponsesNested,
+        // CMD+F: L2_COMMENT_FEED_FOR_L3 — a flat feed for Level-3 UI
+        level2CommentFeed,
+        // CMD+F: EDIT_COMMENTS_FOR_L3 — parsed edit history for Level-3 UI
+        editCommentsParsed,
+        editedSnos,
+        editedBomComponents,
+        // keep timeline
         timeline: tl,
+        // convenience: parsed per-item final comments (for parity with /api/qaps)
+        finalCommentsPerItem:
+          master.finalComments && master.finalComments.trim().startsWith("{")
+            ? JSON.parse(master.finalComments)
+            : {},
         salesRequest: embeddedSalesRequest,
       });
     } catch (e) {
@@ -1746,12 +2020,42 @@ app.put(
         }
       })();
 
+      // Load current specs BEFORE overwriting them
+      const oldMqp = (
+        await mssqlPool
+          .request()
+          .input("id", sql.UniqueIdentifier, id)
+          .query(
+            "SELECT sno, specification, [match], customerSpecification, reviewBy FROM MQPSpecs WHERE qapId=@id"
+          )
+      ).recordset;
+      const oldVis = (
+        await mssqlPool
+          .request()
+          .input("id", sql.UniqueIdentifier, id)
+          .query(
+            "SELECT sno, criteriaLimits, [match], customerSpecification, reviewBy FROM VisualSpecs WHERE qapId=@id"
+          )
+      ).recordset;
+
+      const computedDiff = {
+        header: diffHeader(masterRow, req.body),
+        mqp: specs?.mqp ? diffSpecs(oldMqp, specs.mqp, "mqp") : [],
+        visual: specs?.visual ? diffSpecs(oldVis, specs.visual, "visual") : [],
+      };
+
+      const hasClientMeta =
+        editMeta &&
+        ((Array.isArray(editMeta.header) && editMeta.header.length) ||
+          (Array.isArray(editMeta.mqp) && editMeta.mqp.length) ||
+          (Array.isArray(editMeta.visual) && editMeta.visual.length));
+
       const editEvent = {
         by: req.user?.username || "unknown",
         at: new Date().toISOString(),
-        header: (editMeta && editMeta.header) || [],
-        mqp: (editMeta && editMeta.mqp) || [],
-        visual: (editMeta && editMeta.visual) || [],
+        header: hasClientMeta ? editMeta.header || [] : computedDiff.header,
+        mqp: hasClientMeta ? editMeta.mqp || [] : computedDiff.mqp,
+        visual: hasClientMeta ? editMeta.visual || [] : computedDiff.visual,
         bom: (editMeta && editMeta.bom) || {
           changed: [],
           added: [],
@@ -1936,11 +2240,14 @@ app.put(
         hasAnyEditMeta ||
         specsWereReplaced
       ) {
-        // 1) Clear all Level 2 responses so every department must respond again
+        // 1) Reset (do NOT delete) Level 2 responses so every department must respond again,
+        //    preserving existing comment threads for Level-3 visibility
         await mssqlPool
           .request()
           .input("id", sql.UniqueIdentifier, id)
-          .query(`DELETE FROM LevelResponses WHERE qapId=@id AND level=2`);
+          .query(
+            `UPDATE LevelResponses SET acknowledged=0 WHERE qapId=@id AND level=2`
+          );
 
         // 2) Push the QAP back to Level 2
         await mssqlPool.request().input("id", sql.UniqueIdentifier, id).query(`
@@ -3214,6 +3521,25 @@ app.put(
         VALUES (@sid, 'update', @by, @chg);
       `);
 
+      // If BOM changed, propagate a BOM edit event into the linked QAP(s)
+      if (diff.some((d) => d.field === "bom")) {
+        const beforeBom = before.bom ?? null;
+        const afterBom = after.bom ?? null;
+        const bomDiff = computeBomDiff(beforeBom, afterBom); // uses BOM_DIFF_HELPER
+
+        // find QAPs referencing this SalesRequest
+        const qaps = (
+          await mssqlPool
+            .request()
+            .input("sid", sql.UniqueIdentifier, id)
+            .query("SELECT id FROM QAPs WHERE salesRequestId=@sid")
+        ).recordset;
+
+        for (const row of qaps) {
+          await appendBomEditAndReopenL2(row.id, req.user.username, bomDiff); // QAP_BOM_EDIT_EVENT_HELPER
+        }
+      }
+
       res.json(after);
     } catch (e) {
       console.error("PUT /api/sales-requests/:id error:", e);
@@ -3252,6 +3578,28 @@ app.patch(
       if (!sets.length) {
         // nothing to update
         const inflated = inflateSalesRequestRow(beforeRow, {});
+        // If BOM was patched, push BOM diff into linked QAP(s) and reopen L2
+        if (typeof bom !== "undefined") {
+          const beforeBom = safeParseJson(beforeRow.bom, null);
+          const afterBom = row.bom ? JSON.parse(row.bom) : null;
+          const bomDiff = computeBomDiff(beforeBom, afterBom);
+
+          const qaps = (
+            await mssqlPool
+              .request()
+              .input("sid", sql.UniqueIdentifier, id)
+              .query("SELECT id FROM QAPs WHERE salesRequestId=@sid")
+          ).recordset;
+
+          for (const q of qaps) {
+            await appendBomEditAndReopenL2(
+              q.id,
+              req.user?.username || "system",
+              bomDiff
+            );
+          }
+        }
+
         return res.json(inflated);
       }
 

@@ -69,6 +69,97 @@ type SalesRequestLite = {
   } | null;
 };
 
+// ── Thread helpers (robust to multiple shapes) ───────────────────────────────
+type ThreadEntry = {
+  by: string;
+  at: string;
+  responses: Record<number, string>;
+};
+type ThreadBubble = { by: string; at: string; text: string };
+
+// Accept arrays, a single entry, or a legacy per-sno map with mixed values.
+type CommentPayload =
+  | ThreadEntry[]
+  | ThreadEntry
+  | Record<number, unknown>
+  | undefined;
+
+const isThreadEntry = (v: any): v is ThreadEntry =>
+  !!v && typeof v === "object" && "by" in v && "at" in v && "responses" in v;
+
+const toText = (v: any): string => {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "object") {
+    // If the value itself looks like { text: "..." }, use it.
+    if ("text" in v && typeof (v as any).text === "string")
+      return (v as any).text;
+    // Last resort: stringify so React never sees a raw object.
+    try {
+      return JSON.stringify(v);
+    } catch {
+      return String(v);
+    }
+  }
+  return String(v);
+};
+
+const normalizeToEntries = (comments: CommentPayload): ThreadEntry[] => {
+  if (!comments) return [];
+  if (Array.isArray(comments)) return comments.filter(isThreadEntry);
+  if (isThreadEntry(comments)) return [comments];
+
+  // Legacy map: build a synthetic entry whose responses are the map values.
+  const rec = comments as Record<number, unknown>;
+  return [
+    {
+      by: "unknown",
+      at: new Date().toISOString(),
+      responses: Object.fromEntries(
+        Object.entries(rec).map(([k, v]) => [Number(k), toText(v)])
+      ),
+    },
+  ];
+};
+
+const threadForSno = (
+  comments: CommentPayload,
+  sno: number
+): ThreadBubble[] => {
+  const arr = normalizeToEntries(comments);
+  return arr
+    .map((e) => ({
+      by: e.by,
+      at: e.at,
+      text: toText((e.responses as any)?.[sno]),
+    }))
+    .filter((e) => e.text.trim().length > 0)
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()); // newest first
+};
+
+const ThreadCell: React.FC<{ comments: CommentPayload; sno: number }> = ({
+  comments,
+  sno,
+}) => {
+  const entries = threadForSno(comments, sno);
+  if (!entries.length) return <span>—</span>;
+  return (
+    <div className="min-w-0 w-full space-y-1 max-h-28 overflow-y-auto overflow-x-hidden pr-1">
+      {entries.map((e, i) => (
+        <div key={i} className="rounded-md border bg-white/60 p-1">
+          <div className="flex items-center justify-between gap-2 text-[10px] text-gray-500">
+            <span className="font-medium truncate">{e.by}</span>
+            <time className="shrink-0">{new Date(e.at).toLocaleString()}</time>
+          </div>
+          <div className="text-xs whitespace-pre-wrap break-words">
+            {e.text}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const FieldRow: React.FC<{ label: string; value: React.ReactNode }> = ({
   label,
   value,
@@ -636,39 +727,57 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
                                     <td className="p-2 border">
                                       {s.customerSpecification}
                                     </td>
-                                    <td className="p-2 border">
-                                      {prodL2[s.sno] || "—"}
+                                    <td className="p-2 border align-top">
+                                      <ThreadCell
+                                        comments={prodL2}
+                                        sno={s.sno}
+                                      />
                                     </td>
-                                    <td className="p-2 border">
-                                      {qualL2[s.sno] || "—"}
+                                    <td className="p-2 border align-top">
+                                      <ThreadCell
+                                        comments={qualL2}
+                                        sno={s.sno}
+                                      />
                                     </td>
-                                    <td className="p-2 border">
-                                      {techL2[s.sno] || "—"}
+                                    <td className="p-2 border align-top">
+                                      <ThreadCell
+                                        comments={techL2}
+                                        sno={s.sno}
+                                      />
                                     </td>
+
                                     {l3FirstKeys.map((k) => (
                                       <td
                                         key={`mqp-l3-${k}-${s.sno}`}
-                                        className="p-2 border"
+                                        className="p-2 border align-top"
                                       >
-                                        {l3[k]?.comments?.[s.sno] || "—"}
+                                        <ThreadCell
+                                          comments={l3[k]?.comments as any}
+                                          sno={s.sno}
+                                        />
                                       </td>
                                     ))}
 
-                                    {/* Final (post-final only) */}
                                     {isPostFinal && (
-                                      <td className="p-2 border">
-                                        {finalPerItem[s.sno] ?? finalAll ?? "—"}
+                                      <td className="p-2 border align-top">
+                                        <div className="text-xs whitespace-pre-wrap break-words">
+                                          {finalPerItem[s.sno] ??
+                                            finalAll ??
+                                            "—"}
+                                        </div>
                                       </td>
                                     )}
 
-                                    {/* L3b (post-final only) */}
                                     {isPostFinal &&
                                       l3bKeys.map((k) => (
                                         <td
                                           key={`mqp-l3b-${k}-${s.sno}`}
-                                          className="p-2 border"
+                                          className="p-2 border align-top"
                                         >
-                                          {l3[k]?.comments?.[s.sno] || "—"}
+                                          <ThreadCell
+                                            comments={l3[k]?.comments as any}
+                                            sno={s.sno}
+                                          />
                                         </td>
                                       ))}
 
@@ -786,40 +895,57 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
                                     <td className="p-2 border">
                                       {s.customerSpecification}
                                     </td>
-                                    <td className="p-2 border">
-                                      {prodL2[s.sno] || "—"}
+                                    <td className="p-2 border align-top">
+                                      <ThreadCell
+                                        comments={prodL2}
+                                        sno={s.sno}
+                                      />
                                     </td>
-                                    <td className="p-2 border">
-                                      {qualL2[s.sno] || "—"}
+                                    <td className="p-2 border align-top">
+                                      <ThreadCell
+                                        comments={qualL2}
+                                        sno={s.sno}
+                                      />
                                     </td>
-                                    <td className="p-2 border">
-                                      {techL2[s.sno] || "—"}
+                                    <td className="p-2 border align-top">
+                                      <ThreadCell
+                                        comments={techL2}
+                                        sno={s.sno}
+                                      />
                                     </td>
-                                    {/* L3 (first pass) */}
+
                                     {l3FirstKeys.map((k) => (
                                       <td
                                         key={`vis-l3-${k}-${s.sno}`}
-                                        className="p-2 border"
+                                        className="p-2 border align-top"
                                       >
-                                        {l3[k]?.comments?.[s.sno] || "—"}
+                                        <ThreadCell
+                                          comments={l3[k]?.comments as any}
+                                          sno={s.sno}
+                                        />
                                       </td>
                                     ))}
 
-                                    {/* Final (post-final only) */}
                                     {isPostFinal && (
-                                      <td className="p-2 border">
-                                        {finalPerItem[s.sno] ?? finalAll ?? "—"}
+                                      <td className="p-2 border align-top">
+                                        <div className="text-xs whitespace-pre-wrap break-words">
+                                          {finalPerItem[s.sno] ??
+                                            finalAll ??
+                                            "—"}
+                                        </div>
                                       </td>
                                     )}
 
-                                    {/* L3b (post-final only) */}
                                     {isPostFinal &&
                                       l3bKeys.map((k) => (
                                         <td
                                           key={`vis-l3b-${k}-${s.sno}`}
-                                          className="p-2 border"
+                                          className="p-2 border align-top"
                                         >
-                                          {l3[k]?.comments?.[s.sno] || "—"}
+                                          <ThreadCell
+                                            comments={l3[k]?.comments as any}
+                                            sno={s.sno}
+                                          />
                                         </td>
                                       ))}
 

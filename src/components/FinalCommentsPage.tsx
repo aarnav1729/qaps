@@ -86,6 +86,96 @@ const FieldRow: React.FC<{ label: string; value: React.ReactNode }> = ({
   </div>
 );
 
+// ── Thread helpers (robust to multiple shapes) ───────────────────────────────
+type ThreadEntry = {
+  by: string;
+  at: string;
+  responses: Record<number, string>;
+};
+type ThreadBubble = { by: string; at: string; text: string };
+
+type CommentPayload =
+  | ThreadEntry[]
+  | ThreadEntry
+  | Record<number, unknown>
+  | undefined;
+
+const isThreadEntry = (v: any): v is ThreadEntry =>
+  !!v && typeof v === "object" && "by" in v && "at" in v && "responses" in v;
+
+const toText = (v: any): string => {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "object") {
+    if ("text" in v && typeof (v as any).text === "string")
+      return (v as any).text;
+    try {
+      return JSON.stringify(v);
+    } catch {
+      return String(v);
+    }
+  }
+  return String(v);
+};
+
+const normalizeToEntries = (comments: CommentPayload): ThreadEntry[] => {
+  if (!comments) return [];
+  if (Array.isArray(comments)) return comments.filter(isThreadEntry);
+  if (isThreadEntry(comments)) return [comments];
+
+  // Legacy map: { [sno]: string|obj } → wrap as a synthetic entry
+  const rec = comments as Record<number, unknown>;
+  return [
+    {
+      by: "unknown",
+      at: new Date().toISOString(),
+      responses: Object.fromEntries(
+        Object.entries(rec).map(([k, v]) => [Number(k), toText(v)])
+      ),
+    },
+  ];
+};
+
+const threadForSno = (
+  comments: CommentPayload,
+  sno: number
+): ThreadBubble[] => {
+  const arr = normalizeToEntries(comments);
+  return arr
+    .map((e) => ({
+      by: e.by,
+      at: e.at,
+      text: toText((e.responses as any)?.[sno]),
+    }))
+    .filter((e) => e.text.trim().length > 0)
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()); // newest first
+};
+
+const ThreadCell: React.FC<{ comments: CommentPayload; sno: number }> = ({
+  comments,
+  sno,
+}) => {
+  const entries = threadForSno(comments, sno);
+  if (!entries.length) return <span>—</span>;
+  return (
+    <div className="min-w-0 w-full space-y-1 max-h-28 overflow-y-auto overflow-x-hidden pr-1">
+      {entries.map((e, i) => (
+        <div key={i} className="rounded-md border bg-white/60 p-1">
+          <div className="flex items-center justify-between gap-2 text-[10px] text-gray-500">
+            <span className="font-medium truncate">{e.by}</span>
+            <time className="shrink-0">{new Date(e.at).toLocaleString()}</time>
+          </div>
+          <div className="text-xs whitespace-pre-wrap break-words">
+            {e.text}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const roleLabel = (k: string) => k.replace(/-2$/, "");
+
 /* ─────────────────────────────────────────────── */
 /* props                                           */
 /* ─────────────────────────────────────────────── */
@@ -347,7 +437,7 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                                     key={`mqp-l3-h-${r}`}
                                     className="p-2 border capitalize"
                                   >
-                                    {r} L3
+                                    {roleLabel(r)} L3
                                   </th>
                                 ))}
                                 {l4Roles.map((r) => (
@@ -355,7 +445,7 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                                     key={`mqp-l4-h-${r}`}
                                     className="p-2 border capitalize"
                                   >
-                                    {r} L4
+                                    {roleLabel(r)} L4
                                   </th>
                                 ))}
                                 <th className="p-2 border">Final Comment</th>
@@ -384,31 +474,51 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                                     <td className="p-2 border">
                                       {s.customerSpecification}
                                     </td>
-                                    <td className="p-2 border">
-                                      {L2.production?.comments?.[s.sno] || "—"}
+                                    <td className="p-2 border align-top">
+                                      <ThreadCell
+                                        comments={
+                                          L2.production?.comments as any
+                                        }
+                                        sno={s.sno}
+                                      />
                                     </td>
-                                    <td className="p-2 border">
-                                      {L2.quality?.comments?.[s.sno] || "—"}
+                                    <td className="p-2 border align-top">
+                                      <ThreadCell
+                                        comments={L2.quality?.comments as any}
+                                        sno={s.sno}
+                                      />
                                     </td>
-                                    <td className="p-2 border">
-                                      {L2.technical?.comments?.[s.sno] || "—"}
+                                    <td className="p-2 border align-top">
+                                      <ThreadCell
+                                        comments={L2.technical?.comments as any}
+                                        sno={s.sno}
+                                      />
                                     </td>
+
                                     {l3Roles.map((r) => (
                                       <td
                                         key={`mqp-l3-${r}-${s.sno}`}
-                                        className="p-2 border"
+                                        className="p-2 border align-top"
                                       >
-                                        {L3[r]?.comments?.[s.sno] || "—"}
+                                        <ThreadCell
+                                          comments={L3[r]?.comments as any}
+                                          sno={s.sno}
+                                        />
                                       </td>
                                     ))}
+
                                     {l4Roles.map((r) => (
                                       <td
                                         key={`mqp-l4-${r}-${s.sno}`}
-                                        className="p-2 border"
+                                        className="p-2 border align-top"
                                       >
-                                        {L4[r]?.comments?.[s.sno] || "—"}
+                                        <ThreadCell
+                                          comments={L4[r]?.comments as any}
+                                          sno={s.sno}
+                                        />
                                       </td>
                                     ))}
+
                                     <td className="p-2 border">
                                       <Textarea
                                         value={comments[qap.id]?.[s.sno] || ""}
@@ -446,18 +556,18 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                                 <th className="p-2 border">Tech L2</th>
                                 {l3Roles.map((r) => (
                                   <th
-                                    key={`vis-l3-h-${r}`}
+                                    key={`mqp-l3-h-${r}`}
                                     className="p-2 border capitalize"
                                   >
-                                    {r} L3
+                                    {roleLabel(r)} L3
                                   </th>
                                 ))}
                                 {l4Roles.map((r) => (
                                   <th
-                                    key={`vis-l4-h-${r}`}
+                                    key={`mqp-l4-h-${r}`}
                                     className="p-2 border capitalize"
                                   >
-                                    {r} L4
+                                    {roleLabel(r)} L4
                                   </th>
                                 ))}
                                 <th className="p-2 border">Final Comment</th>
@@ -488,31 +598,51 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                                     <td className="p-2 border">
                                       {s.customerSpecification}
                                     </td>
-                                    <td className="p-2 border">
-                                      {L2.production?.comments?.[s.sno] || "—"}
+                                    <td className="p-2 border align-top">
+                                      <ThreadCell
+                                        comments={
+                                          L2.production?.comments as any
+                                        }
+                                        sno={s.sno}
+                                      />
                                     </td>
-                                    <td className="p-2 border">
-                                      {L2.quality?.comments?.[s.sno] || "—"}
+                                    <td className="p-2 border align-top">
+                                      <ThreadCell
+                                        comments={L2.quality?.comments as any}
+                                        sno={s.sno}
+                                      />
                                     </td>
-                                    <td className="p-2 border">
-                                      {L2.technical?.comments?.[s.sno] || "—"}
+                                    <td className="p-2 border align-top">
+                                      <ThreadCell
+                                        comments={L2.technical?.comments as any}
+                                        sno={s.sno}
+                                      />
                                     </td>
+
                                     {l3Roles.map((r) => (
                                       <td
                                         key={`vis-l3-${r}-${s.sno}`}
-                                        className="p-2 border"
+                                        className="p-2 border align-top"
                                       >
-                                        {L3[r]?.comments?.[s.sno] || "—"}
+                                        <ThreadCell
+                                          comments={L3[r]?.comments as any}
+                                          sno={s.sno}
+                                        />
                                       </td>
                                     ))}
+
                                     {l4Roles.map((r) => (
                                       <td
                                         key={`vis-l4-${r}-${s.sno}`}
-                                        className="p-2 border"
+                                        className="p-2 border align-top"
                                       >
-                                        {L4[r]?.comments?.[s.sno] || "—"}
+                                        <ThreadCell
+                                          comments={L4[r]?.comments as any}
+                                          sno={s.sno}
+                                        />
                                       </td>
                                     ))}
+
                                     <td className="p-2 border">
                                       <Textarea
                                         value={comments[qap.id]?.[s.sno] || ""}

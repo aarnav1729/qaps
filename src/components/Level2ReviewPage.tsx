@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { isEdited } from "@/lib/edited"; // or "./edited" depending on your path
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -127,9 +128,10 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
   const [responses, setResponses] = useState<
     Record<string, Record<number, string>>
   >({});
-  const [rowFilter, setRowFilter] = useState<"all" | "matched" | "unmatched">(
-    "all"
-  );
+  const [rowFilter, setRowFilter] = useState<
+    "all" | "matched" | "unmatched" | "edited"
+  >("all");
+
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   /* ───────────────────── derive reviewable ───────────────────── */
@@ -222,7 +224,7 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
   };
 
   const renderChangeSummary = (qapLocal: any) => {
-    const em = qapLocal?.editMeta as any;
+    const em = latestEditEvent(qapLocal) as any;
     if (!em) return null;
     return (
       <details className="mb-4 rounded border border-yellow-300 bg-yellow-50 p-3 text-sm">
@@ -384,6 +386,134 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
   };
   // <<< CHANGE_SUMMARY_HELPERS
 
+  // >>> L2_EDIT_HL_HELPERS (ADD)
+  type EditRowDelta = {
+    field?: string;
+    key?: string;
+    name?: string;
+    before?: any;
+    after?: any;
+  };
+  type EditRow = { sno: number; deltas?: EditRowDelta[] };
+  type EditEvent = {
+    by?: string;
+    at?: string;
+    header?: any[];
+    mqp?: EditRow[];
+    visual?: EditRow[];
+    bom?: { changed?: any[]; added?: any[]; removed?: any[] };
+    scope?: string;
+  };
+
+  const _pickField = (d: any) =>
+    (d?.field || d?.key || d?.name || "").toString().trim();
+
+  /**
+   * Return the edit history as an array of events (oldest → newest).
+   * Accepts:
+   *  - qap.editMeta (object OR array)
+   *  - qap.editCommentsParsed (array)
+   */
+  const getEditHistory = (qapLocal: any): EditEvent[] => {
+    const out: EditEvent[] = [];
+
+    // FE-provided meta (object or array)
+    const em = qapLocal?.editMeta;
+    if (Array.isArray(em)) {
+      for (const e of em) out.push(e as EditEvent);
+    } else if (em && typeof em === "object") {
+      out.push(em as EditEvent);
+    }
+
+    // BE-parsed history (authoritative)
+    const hist = qapLocal?.editCommentsParsed;
+    if (Array.isArray(hist) && hist.length) {
+      // append in order (assume already oldest → newest)
+      for (const e of hist) out.push(e as EditEvent);
+    }
+
+    return out;
+  };
+
+  /**
+   * We want the **latest** event that actually has row-level deltas
+   * (mqp/visual) so cells can be highlighted. If the very last event only
+   * touched headers (no table deltas), look backward for the most recent
+   * event that has mqp/visual deltas.
+   */
+  const latestEditEvent = (qapLocal: any): EditEvent | null => {
+    const history = getEditHistory(qapLocal);
+    if (!history.length) return null;
+
+    // iterate from newest → oldest to find one with any row deltas
+    for (let i = history.length - 1; i >= 0; i--) {
+      const e = history[i] as EditEvent;
+      const hasMq =
+        Array.isArray(e.mqp) &&
+        e.mqp.some((r) => Array.isArray(r.deltas) && r.deltas.length > 0);
+      const hasVi =
+        Array.isArray(e.visual) &&
+        e.visual.some((r) => Array.isArray(r.deltas) && r.deltas.length > 0);
+      if (hasMq || hasVi) return e;
+    }
+
+    // nothing with row deltas; return the newest event (likely header-only)
+    return history[history.length - 1] as EditEvent;
+  };
+
+  /**
+   * Build maps of { sno -> set(fieldsChanged) } for MQP & Visual using the
+   * chosen latest event. Also normalize field names (e.g. 'limits' vs 'criteriaLimits').
+   */
+  const buildEditedIndex = (qapLocal: any) => {
+    const ev = latestEditEvent(qapLocal);
+    const mqp = new Map<number, Set<string>>();
+    const visual = new Map<number, Set<string>>();
+
+    const push = (idx: Map<number, Set<string>>, sno: number, raw: string) => {
+      const set = idx.get(sno) || new Set<string>();
+      // normalize common synonyms
+      const f = raw.trim();
+      const norm =
+        f === "limits"
+          ? "criteriaLimits"
+          : f === "premierSpec"
+          ? "specification"
+          : f;
+      set.add(norm);
+      idx.set(sno, set);
+    };
+
+    if (ev?.mqp) {
+      for (const row of ev.mqp) {
+        for (const d of row.deltas || [])
+          push(mqp, Number(row.sno), _pickField(d));
+      }
+    }
+    if (ev?.visual) {
+      for (const row of ev.visual) {
+        for (const d of row.deltas || [])
+          push(visual, Number(row.sno), _pickField(d));
+      }
+    }
+    return { mqp, visual };
+  };
+
+  const cellEdited = (
+    idx: Map<number, Set<string>>,
+    sno: number,
+    ...fields: string[]
+  ) => {
+    const set = idx.get(sno);
+    if (!set) return false;
+    return fields.some((f) => set.has(f));
+  };
+
+  // Slightly stronger visual for edited cells
+  const HL_CELL =
+    "bg-amber-50 border-amber-300 ring-1 ring-amber-300 shadow-inner transition-colors";
+  // <<< L2_EDIT_HL_HELPERS
+
   /* ───────────────────────── render ───────────────────────── */
   return (
     <div className="container mx-auto px-4 py-6">
@@ -408,6 +538,7 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
           <option value="all">All</option>
           <option value="matched">Matched (Green)</option>
           <option value="unmatched">Unmatched (Red)</option>
+          <option value="edited">Edited (since last submission)</option>
         </select>
         <span className="text-sm text-gray-600 ml-auto">
           Pending QAPs: {reviewable.length}
@@ -425,14 +556,26 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
           // but this keeps the intent explicit and future-proof):
           const respondDisabled = qap.currentLevel !== 2;
 
-          const specs = qap.allSpecs.filter((s) =>
-            rowFilter === "all"
-              ? true
-              : rowFilter === "matched"
-              ? s.match === "yes"
-              : s.match === "no"
-          );
+          // >>> L2_EDIT_INDEX (ADD)
+          const editedIndex = buildEditedIndex(qap);
+          // <<< L2_EDIT_INDEX
 
+          const specs = qap.allSpecs.filter((s) => {
+            if (rowFilter === "all") return true;
+            if (rowFilter === "matched") return s.match === "yes";
+            if (rowFilter === "unmatched") return s.match === "no";
+            if (rowFilter === "edited") {
+              // Pass if this S.No shows up in either MQP or Visual edit indices
+              // (also fall back to qap.editedSnos via isEdited helper)
+              return (
+                editedIndex.mqp.has(s.sno) ||
+                editedIndex.visual.has(s.sno) ||
+                isEdited("mqp", s.sno, qap.editedSnos) ||
+                isEdited("visual", s.sno, qap.editedSnos)
+              );
+            }
+            return true;
+          });
           const isOpen = expanded[qap.id] || false;
 
           // Try to pluck a linked Sales Request (optional)
@@ -510,6 +653,17 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                     {renderChangeSummary(qap)}
                     {/* <<< CHANGE_SUMMARY_PANEL */}
 
+                    {/* >>> L2_EDIT_LEGEND (ADD) */}
+                    {(editedIndex.mqp.size || editedIndex.visual.size) && (
+                      <div className="mb-3 text-xs text-gray-600">
+                        <span className="inline-block h-3 w-3 rounded-sm align-middle mr-2 bg-amber-300 border border-amber-500"></span>
+                        <span className="align-middle">
+                          Edited since last submission
+                        </span>
+                      </div>
+                    )}
+                    {/* <<< L2_EDIT_LEGEND */}
+
                     <Tabs defaultValue="mqp">
                       <TabsList className="mb-4">
                         <TabsTrigger value="mqp">
@@ -546,20 +700,66 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                                       s.match === "yes"
                                         ? "bg-green-50"
                                         : "bg-red-50"
+                                    } ${
+                                      isEdited("mqp", s.sno, qap.editedSnos)
+                                        ? "ring-1 ring-amber-300"
+                                        : ""
                                     }`}
                                   >
-                                    <td className="p-2 border">{s.sno}</td>
+                                    <td className="p-2 border">
+                                      {s.sno}
+                                      {editedIndex.mqp.has(s.sno) && (
+                                        <Badge
+                                          variant="outline"
+                                          className="ml-2 bg-amber-50 border-amber-300 text-amber-800"
+                                        >
+                                          Edited
+                                        </Badge>
+                                      )}
+                                    </td>
+
                                     <td className="p-2 border">{s.criteria}</td>
                                     <td className="p-2 border">
                                       {s.subCriteria}
                                     </td>
-                                    <td className="p-2 border">
+                                    <td
+                                      className={`p-2 border ${
+                                        cellEdited(
+                                          editedIndex.mqp,
+                                          s.sno,
+                                          "specification"
+                                        )
+                                          ? HL_CELL
+                                          : ""
+                                      }`}
+                                    >
                                       {s.specification}
                                     </td>
-                                    <td className="p-2 border">
+                                    <td
+                                      className={`p-2 border ${
+                                        cellEdited(
+                                          editedIndex.mqp,
+                                          s.sno,
+                                          "customerSpecification"
+                                        )
+                                          ? HL_CELL
+                                          : ""
+                                      }`}
+                                    >
                                       {s.customerSpecification}
                                     </td>
-                                    <td className="p-2 border">
+
+                                    <td
+                                      className={`p-2 border ${
+                                        cellEdited(
+                                          editedIndex.mqp,
+                                          s.sno,
+                                          "match"
+                                        )
+                                          ? HL_CELL
+                                          : ""
+                                      }`}
+                                    >
                                       <Badge
                                         variant={
                                           s.match === "yes"
@@ -570,6 +770,7 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                                         {s.match?.toUpperCase()}
                                       </Badge>
                                     </td>
+
                                     <td className="p-2 border">
                                       <Textarea
                                         value={responses[qap.id]?.[s.sno] || ""}
@@ -657,20 +858,68 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                                       s.match === "yes"
                                         ? "bg-green-50"
                                         : "bg-red-50"
+                                    } ${
+                                      qap?.editedSnos?.visual?.includes(s.sno)
+                                        ? "ring-1 ring-amber-300"
+                                        : ""
                                     }`}
                                   >
-                                    <td className="p-2 border">{s.sno}</td>
+                                    <td className="p-2 border">
+                                      {s.sno}
+                                      {editedIndex.visual.has(s.sno) && (
+                                        <Badge
+                                          variant="outline"
+                                          className="ml-2 bg-amber-50 border-amber-300 text-amber-800"
+                                        >
+                                          Edited
+                                        </Badge>
+                                      )}
+                                    </td>
+
                                     <td className="p-2 border">{s.criteria}</td>
                                     <td className="p-2 border">
                                       {s.subCriteria}
                                     </td>
-                                    <td className="p-2 border">
+                                    <td
+                                      className={`p-2 border ${
+                                        cellEdited(
+                                          editedIndex.visual,
+                                          s.sno,
+                                          "criteriaLimits",
+                                          "limits"
+                                        )
+                                          ? HL_CELL
+                                          : ""
+                                      }`}
+                                    >
                                       {s.criteriaLimits}
                                     </td>
-                                    <td className="p-2 border">
+
+                                    <td
+                                      className={`p-2 border ${
+                                        cellEdited(
+                                          editedIndex.visual,
+                                          s.sno,
+                                          "customerSpecification"
+                                        )
+                                          ? HL_CELL
+                                          : ""
+                                      }`}
+                                    >
                                       {s.customerSpecification}
                                     </td>
-                                    <td className="p-2 border">
+
+                                    <td
+                                      className={`p-2 border ${
+                                        cellEdited(
+                                          editedIndex.visual,
+                                          s.sno,
+                                          "match"
+                                        )
+                                          ? HL_CELL
+                                          : ""
+                                      }`}
+                                    >
                                       <Badge
                                         variant={
                                           s.match === "yes"
@@ -681,6 +930,7 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                                         {s.match?.toUpperCase()}
                                       </Badge>
                                     </td>
+
                                     <td className="p-2 border">
                                       <Textarea
                                         value={responses[qap.id]?.[s.sno] || ""}
