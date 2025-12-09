@@ -80,7 +80,6 @@ type ThreadEntry = {
 /* add under your ThreadEntry type */
 type ThreadBubble = { by: string; at: string; text: string };
 
-/** Normalize comments to a per-sno chronological thread (oldest → newest) */
 /** Normalize comments to a per-sno thread (newest → oldest) */
 const threadForSno = (
   comments: ThreadEntry[] | Record<number, string> | undefined,
@@ -98,7 +97,7 @@ const threadForSno = (
       text: e.responses?.[sno],
     }))
     .filter((e) => e.text && String(e.text).trim().length > 0)
-    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()); // ← newest first
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()); // newest first
 };
 
 /** Compact renderer for a comment thread inside a table cell */
@@ -116,7 +115,6 @@ const ThreadCell: React.FC<{
             <span className="font-medium truncate">{e.by}</span>
             <time className="shrink-0">{new Date(e.at).toLocaleString()}</time>
           </div>
-          {/* preserve newlines + wrap long words/URLs */}
           <div className="text-xs whitespace-pre-wrap break-words">
             {e.text}
           </div>
@@ -131,15 +129,13 @@ const latestForSno = (
   sno: number
 ) => {
   if (Array.isArray(comments)) {
-    // walk newest → oldest looking for a response for this sno
     for (let i = comments.length - 1; i >= 0; i--) {
       const txt = comments[i]?.responses?.[sno];
       if (txt) return txt;
     }
     return "—";
   }
-  // legacy shape
-  return comments?.[sno] ?? "—";
+  return (comments as any)?.[sno] ?? "—";
 };
 
 const FieldRow: React.FC<{ label: string; value: React.ReactNode }> = ({
@@ -179,9 +175,7 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
   const [responses, setResponses] = useState<{
     [qapId: string]: Record<number, string>;
   }>({});
-  const [acknowledged, setAcknowledged] = useState<{
-    [qapId: string]: Record<number, boolean>;
-  }>({});
+
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   /* ───────────────────── derive reviewable ───────────────────── */
@@ -220,15 +214,6 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
     setResponses((prev) => ({
       ...prev,
       [qapId]: { ...(prev[qapId] || {}), [sno]: text },
-    }));
-
-  const handleAcknowledge = (qapId: string, sno: number) =>
-    setAcknowledged((prev) => ({
-      ...prev,
-      [qapId]: {
-        ...(prev[qapId] || {}),
-        [sno]: !(prev[qapId]?.[sno] || false),
-      },
     }));
 
   const getTimeRemaining = (submittedAt?: string) => {
@@ -460,11 +445,9 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
     return fields.some((f) => set.has(f));
   };
 
-  // Same visual strength as Level2
   const HL_CELL =
     "bg-amber-50 border-amber-300 ring-1 ring-amber-300 shadow-inner transition-colors";
 
-  // ✅ minimal row-level detector (meta + legacy)
   const rowEdited = (
     scope: "mqp" | "visual",
     sno: number,
@@ -536,10 +519,6 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
             }
             return true;
           });
-
-          const allAck = Object.values(acknowledged[qap.id] || {}).every(
-            Boolean
-          );
 
           /* L2 comments */
           const l2 = qap.levelResponses?.[2] || {};
@@ -652,7 +631,6 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
                                 </th>
                                 <th className="p-2 border">Match</th>
                                 <th className="p-2 border">Your Comment</th>
-                                <th className="p-2 border">Ack</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -747,19 +725,6 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
                                           className="min-h-[3rem]"
                                         />
                                       </td>
-                                      <td className="p-2 border text-center">
-                                        <input
-                                          type="checkbox"
-                                          checked={
-                                            acknowledged[qap.id]?.[s.sno] ||
-                                            false
-                                          }
-                                          onChange={() =>
-                                            handleAcknowledge(qap.id, s.sno)
-                                          }
-                                          className="rounded"
-                                        />
-                                      </td>
                                     </tr>
                                   );
                                 })}
@@ -788,7 +753,6 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
                                 </th>
                                 <th className="p-2 border">Match</th>
                                 <th className="p-2 border">Your Comment</th>
-                                <th className="p-2 border">Ack</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -883,19 +847,6 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
                                           }
                                           placeholder="Comments…"
                                           className="min-h-[3rem]"
-                                        />
-                                      </td>
-                                      <td className="p-2 border text-center">
-                                        <input
-                                          type="checkbox"
-                                          checked={
-                                            acknowledged[qap.id]?.[s.sno] ||
-                                            false
-                                          }
-                                          onChange={() =>
-                                            handleAcknowledge(qap.id, s.sno)
-                                          }
-                                          className="rounded"
                                         />
                                       </td>
                                     </tr>
@@ -1199,7 +1150,6 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
                                                           )
                                                         : rowsWithIndex;
 
-                                                    // Hide whole component block if nothing edited and filter is active
                                                     if (
                                                       rowFilter === "edited" &&
                                                       filteredRows.length === 0
@@ -1261,13 +1211,12 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
                       <Button
                         onClick={() => submit(qap.id)}
                         disabled={
-                          !allAck ||
                           Object.keys(responses[qap.id] || {}).length === 0
                         }
                         className="bg-blue-600 hover:bg-blue-700"
                       >
                         <Send className="h-4 w-4 mr-2" />
-                        {allAck ? "Ready to Submit" : "Submit Review"}
+                        Submit Review
                       </Button>
                     </div>
                   </CardContent>

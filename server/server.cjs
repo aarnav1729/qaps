@@ -646,46 +646,197 @@ function mapSpecRow(r) {
 }
 
 // Turn whatever is in LevelResponses.comments into a normalized thread array
+// Turn whatever is in LevelResponses.comments into a normalized thread array
 function coerceCommentsToThread(raw, fallbackBy, fallbackAt) {
-  try {
-    const parsed = JSON.parse(raw || "[]");
-    if (Array.isArray(parsed)) return parsed;
-    if (parsed && typeof parsed === "object") {
-      // legacy single object { [sno]: "text", ... } → wrap as first entry
+  const fallbackIso =
+    fallbackAt instanceof Date
+      ? fallbackAt.toISOString()
+      : new Date(fallbackAt || Date.now()).toISOString();
+
+  // No value
+  if (raw == null) return [];
+
+  // Already an array (unlikely from DB, but safe)
+  if (Array.isArray(raw)) {
+    return raw
+      .map((x) => {
+        if (typeof x === "string") {
+          const t = x.trim();
+          if (!t) return null;
+          return {
+            by: fallbackBy || "unknown",
+            at: fallbackIso,
+            comment: t,
+            responses: { general: t },
+          };
+        }
+        if (x && typeof x === "object") {
+          return {
+            by: x.by || fallbackBy || "unknown",
+            at: x.at || fallbackIso,
+            comment: typeof x.comment === "string" ? x.comment : undefined,
+            responses:
+              x.responses && typeof x.responses === "object" ? x.responses : {},
+          };
+        }
+        return null;
+      })
+      .filter(Boolean);
+  }
+
+  // DB gives string
+  if (typeof raw === "string") {
+    const txt = raw.trim();
+    if (!txt) return [];
+
+    try {
+      const parsed = JSON.parse(txt);
+
+      // New format: array of {by, at, responses?, comment?}
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((x) => {
+            if (typeof x === "string") {
+              const t = x.trim();
+              if (!t) return null;
+              return {
+                by: fallbackBy || "unknown",
+                at: fallbackIso,
+                comment: t,
+                responses: { general: t },
+              };
+            }
+            if (x && typeof x === "object") {
+              return {
+                by: x.by || fallbackBy || "unknown",
+                at: x.at || fallbackIso,
+                comment: typeof x.comment === "string" ? x.comment : undefined,
+                responses:
+                  x.responses && typeof x.responses === "object"
+                    ? x.responses
+                    : {},
+              };
+            }
+            return null;
+          })
+          .filter(Boolean);
+      }
+
+      // Legacy format: object map { [sno]: "text" }
+      if (parsed && typeof parsed === "object") {
+        return [
+          {
+            by: fallbackBy || "unknown",
+            at: fallbackIso,
+            responses: parsed,
+            comment: undefined,
+          },
+        ];
+      }
+
+      return [];
+    } catch {
+      // Raw plain-text stored historically
       return [
         {
           by: fallbackBy || "unknown",
-          at:
-            fallbackAt instanceof Date
-              ? fallbackAt.toISOString()
-              : new Date(fallbackAt || Date.now()).toISOString(),
-          responses: parsed,
+          at: fallbackIso,
+          comment: txt,
+          responses: { general: txt },
         },
       ];
     }
-    return [];
-  } catch {
-    return [];
   }
+
+  // Fallback
+  return [];
+}
+
+// Build a single readable string for the UI "Comment" column
+function commentTextFromThreadEntry(entry) {
+  if (!entry) return "";
+
+  // Prefer explicit comment if present
+  if (typeof entry.comment === "string" && entry.comment.trim()) {
+    return entry.comment.trim();
+  }
+
+  const resp =
+    entry.responses && typeof entry.responses === "object"
+      ? entry.responses
+      : {};
+
+  const vals = Object.values(resp)
+    .map((v) => (typeof v === "string" ? v.trim() : ""))
+    .filter(Boolean);
+
+  // If FE is sending per-item comments keyed by sno, join them
+  if (vals.length) {
+    // Keep it readable for a single table cell
+    return vals.join(" | ");
+  }
+
+  return "";
+}
+
+// Flat feed for ALL levels (2,3,4) so the UI can render a unified Comments table
+function flattenAllLevelsCommentFeed(rows = []) {
+  const out = [];
+
+  for (const r of rows) {
+    const lvl = Number(r.level);
+    if (![2, 3, 4].includes(lvl)) continue;
+
+    const thread = coerceCommentsToThread(
+      r.comments,
+      r.username,
+      r.respondedAt
+    );
+
+    for (const entry of thread) {
+      out.push({
+        level: lvl,
+        role: r.role,
+        by: entry.by || r.username,
+        at: entry.at,
+        commentText: commentTextFromThreadEntry(entry),
+        responses: entry.responses || {},
+      });
+    }
+  }
+
+  out.sort((a, b) => new Date(a.at) - new Date(b.at));
+  return out;
 }
 
 // CMD+F: NEST_RESPONSES_HELPER
 function nestResponses(rows = []) {
   return rows.reduce((o, r) => {
     o[r.level] = o[r.level] || {};
+    const thread = coerceCommentsToThread(
+      r.comments,
+      r.username,
+      r.respondedAt
+    );
+    const latest = thread.length ? thread[thread.length - 1] : null;
+
     o[r.level][r.role] = {
       username: r.username,
       acknowledged: r.acknowledged === 1 || r.acknowledged === true,
-      comments: coerceCommentsToThread(r.comments, r.username, r.respondedAt),
+      comments: thread,
       respondedAt: r.respondedAt,
+
+      // NEW convenience
+      latestCommentText: latest ? commentTextFromThreadEntry(latest) : "",
     };
+
     return o;
   }, {});
 }
 
 // CMD+F: L2_FEED_HELPER
+// CMD+F: L2_FEED_HELPER
 function flattenLevel2Feed(rows = []) {
-  // a flat, UI-friendly feed of all Level-2 comment entries across roles
   const out = [];
   for (const r of rows) {
     if (Number(r.level) !== 2) continue;
@@ -700,10 +851,10 @@ function flattenLevel2Feed(rows = []) {
         by: entry.by,
         at: entry.at,
         responses: entry.responses || {},
+        commentText: commentTextFromThreadEntry(entry),
       });
     }
   }
-  // sort by time, oldest first
   out.sort((a, b) => new Date(a.at) - new Date(b.at));
   return out;
 }
@@ -1025,6 +1176,61 @@ function computeBomDiff(prev, next) {
       }
     }
   } catch {}
+  return out;
+}
+
+function buildApprovalsTrail(masterRow, respRows = []) {
+  const out = [];
+
+  // Level-based acknowledgements (2,3,4)
+  for (const r of respRows) {
+    const lvl = Number(r.level);
+    if (![2, 3, 4].includes(lvl)) continue;
+
+    const ack = r.acknowledged === 1 || r.acknowledged === true;
+    if (!ack) continue;
+
+    const thread = coerceCommentsToThread(
+      r.comments,
+      r.username,
+      r.respondedAt
+    );
+
+    out.push({
+      level: lvl,
+      role: r.role,
+      by: r.username || "unknown",
+      at:
+        r.respondedAt instanceof Date
+          ? r.respondedAt.toISOString()
+          : new Date(r.respondedAt || Date.now()).toISOString(),
+      action: "approved",
+      commentCount: thread.length,
+    });
+  }
+
+  // Final approval/rejection by plant-head stored in QAPs
+  const status = String(masterRow?.status || "").toLowerCase();
+  if (
+    (status === "approved" || status === "rejected") &&
+    masterRow?.approver &&
+    masterRow?.approvedAt
+  ) {
+    out.push({
+      level: 5,
+      role: "plant-head",
+      by: masterRow.approver,
+      at:
+        masterRow.approvedAt instanceof Date
+          ? masterRow.approvedAt.toISOString()
+          : new Date(masterRow.approvedAt).toISOString(),
+      action: status,
+      feedback: masterRow.feedback || null,
+    });
+  }
+
+  // Sort oldest → newest
+  out.sort((a, b) => new Date(a.at) - new Date(b.at));
   return out;
 }
 
@@ -1458,6 +1664,10 @@ app.get("/api/qaps", authenticateToken, async (req, res) => {
       const editCommentsParsed = parseEditChanges(m);
       const editedSnos = deriveEditedSnos(editCommentsParsed);
       const editedBomComponents = deriveEditedBomComponents(editCommentsParsed);
+      const rawRespRows = respMap[m.id] || [];
+      const level2CommentFeed = flattenLevel2Feed(rawRespRows);
+      const commentFeed = flattenAllLevelsCommentFeed(rawRespRows);
+      const approvalsTrail = buildApprovalsTrail(m, rawRespRows);
 
       return {
         ...m,
@@ -1494,6 +1704,8 @@ app.get("/api/qaps", authenticateToken, async (req, res) => {
         editCommentsParsed,
         editedSnos,
         editedBomComponents,
+        commentFeed,
+        approvalsTrail,
 
         // (optional) a flat L2 feed for parity with /api/qaps/:id and /for-review
         level2CommentFeed: flattenLevel2Feed(respMap[m.id] || []),
@@ -1645,6 +1857,9 @@ app.get("/api/qaps/for-review", authenticateToken, async (req, res) => {
         const rawResp = respMap[m.id] || [];
         const levelResponsesNested = nestResponses(rawResp);
         const level2CommentFeed = flattenLevel2Feed(rawResp);
+        const commentFeed = flattenAllLevelsCommentFeed(rawResp);
+        const approvalsTrail = buildApprovalsTrail(m, rawResp);
+
         const editCommentsParsed = parseEditChanges(m);
         // CMD+F: INCLUDE_EDIT_SNOS_CONST_FOR_REVIEW
         const editedSnos = deriveEditedSnos(editCommentsParsed);
@@ -1663,6 +1878,9 @@ app.get("/api/qaps/for-review", authenticateToken, async (req, res) => {
           editCommentsParsed,
           editedSnos,
           editedBomComponents,
+          level2CommentFeed,
+          commentFeed,
+          approvalsTrail,
           // embed SR for the UI BOM tab
           salesRequest:
             m.salesRequestId && srById[m.salesRequestId]
@@ -1793,6 +2011,9 @@ app.get(
       // CMD+F: SHOW_L2_COMMENTS_TO_L3
       const levelResponsesNested = nestResponses(resp || []);
       const level2CommentFeed = flattenLevel2Feed(resp || []);
+      const commentFeed = flattenAllLevelsCommentFeed(resp || []);
+      const approvalsTrail = buildApprovalsTrail(master, resp || []);
+
       const editCommentsParsed = parseEditChanges(master);
       const editedSnos = deriveEditedSnos(editCommentsParsed);
       const editedBomComponents = deriveEditedBomComponents(editCommentsParsed);
@@ -1807,6 +2028,9 @@ app.get(
         editCommentsParsed,
         editedSnos,
         editedBomComponents,
+        level2CommentFeed,
+        commentFeed,
+        approvalsTrail,
         // keep timeline
         timeline: tl,
         // convenience: parsed per-item final comments (for parity with /api/qaps)
@@ -2033,7 +2257,42 @@ app.put(
         editMeta &&
         ((Array.isArray(editMeta.header) && editMeta.header.length) ||
           (Array.isArray(editMeta.mqp) && editMeta.mqp.length) ||
-          (Array.isArray(editMeta.visual) && editMeta.visual.length));
+          (Array.isArray(editMeta.visual) && editMeta.visual.length) ||
+          (editMeta.bom &&
+            ((Array.isArray(editMeta.bom.changed) &&
+              editMeta.bom.changed.length) ||
+              (Array.isArray(editMeta.bom.added) &&
+                editMeta.bom.added.length) ||
+              (Array.isArray(editMeta.bom.removed) &&
+                editMeta.bom.removed.length))));
+
+      function buildEditSummary(evt) {
+        try {
+          const h = Array.isArray(evt.header) ? evt.header.length : 0;
+          const m = Array.isArray(evt.mqp) ? evt.mqp.length : 0;
+          const v = Array.isArray(evt.visual) ? evt.visual.length : 0;
+          const b =
+            evt.bom &&
+            (Array.isArray(evt.bom.changed) ||
+              Array.isArray(evt.bom.added) ||
+              Array.isArray(evt.bom.removed))
+              ? (evt.bom.changed?.length || 0) +
+                (evt.bom.added?.length || 0) +
+                (evt.bom.removed?.length || 0)
+              : 0;
+
+          const parts = [];
+          if (evt.scope && evt.scope !== "none")
+            parts.push(`Scope: ${evt.scope}`);
+          if (h) parts.push(`Header: ${h}`);
+          if (m) parts.push(`MQP: ${m}`);
+          if (v) parts.push(`Visual: ${v}`);
+          if (b) parts.push(`BOM: ${b}`);
+          return parts.join(" • ") || "Edited";
+        } catch {
+          return "Edited";
+        }
+      }
 
       const editEvent = {
         by: req.user?.username || "unknown",
@@ -2047,9 +2306,22 @@ app.put(
           removed: [],
         },
         scope: (editMeta && editMeta.scope) || "none",
+
+        // NEW (backward compatible)
+        comment:
+          editMeta && typeof editMeta.comment === "string"
+            ? editMeta.comment.trim()
+            : undefined,
+        summary:
+          editMeta && typeof editMeta.summary === "string"
+            ? editMeta.summary.trim()
+            : undefined,
       };
-      historyPrev.push(editEvent);
-      const editChangesStr = JSON.stringify(historyPrev);
+
+      // ensure we always have a summary for UI rendering
+      if (!editEvent.summary) {
+        editEvent.summary = buildEditSummary(editEvent);
+      }
 
       // 3) Update master fields (keepIfPresent semantics)
       let rq = mssqlPool

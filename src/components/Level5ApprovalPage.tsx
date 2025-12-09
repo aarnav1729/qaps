@@ -21,6 +21,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { QAPFormData, QAPSpecification } from "@/types/qap";
 
 import ExtraAdditions from "@/components/ExtraAdditions";
+import { isEdited } from "@/lib/edited";
+import { downloadQapAsPDF } from "@/utils/qapPdfGenerator";
 
 /* ───────────────────────────────────────────────────────────── */
 /* Local lightweight types just for rendering the BOM tab        */
@@ -178,6 +180,209 @@ const ThreadCell: React.FC<{ comments: CommentPayload; sno: number }> = ({
   );
 };
 
+/* ─────────────────────────────────────────────── */
+/* EDIT HIGHLIGHT HELPERS (same as Final Comments) */
+/* ─────────────────────────────────────────────── */
+
+type EditRowDelta = {
+  field?: string;
+  key?: string;
+  name?: string;
+  before?: any;
+  after?: any;
+};
+type EditRow = { sno: number; deltas?: EditRowDelta[] };
+type EditEvent = {
+  by?: string;
+  at?: string;
+  header?: any[];
+  mqp?: EditRow[];
+  visual?: EditRow[];
+  bom?: { changed?: any[]; added?: any[]; removed?: any[] };
+  scope?: string;
+};
+
+const _pickField = (d: any) =>
+  (d?.field || d?.key || d?.name || "").toString().trim();
+
+const getEditHistory = (qapLocal: any): EditEvent[] => {
+  const out: EditEvent[] = [];
+
+  const em = qapLocal?.editMeta;
+  if (Array.isArray(em)) {
+    for (const e of em) out.push(e as EditEvent);
+  } else if (em && typeof em === "object") {
+    out.push(em as EditEvent);
+  }
+
+  const hist = qapLocal?.editCommentsParsed;
+  if (Array.isArray(hist) && hist.length) {
+    for (const e of hist) out.push(e as EditEvent);
+  }
+
+  return out;
+};
+
+const latestEditEvent = (qapLocal: any): EditEvent | null => {
+  const history = getEditHistory(qapLocal);
+  if (!history.length) return null;
+
+  for (let i = history.length - 1; i >= 0; i--) {
+    const e = history[i] as EditEvent;
+    const hasMq =
+      Array.isArray(e.mqp) &&
+      e.mqp.some((r) => Array.isArray(r.deltas) && r.deltas.length > 0);
+    const hasVi =
+      Array.isArray(e.visual) &&
+      e.visual.some((r) => Array.isArray(r.deltas) && r.deltas.length > 0);
+
+    if (hasMq || hasVi) return e;
+  }
+
+  return history[history.length - 1] as EditEvent;
+};
+
+const buildEditedIndex = (qapLocal: any) => {
+  const ev = latestEditEvent(qapLocal);
+  const mqp = new Map<number, Set<string>>();
+  const visual = new Map<number, Set<string>>();
+
+  const push = (idx: Map<number, Set<string>>, sno: number, raw: string) => {
+    const set = idx.get(sno) || new Set<string>();
+    const f = raw.trim();
+    const norm =
+      f === "limits"
+        ? "criteriaLimits"
+        : f === "premierSpec"
+        ? "specification"
+        : f;
+    set.add(norm);
+    idx.set(sno, set);
+  };
+
+  if (ev?.mqp) {
+    for (const row of ev.mqp) {
+      for (const d of row.deltas || [])
+        push(mqp, Number(row.sno), _pickField(d));
+    }
+  }
+  if (ev?.visual) {
+    for (const row of ev.visual) {
+      for (const d of row.deltas || [])
+        push(visual, Number(row.sno), _pickField(d));
+    }
+  }
+
+  return { mqp, visual };
+};
+
+const latestBomEditEvent = (qapLocal: any): EditEvent | null => {
+  const history = getEditHistory(qapLocal);
+  if (!history.length) return null;
+
+  for (let i = history.length - 1; i >= 0; i--) {
+    const e = history[i] as any;
+    const b = e?.bom;
+    const count =
+      (b?.changed?.length || 0) +
+      (b?.added?.length || 0) +
+      (b?.removed?.length || 0);
+
+    if (count > 0) return e as EditEvent;
+  }
+
+  return null;
+};
+
+const buildBomEditedIndex = (qapLocal: any) => {
+  const ev = (latestBomEditEvent(qapLocal) ?? latestEditEvent(qapLocal)) as any;
+
+  const changedPos = new Set<string>();
+  const addedPos = new Set<string>();
+  const removedPos = new Set<string>();
+
+  const changed = new Set<string>();
+  const added = new Set<string>();
+  const removed = new Set<string>();
+
+  const norm = (s: any) =>
+    String(s || "")
+      .trim()
+      .toLowerCase();
+  const posKey = (comp: string, index: number) =>
+    `${norm(comp)}::${Number(index)}`;
+
+  const pickNameFromEditItem = (x: any) =>
+    norm(x?.row?.model || x?.model || x?.part || x?.name);
+
+  const pushAll = (
+    arr: any[] | undefined,
+    posSet: Set<string>,
+    nameSet: Set<string>
+  ) => {
+    if (!Array.isArray(arr)) return;
+
+    for (const x of arr) {
+      if (typeof x?.comp === "string" && typeof x?.index === "number") {
+        posSet.add(posKey(x.comp, x.index));
+      }
+
+      const n = pickNameFromEditItem(x);
+      if (n) nameSet.add(n);
+    }
+  };
+
+  if (ev?.bom) {
+    pushAll(ev.bom.changed, changedPos, changed);
+    pushAll(ev.bom.added, addedPos, added);
+    pushAll(ev.bom.removed, removedPos, removed);
+  }
+
+  return { changedPos, addedPos, removedPos, changed, added, removed };
+};
+
+const bomRowEdited = (
+  idx: {
+    changedPos: Set<string>;
+    addedPos: Set<string>;
+    removedPos: Set<string>;
+    changed: Set<string>;
+    added: Set<string>;
+    removed: Set<string>;
+  },
+  compName: string,
+  rowIndex: number,
+  row: any
+) => {
+  const norm = (s: any) =>
+    String(s || "")
+      .trim()
+      .toLowerCase();
+  const keyPos = `${norm(compName)}::${Number(rowIndex)}`;
+
+  if (idx.changedPos.has(keyPos) || idx.addedPos.has(keyPos)) return true;
+
+  const keyName = norm(row?.model || row?.part || row?.name);
+  if (!keyName) return false;
+
+  return idx.changed.has(keyName) || idx.added.has(keyName);
+};
+
+const HL_BOM_ROW =
+  "bg-amber-50 ring-1 ring-amber-300 shadow-sm transition-colors";
+
+const rowEdited = (
+  scope: "mqp" | "visual",
+  sno: number,
+  qapLocal: any,
+  idx: { mqp: Map<number, Set<string>>; visual: Map<number, Set<string>> }
+) =>
+  (scope === "mqp" ? idx.mqp.has(sno) : idx.visual.has(sno)) ||
+  isEdited(scope, sno, qapLocal.editedSnos);
+
+/* ─────────────────────────────────────────────── */
+/* props                                           */
+/* ─────────────────────────────────────────────── */
 interface Level5ApprovalPageProps {
   qapData: QAPFormData[];
   onApprove: (id: string, feedback?: string) => void;
@@ -193,9 +398,9 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
 
   /* ───────── state ───────── */
   const [searchTerm, setSearchTerm] = useState("");
-  const [rowFilter, setRowFilter] = useState<"all" | "matched" | "unmatched">(
-    "all"
-  );
+  const [rowFilter, setRowFilter] = useState<
+    "all" | "matched" | "unmatched" | "edited"
+  >("all");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [decision, setDecision] = useState<{
     [qapId: string]: "approve" | "reject" | null;
@@ -247,6 +452,21 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
     if (!action) return;
 
     if (action === "approve") {
+      // ✅ Generate the final QAP PDF before status transition
+      // so the document captures MQP + Visual + BOM + edits + approvals + threads
+      // along with the optional L5 approval note.
+      try {
+        downloadQapAsPDF(qap as any, {
+          approvedLevel: 5,
+          approvedBy: user?.email || user?.name || "Level 5 Approver",
+          approvalNote: note || undefined,
+          approvedAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        // Non-blocking: approval should not fail if printing is blocked by browser
+        console.error("[QAP PDF] Level 5 print failed:", err);
+      }
+
       onApprove(qap.id, note || undefined);
     } else {
       if (!note) {
@@ -285,6 +505,7 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
             <option value="all">All</option>
             <option value="matched">Matched (Green)</option>
             <option value="unmatched">Unmatched (Red)</option>
+            <option value="edited">Edited (since last submission)</option>
           </select>
         </div>
         <span className="text-sm text-gray-600">
@@ -298,13 +519,25 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
         </div>
       ) : (
         reviewable.map((qap) => {
-          const specs = qap.allSpecs.filter((s) =>
-            rowFilter === "all"
-              ? true
-              : rowFilter === "matched"
-              ? s.match === "yes"
-              : s.match === "no"
-          );
+          const editedIndex = buildEditedIndex(qap);
+          const bomEditedIndex = buildBomEditedIndex(qap);
+
+          const specs = qap.allSpecs.filter((s) => {
+            if (rowFilter === "all") return true;
+            if (rowFilter === "matched") return s.match === "yes";
+            if (rowFilter === "unmatched") return s.match === "no";
+
+            if (rowFilter === "edited") {
+              return (
+                editedIndex.mqp.has(s.sno) ||
+                editedIndex.visual.has(s.sno) ||
+                isEdited("mqp", s.sno, (qap as any).editedSnos) ||
+                isEdited("visual", s.sno, (qap as any).editedSnos)
+              );
+            }
+
+            return true;
+          });
 
           const L2 = qap.levelResponses?.[2] || {};
           const L3 = qap.levelResponses?.[3] || {};
@@ -372,7 +605,26 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
                         <TabsTrigger value="visual">
                           Visual/EL ({qap.specs.visual.length})
                         </TabsTrigger>
-                        <TabsTrigger value="bom">BOM</TabsTrigger>
+                        <TabsTrigger value="bom">
+                          BOM
+                          {(() => {
+                            const ev = latestBomEditEvent(qap) as any;
+                            const hasBomEdits =
+                              (ev?.bom?.changed?.length || 0) +
+                                (ev?.bom?.added?.length || 0) +
+                                (ev?.bom?.removed?.length || 0) >
+                              0;
+
+                            return hasBomEdits ? (
+                              <Badge
+                                variant="outline"
+                                className="ml-2 bg-amber-50 border-amber-300 text-amber-800"
+                              >
+                                Edited
+                              </Badge>
+                            ) : null;
+                          })()}
+                        </TabsTrigger>
                       </TabsList>
 
                       {/* MQP TAB */}
@@ -427,102 +679,128 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
                             <tbody>
                               {specs
                                 .filter((s) => qap.specs.mqp.includes(s as any))
-                                .map((s) => (
-                                  <tr
-                                    key={s.sno}
-                                    className={`border-b ${
-                                      s.match === "yes"
-                                        ? "bg-green-50"
-                                        : "bg-red-50"
-                                    }`}
-                                  >
-                                    <td className="p-2 border">{s.sno}</td>
-                                    <td className="p-2 border">{s.criteria}</td>
-                                    <td className="p-2 border">
-                                      {s.subCriteria}
-                                    </td>
-                                    <td className="p-2 border">
-                                      {s.specification}
-                                    </td>
-                                    <td className="p-2 border">
-                                      {s.customerSpecification}
-                                    </td>
-                                    <td className="p-2 border align-top">
-                                      <ThreadCell
-                                        comments={
-                                          L2.production?.comments as any
-                                        }
-                                        sno={s.sno}
-                                      />
-                                    </td>
-                                    <td className="p-2 border align-top">
-                                      <ThreadCell
-                                        comments={L2.quality?.comments as any}
-                                        sno={s.sno}
-                                      />
-                                    </td>
-                                    <td className="p-2 border align-top">
-                                      <ThreadCell
-                                        comments={L2.technical?.comments as any}
-                                        sno={s.sno}
-                                      />
-                                    </td>
+                                .map((s) => {
+                                  const mqEdited = rowEdited(
+                                    "mqp",
+                                    s.sno,
+                                    qap,
+                                    editedIndex
+                                  );
 
-                                    {l3R1.map((r) => (
-                                      <td
-                                        key={`mqp-l3-${r}-${s.sno}`}
-                                        className="p-2 border align-top"
-                                      >
+                                  return (
+                                    <tr
+                                      key={s.sno}
+                                      className={`border-b ${
+                                        mqEdited
+                                          ? "bg-amber-50 ring-1 ring-amber-300"
+                                          : s.match === "yes"
+                                          ? "bg-green-50"
+                                          : "bg-red-50"
+                                      }`}
+                                    >
+                                      <td className="p-2 border">
+                                        {s.sno}
+                                        {mqEdited && (
+                                          <Badge
+                                            variant="outline"
+                                            className="ml-2 bg-amber-50 border-amber-300 text-amber-800"
+                                          >
+                                            Edited
+                                          </Badge>
+                                        )}
+                                      </td>
+                                      <td className="p-2 border">
+                                        {s.criteria}
+                                      </td>
+                                      <td className="p-2 border">
+                                        {s.subCriteria}
+                                      </td>
+                                      <td className="p-2 border">
+                                        {s.specification}
+                                      </td>
+                                      <td className="p-2 border">
+                                        {s.customerSpecification}
+                                      </td>
+                                      <td className="p-2 border align-top">
                                         <ThreadCell
-                                          comments={L3?.[r]?.comments as any}
+                                          comments={
+                                            L2.production?.comments as any
+                                          }
                                           sno={s.sno}
                                         />
                                       </td>
-                                    ))}
-
-                                    {l4R1.map((r) => (
-                                      <td
-                                        key={`mqp-l4-${r}-${s.sno}`}
-                                        className="p-2 border align-top"
-                                      >
+                                      <td className="p-2 border align-top">
                                         <ThreadCell
-                                          comments={L4?.[r]?.comments as any}
+                                          comments={L2.quality?.comments as any}
                                           sno={s.sno}
                                         />
                                       </td>
-                                    ))}
-
-                                    <td className="p-2 border">
-                                      {qap.finalCommentsPerItem?.[s.sno] || "—"}
-                                    </td>
-
-                                    {/* L3 2nd */}
-                                    {l3R2.map((r) => (
-                                      <td
-                                        key={`mqp-l3b-${r}-${s.sno}`}
-                                        className="p-2 border align-top"
-                                      >
+                                      <td className="p-2 border align-top">
                                         <ThreadCell
-                                          comments={L3?.[r]?.comments as any}
+                                          comments={
+                                            L2.technical?.comments as any
+                                          }
                                           sno={s.sno}
                                         />
                                       </td>
-                                    ))}
 
-                                    {/* L4 2nd */}
-                                    {l4R2.map((r) => (
-                                      <td
-                                        key={`mqp-l4b-${r}-${s.sno}`}
-                                        className="p-2 border align-top"
-                                      >
-                                        <ThreadCell
-                                          comments={L4?.[r]?.comments as any}
-                                          sno={s.sno}
-                                        />
+                                      {l3R1.map((r) => (
+                                        <td
+                                          key={`mqp-l3-${r}-${s.sno}`}
+                                          className="p-2 border align-top"
+                                        >
+                                          <ThreadCell
+                                            comments={L3?.[r]?.comments as any}
+                                            sno={s.sno}
+                                          />
+                                        </td>
+                                      ))}
+
+                                      {l4R1.map((r) => (
+                                        <td
+                                          key={`mqp-l4-${r}-${s.sno}`}
+                                          className="p-2 border align-top"
+                                        >
+                                          <ThreadCell
+                                            comments={L4?.[r]?.comments as any}
+                                            sno={s.sno}
+                                          />
+                                        </td>
+                                      ))}
+
+                                      <td className="p-2 border">
+                                        {qap.finalCommentsPerItem?.[s.sno] ||
+                                          "—"}
                                       </td>
-                                    ))}
-                                  </tr>
-                                ))}
+
+                                      {/* L3 2nd */}
+                                      {l3R2.map((r) => (
+                                        <td
+                                          key={`mqp-l3b-${r}-${s.sno}`}
+                                          className="p-2 border align-top"
+                                        >
+                                          <ThreadCell
+                                            comments={L3?.[r]?.comments as any}
+                                            sno={s.sno}
+                                          />
+                                        </td>
+                                      ))}
+
+                                      {/* L4 2nd */}
+                                      {l4R2.map((r) => (
+                                        <td
+                                          key={`mqp-l4b-${r}-${s.sno}`}
+                                          className="p-2 border align-top"
+                                        >
+                                          <ThreadCell
+                                            comments={L4?.[r]?.comments as any}
+                                            sno={s.sno}
+                                          />
+                                        </td>
+                                      ))}
+                                    </tr>
+                                  );
+                                })}
                             </tbody>
                           </table>
                         </div>
@@ -582,97 +860,123 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
                                 .filter((s) =>
                                   qap.specs.visual.includes(s as any)
                                 )
-                                .map((s) => (
-                                  <tr
-                                    key={s.sno}
-                                    className={`border-b ${
-                                      s.match === "yes"
-                                        ? "bg-green-50"
-                                        : "bg-red-50"
-                                    }`}
-                                  >
-                                    <td className="p-2 border">{s.sno}</td>
-                                    <td className="p-2 border">{s.criteria}</td>
-                                    <td className="p-2 border">
-                                      {s.subCriteria}
-                                    </td>
-                                    <td className="p-2 border">
-                                      {s.criteriaLimits}
-                                    </td>
-                                    <td className="p-2 border">
-                                      {s.customerSpecification}
-                                    </td>
-                                    <td className="p-2 border align-top">
-                                      <ThreadCell
-                                        comments={
-                                          L2.production?.comments as any
-                                        }
-                                        sno={s.sno}
-                                      />
-                                    </td>
-                                    <td className="p-2 border align-top">
-                                      <ThreadCell
-                                        comments={L2.quality?.comments as any}
-                                        sno={s.sno}
-                                      />
-                                    </td>
-                                    <td className="p-2 border align-top">
-                                      <ThreadCell
-                                        comments={L2.technical?.comments as any}
-                                        sno={s.sno}
-                                      />
-                                    </td>
+                                .map((s) => {
+                                  const vEdited = rowEdited(
+                                    "visual",
+                                    s.sno,
+                                    qap,
+                                    editedIndex
+                                  );
 
-                                    {l3R1.map((r) => (
-                                      <td
-                                        key={`vis-l3-${r}-${s.sno}`}
-                                        className="p-2 border align-top"
-                                      >
+                                  return (
+                                    <tr
+                                      key={s.sno}
+                                      className={`border-b ${
+                                        vEdited
+                                          ? "bg-amber-50 ring-1 ring-amber-300"
+                                          : s.match === "yes"
+                                          ? "bg-green-50"
+                                          : "bg-red-50"
+                                      }`}
+                                    >
+                                      <td className="p-2 border">
+                                        {s.sno}
+                                        {vEdited && (
+                                          <Badge
+                                            variant="outline"
+                                            className="ml-2 bg-amber-50 border-amber-300 text-amber-800"
+                                          >
+                                            Edited
+                                          </Badge>
+                                        )}
+                                      </td>
+                                      <td className="p-2 border">
+                                        {s.criteria}
+                                      </td>
+                                      <td className="p-2 border">
+                                        {s.subCriteria}
+                                      </td>
+                                      <td className="p-2 border">
+                                        {s.criteriaLimits}
+                                      </td>
+                                      <td className="p-2 border">
+                                        {s.customerSpecification}
+                                      </td>
+                                      <td className="p-2 border align-top">
                                         <ThreadCell
-                                          comments={L3?.[r]?.comments as any}
+                                          comments={
+                                            L2.production?.comments as any
+                                          }
                                           sno={s.sno}
                                         />
                                       </td>
-                                    ))}
-                                    {l4R1.map((r) => (
-                                      <td
-                                        key={`vis-l4-${r}-${s.sno}`}
-                                        className="p-2 border align-top"
-                                      >
+                                      <td className="p-2 border align-top">
                                         <ThreadCell
-                                          comments={L4?.[r]?.comments as any}
+                                          comments={L2.quality?.comments as any}
                                           sno={s.sno}
                                         />
                                       </td>
-                                    ))}
+                                      <td className="p-2 border align-top">
+                                        <ThreadCell
+                                          comments={
+                                            L2.technical?.comments as any
+                                          }
+                                          sno={s.sno}
+                                        />
+                                      </td>
 
-                                    <td className="p-2 border">
-                                      {qap.finalCommentsPerItem?.[s.sno] || "—"}
-                                    </td>
-                                    {l3R2.map((r) => (
-                                      <td
-                                        key={`vis-l3b-${r}-${s.sno}`}
-                                        className="p-2 border align-top"
-                                      >
-                                        <ThreadCell
-                                          comments={L3?.[r]?.comments as any}
-                                          sno={s.sno}
-                                        />
+                                      {l3R1.map((r) => (
+                                        <td
+                                          key={`vis-l3-${r}-${s.sno}`}
+                                          className="p-2 border align-top"
+                                        >
+                                          <ThreadCell
+                                            comments={L3?.[r]?.comments as any}
+                                            sno={s.sno}
+                                          />
+                                        </td>
+                                      ))}
+                                      {l4R1.map((r) => (
+                                        <td
+                                          key={`vis-l4-${r}-${s.sno}`}
+                                          className="p-2 border align-top"
+                                        >
+                                          <ThreadCell
+                                            comments={L4?.[r]?.comments as any}
+                                            sno={s.sno}
+                                          />
+                                        </td>
+                                      ))}
+
+                                      <td className="p-2 border">
+                                        {qap.finalCommentsPerItem?.[s.sno] ||
+                                          "—"}
                                       </td>
-                                    ))}
-                                    {l4R2.map((r) => (
-                                      <td
-                                        key={`vis-l4b-${r}-${s.sno}`}
-                                        className="p-2 border align-top"
-                                      >
-                                        <ThreadCell
-                                          comments={L4?.[r]?.comments as any}
-                                          sno={s.sno}
-                                        />
-                                      </td>
-                                    ))}
-                                  </tr>
-                                ))}
+                                      {l3R2.map((r) => (
+                                        <td
+                                          key={`vis-l3b-${r}-${s.sno}`}
+                                          className="p-2 border align-top"
+                                        >
+                                          <ThreadCell
+                                            comments={L3?.[r]?.comments as any}
+                                            sno={s.sno}
+                                          />
+                                        </td>
+                                      ))}
+                                      {l4R2.map((r) => (
+                                        <td
+                                          key={`vis-l4b-${r}-${s.sno}`}
+                                          className="p-2 border align-top"
+                                        >
+                                          <ThreadCell
+                                            comments={L4?.[r]?.comments as any}
+                                            sno={s.sno}
+                                          />
+                                        </td>
+                                      ))}
+                                    </tr>
+                                  );
+                                })}
                             </tbody>
                           </table>
                         </div>
@@ -928,7 +1232,13 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
                                             >
                                               <div className="font-medium mb-2">
                                                 {c.name}
+                                                {rowFilter === "edited" && (
+                                                  <span className="text-xs text-gray-500 ml-2">
+                                                    (edited rows only)
+                                                  </span>
+                                                )}
                                               </div>
+
                                               <table className="min-w-full text-sm border">
                                                 <thead className="bg-gray-50 text-left">
                                                   <tr>
@@ -944,24 +1254,67 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
                                                   </tr>
                                                 </thead>
                                                 <tbody className="divide-y">
-                                                  {c.rows.map((r, i) => (
-                                                    <tr
-                                                      key={i}
-                                                      className="align-top"
-                                                    >
-                                                      <td className="px-3 py-2 whitespace-nowrap">
-                                                        {r.model || "-"}
-                                                      </td>
-                                                      <td className="px-3 py-2 whitespace-nowrap">
-                                                        {r.subVendor || "-"}
-                                                      </td>
-                                                      <td className="px-3 py-2">
-                                                        <div className="whitespace-pre-wrap">
-                                                          {r.spec || "—"}
-                                                        </div>
-                                                      </td>
-                                                    </tr>
-                                                  ))}
+                                                  {(() => {
+                                                    const rowsWithIndex =
+                                                      Array.isArray(c.rows)
+                                                        ? c.rows.map(
+                                                            (r, rowIndex) => ({
+                                                              r,
+                                                              rowIndex,
+                                                            })
+                                                          )
+                                                        : [];
+
+                                                    const filteredRows =
+                                                      rowFilter === "edited"
+                                                        ? rowsWithIndex.filter(
+                                                            ({ r, rowIndex }) =>
+                                                              bomRowEdited(
+                                                                bomEditedIndex,
+                                                                c.name,
+                                                                rowIndex,
+                                                                r
+                                                              )
+                                                          )
+                                                        : rowsWithIndex;
+
+                                                    if (
+                                                      rowFilter === "edited" &&
+                                                      filteredRows.length === 0
+                                                    ) {
+                                                      return null;
+                                                    }
+
+                                                    return filteredRows.map(
+                                                      ({ r, rowIndex }, i) => (
+                                                        <tr
+                                                          key={i}
+                                                          className={`align-top ${
+                                                            bomRowEdited(
+                                                              bomEditedIndex,
+                                                              c.name,
+                                                              rowIndex,
+                                                              r
+                                                            )
+                                                              ? HL_BOM_ROW
+                                                              : ""
+                                                          }`}
+                                                        >
+                                                          <td className="px-3 py-2 whitespace-nowrap">
+                                                            {r.model || "-"}
+                                                          </td>
+                                                          <td className="px-3 py-2 whitespace-nowrap">
+                                                            {r.subVendor || "-"}
+                                                          </td>
+                                                          <td className="px-3 py-2">
+                                                            <div className="whitespace-pre-wrap">
+                                                              {r.spec || "—"}
+                                                            </div>
+                                                          </td>
+                                                        </tr>
+                                                      )
+                                                    );
+                                                  })()}
                                                 </tbody>
                                               </table>
                                             </div>

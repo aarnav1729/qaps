@@ -14,11 +14,27 @@ import { QAPFormData } from "@/types/qap";
 import { useAuth } from "@/contexts/AuthContext";
 import { Eye, CheckCircle, XCircle, Search, Filter } from "lucide-react";
 
+// Fallback modal for view (shadcn)
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+
 interface ApprovalsPageProps {
   qapData: QAPFormData[];
   onApprove: (id: string, feedback?: string) => void;
   onReject: (id: string, feedback: string) => void;
-  onView: (qap: QAPFormData) => void;
+
+  /**
+   * Optional external view handler.
+   * Return true if the parent fully handled UI (navigation/modal),
+   * otherwise this page will open a built-in View dialog.
+   */
+  onView?: (qap: QAPFormData) => boolean | void;
 }
 
 const ApprovalsPage: React.FC<ApprovalsPageProps> = ({
@@ -31,6 +47,10 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [feedback, setFeedback] = useState<string>("");
+
+  // Built-in viewer fallback
+  const [viewOpen, setViewOpen] = useState(false);
+  const [selectedQap, setSelectedQap] = useState<QAPFormData | null>(null);
 
   const filteredQAPs = useMemo(() => {
     return qapData.filter((qap) => {
@@ -75,6 +95,34 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({
     pending: filteredQAPs.filter((q) => q.status === "level-5").length,
     rejected: filteredQAPs.filter((q) => q.status === "rejected").length,
   };
+
+  const handleView = (qap: QAPFormData) => {
+    try {
+      if (typeof onView === "function") {
+        const handled = onView(qap);
+        // If parent explicitly says it handled the UI, don't open fallback.
+        if (handled === true) return;
+        // Otherwise, continue to open the internal dialog.
+      }
+    } catch (err) {
+      console.error("ApprovalsPage onView handler failed:", err);
+      // fall through to internal dialog
+    }
+
+    setSelectedQap(qap);
+    setViewOpen(true);
+  };
+
+  const selectedCounts = useMemo(() => {
+    if (!selectedQap) return { total: 0, matched: 0, unmatched: 0 };
+    const allSpecs = [
+      ...(selectedQap.specs?.mqp || []),
+      ...(selectedQap.specs?.visual || []),
+    ];
+    const matched = allSpecs.filter((i) => i.match === "yes").length;
+    const unmatched = allSpecs.filter((i) => i.match === "no").length;
+    return { total: allSpecs.length, matched, unmatched };
+  }, [selectedQap]);
 
   return (
     <div className="container mx-auto px-4 py-6">
@@ -199,13 +247,17 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({
                 </thead>
                 <tbody>
                   {filteredQAPs.map((qap) => {
-                    const allSpecs = [...qap.specs.mqp, ...qap.specs.visual];
+                    const allSpecs = [
+                      ...(qap.specs?.mqp || []),
+                      ...(qap.specs?.visual || []),
+                    ];
                     const matchedCount = allSpecs.filter(
                       (item) => item.match === "yes"
                     ).length;
                     const unmatchedCount = allSpecs.filter(
                       (item) => item.match === "no"
                     ).length;
+
                     return (
                       <tr key={qap.id} className="border-b hover:bg-gray-50">
                         <td className="p-3 font-medium">{qap.customerName}</td>
@@ -243,12 +295,13 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => onView(qap)}
+                              onClick={() => handleView(qap)}
                               className="h-8 w-8 p-0"
                               title="View Details"
                             >
                               <Eye className="h-4 w-4" />
                             </Button>
+
                             {qap.status === "level-5" &&
                               user?.role === "plant-head" && (
                                 <>
@@ -288,6 +341,110 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({
           )}
         </CardContent>
       </Card>
+
+      {/* Built-in View Dialog fallback */}
+      <Dialog open={viewOpen} onOpenChange={setViewOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>QAP Details</DialogTitle>
+            <DialogDescription>
+              Quick view summary (fallback view inside Approvals dashboard)
+            </DialogDescription>
+          </DialogHeader>
+
+          {!selectedQap ? (
+            <div className="text-sm text-gray-500">No QAP selected.</div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                <div>
+                  <div className="text-gray-500">Customer</div>
+                  <div className="font-medium text-gray-900">
+                    {selectedQap.customerName}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-gray-500">Project</div>
+                  <div className="font-medium text-gray-900">
+                    {selectedQap.projectName}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-gray-500">Plant</div>
+                  <div className="font-medium text-gray-900">
+                    {selectedQap.plant?.toUpperCase()}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-gray-500">Product Type</div>
+                  <div className="font-medium text-gray-900">
+                    {selectedQap.productType}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-gray-500">Order Qty (MW)</div>
+                  <div className="font-medium text-gray-900">
+                    {selectedQap.orderQuantity?.toLocaleString()}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-gray-500">Status</div>
+                  <div>{getStatusBadge(selectedQap.status)}</div>
+                </div>
+                <div>
+                  <div className="text-gray-500">Submitted By</div>
+                  <div className="font-medium text-gray-900">
+                    {selectedQap.submittedBy || "-"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-gray-500">Submitted At</div>
+                  <div className="font-medium text-gray-900">
+                    {selectedQap.submittedAt
+                      ? new Date(selectedQap.submittedAt).toLocaleString()
+                      : "-"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-md border p-3 bg-gray-50">
+                <div className="text-sm font-medium text-gray-700 mb-2">
+                  Items Overview
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <Badge variant="outline" className="bg-white">
+                    MQP: {selectedQap.specs?.mqp?.length ?? 0}
+                  </Badge>
+                  <Badge variant="outline" className="bg-white">
+                    Visual/EL: {selectedQap.specs?.visual?.length ?? 0}
+                  </Badge>
+                  <Badge variant="outline" className="bg-white">
+                    Total: {selectedCounts.total}
+                  </Badge>
+                  <Badge
+                    variant="outline"
+                    className="bg-green-50 border-green-200 text-green-800"
+                  >
+                    Matched: {selectedCounts.matched}
+                  </Badge>
+                  <Badge
+                    variant="outline"
+                    className="bg-red-50 border-red-200 text-red-800"
+                  >
+                    Unmatched: {selectedCounts.unmatched}
+                  </Badge>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setViewOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
