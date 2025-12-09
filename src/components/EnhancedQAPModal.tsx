@@ -277,7 +277,6 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
         currentLevel: (editingQAP as any).currentLevel,
       });
 
-      // Pull existing specs (supports legacy `qaps` or new `specs`)
       const m = Array.isArray(editingQAP.qaps)
         ? editingQAP.qaps.filter((q) => q.criteria === "MQP")
         : editingQAP.specs?.mqp || [];
@@ -287,7 +286,6 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
           )
         : editingQAP.specs?.visual || [];
 
-      // ⬅️ Key change: normalize `reviewBy` to string[] for BASELINES too
       const normalizedM = (m || []).map((r) => ({
         ...r,
         reviewBy: normalizeReviewBy((r as any).reviewBy),
@@ -297,13 +295,21 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
         reviewBy: normalizeReviewBy((r as any).reviewBy),
       }));
 
-      // Deep clone into baselines so we never mutate them later
       setBaselineMqp(JSON.parse(JSON.stringify(normalizedM)));
       setBaselineVisual(JSON.parse(JSON.stringify(normalizedV)));
+
+      // ✅ NEW: seed BOM baseline from existing QAP snapshot
+      const existingBom =
+        (editingQAP as any).bomSnapshot ?? (editingQAP as any).bom ?? null;
+
+      setBaselineBom(
+        existingBom ? JSON.parse(JSON.stringify(existingBom)) : null
+      );
     } else {
       setBaselineHeader(null);
       setBaselineMqp(null);
       setBaselineVisual(null);
+      setBaselineBom(null); // ✅ NEW
     }
   }, [isOpen, editingQAP]);
 
@@ -335,6 +341,18 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
   const [projectCode, setProjectCode] = useState("");
   const [projectCodeOptions, setProjectCodeOptions] = useState<string[]>([]);
   const [bomDraft, setBomDraft] = useState<BomPayload | null>(null);
+  useEffect(() => {
+    if (!isOpen || !editingQAP) return;
+
+    const existingBom =
+      (editingQAP as any).bomSnapshot ?? (editingQAP as any).bom ?? null;
+
+    // only seed if editor is empty
+    if (existingBom && !bomDraft) {
+      setBomDraft(JSON.parse(JSON.stringify(existingBom)));
+    }
+  }, [isOpen, editingQAP, bomDraft]);
+
   const [bomSaving, setBomSaving] = useState(false);
   const [bomError, setBomError] = useState<string | null>(null);
   const [bomSavedOnce, setBomSavedOnce] = useState(false);
@@ -392,17 +410,18 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
     () => diffBomLocal(baselineBom, bomDraft),
     [baselineBom, bomDraft]
   );
+  const bomDirty = useMemo(() => {
+    if (!baselineBom && !bomDraft) return false;
+    return JSON.stringify(baselineBom) !== JSON.stringify(bomDraft);
+  }, [baselineBom, bomDraft]);
 
   const hasPendingChanges = useMemo(
     () =>
       pendingHeader.length > 0 ||
       pendingMqp.length > 0 ||
       pendingVisual.length > 0 ||
-      pendingBom.changed.length +
-        pendingBom.added.length +
-        pendingBom.removed.length >
-        0,
-    [pendingHeader, pendingMqp, pendingVisual, pendingBom]
+      bomDirty,
+    [pendingHeader, pendingMqp, pendingVisual, bomDirty]
   );
 
   const willResetOnSave = useMemo(
@@ -421,16 +440,14 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
       pendingHeader.length > 0 ||
       pendingMqp.length > 0 ||
       pendingVisual.length > 0;
-    const bomChanged =
-      pendingBom.changed.length +
-        pendingBom.added.length +
-        pendingBom.removed.length >
-      0;
+
+    const bomChanged = bomDirty;
+
     if (qapChanged && bomChanged) return "both";
     if (qapChanged) return "qap";
     if (bomChanged) return "bom";
     return "none";
-  }, [pendingHeader, pendingMqp, pendingVisual, pendingBom]);
+  }, [pendingHeader, pendingMqp, pendingVisual, bomDirty]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -554,7 +571,20 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
       g12r: "Dual Glass G12R Topcon",
       g12: "Dual Glass G12 Topcon",
     };
-    return map[(sr.moduleOrderType || "").toLowerCase()] || "";
+
+    const fromLegacy = map[(sr.moduleOrderType || "").toLowerCase()] || "";
+
+    if (fromLegacy) return fromLegacy;
+
+    // fallback to newer signals if available
+    const pc = (sr.productCategory || "").toLowerCase();
+    if (pc.includes("g12r")) return "Dual Glass G12R Topcon";
+    if (pc.includes("g12")) return "Dual Glass G12 Topcon";
+    if (pc.includes("m10") && pc.includes("topcon"))
+      return "Dual Glass M10 Topcon";
+    if (pc.includes("m10") && pc.includes("perc")) return "Dual Glass M10 Perc";
+
+    return "";
   }
 
   // ⬇️ ADD: client-side fetch of SR by project code (safe fallbacks)
@@ -806,11 +836,7 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
     );
 
   // ⬇️ Put near other helpers
-  const hasBomChanges =
-    (pendingBom.added?.length || 0) +
-      (pendingBom.changed?.length || 0) +
-      (pendingBom.removed?.length || 0) >
-    0;
+  const hasBomChanges = bomDirty;
 
   const summarizeCounts = () => {
     const header = pendingHeader.length;
@@ -961,15 +987,15 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
     setLinkedSR(null);
   };
 
-  // only allow progressing once all required fields are set
-  const isFormValid = Boolean(
-    projectCode &&
-      customerName &&
-      projectName &&
-      orderQuantity > 0 &&
-      productType &&
-      plant
-  );
+  const isFormValid = editingQAP
+    ? Boolean(projectCode && customerName) &&
+      // either full header exists
+      (Boolean(projectName && orderQuantity > 0 && productType && plant) ||
+        // ✅ OR user is only updating BOM
+        bomDirty)
+    : Boolean(projectCode && customerName);
+
+  // customerName is already derived from project code in onPickProjectCode
 
   const getUnmatchedItems = () => {
     return [...mqpData, ...visualElData].filter((item) => item.match === "no");
@@ -1036,15 +1062,46 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
   }
 
   function diffBomLocal(before: BomPayload | null, after: BomPayload | null) {
+    // ✅ handle null → treat as all added/removed so changes are detected
+    if (!before && after) {
+      const added: Array<{ comp: string; index: number; row: BomRow }> = [];
+      for (const comp of after.components || []) {
+        (comp.rows || []).forEach((row, i) => {
+          added.push({ comp: comp.name, index: i, row });
+        });
+      }
+      return {
+        changed: [],
+        added,
+        removed: [] as Array<{ comp: string; index: number; row: BomRow }>,
+      };
+    }
+
+    if (before && !after) {
+      const removed: Array<{ comp: string; index: number; row: BomRow }> = [];
+      for (const comp of before.components || []) {
+        (comp.rows || []).forEach((row, i) => {
+          removed.push({ comp: comp.name, index: i, row });
+        });
+      }
+      return {
+        changed: [],
+        added: [],
+        removed,
+      };
+    }
+
     if (!before || !after)
       return {
         changed: [],
         added: [],
         removed: [] as Array<{ comp: string; index: number; row: BomRow }>,
       };
+
     const bIdx = new Map((before.components || []).map((c) => [c.name, c]));
     const aIdx = new Map((after.components || []).map((c) => [c.name, c]));
     const comps = new Set<string>([...bIdx.keys(), ...aIdx.keys()]);
+
     const changed: Array<{
       comp: string;
       index: number;
@@ -1052,13 +1109,16 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
     }> = [];
     const added: Array<{ comp: string; index: number; row: BomRow }> = [];
     const removed: Array<{ comp: string; index: number; row: BomRow }> = [];
+
     for (const comp of comps) {
       const bRows = bIdx.get(comp)?.rows || [];
       const aRows = aIdx.get(comp)?.rows || [];
       const max = Math.max(bRows.length, aRows.length);
+
       for (let i = 0; i < max; i++) {
         const br = bRows[i],
           ar = aRows[i];
+
         if (br && !ar) removed.push({ comp, index: i, row: br });
         else if (!br && ar) added.push({ comp, index: i, row: ar });
         else if (br && ar) {
@@ -1071,10 +1131,12 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
             .filter(
               (d) => JSON.stringify(d.before) !== JSON.stringify(d.after)
             );
+
           if (deltas.length) changed.push({ comp, index: i, deltas });
         }
       }
     }
+
     return { changed, added, removed };
   }
 

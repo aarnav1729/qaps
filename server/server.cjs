@@ -322,9 +322,12 @@ async function initMssql() {
         action         NVARCHAR(20)    NOT NULL,  -- 'create' | 'update' | 'delete'
         changedBy      NVARCHAR(50)    NOT NULL,
         changedAt      DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
-        changes        NVARCHAR(MAX)   NULL       -- JSON array of { field, before, after }
-      );
+        changes        NVARCHAR(MAX)   NULL,       -- JSON array of { field, before, after }
+        snapshot       NVARCHAR(MAX)   NULL       -- JSON snapshot for UI history views      
+        );
 
+        IF COL_LENGTH('SalesRequestHistory','snapshot') IS NULL
+        ALTER TABLE SalesRequestHistory ADD snapshot NVARCHAR(MAX) NULL;
       ------------------------------------------------
       -- Customers (master)
       IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Customers')
@@ -736,6 +739,28 @@ function deriveEditedSnos(editHistory /* from parseEditChanges(...) */) {
     };
   } catch {
     return { mqp: [], visual: [] };
+  }
+}
+
+// CMD+F: EDIT_BOM_COMPONENTS_HELPER
+function deriveEditedBomComponents(
+  editHistory /* from parseEditChanges(...) */
+) {
+  try {
+    const evts = Array.isArray(editHistory) ? editHistory : [];
+    // walk backwards to find the most recent event that actually changed BOM
+    for (let i = evts.length - 1; i >= 0; i--) {
+      const bom = evts[i]?.bom;
+      if (!bom) continue;
+      const { changed = [], added = [], removed = [] } = bom || {};
+      const comps = [...changed, ...added, ...removed]
+        .map((x) => x && x.component)
+        .filter(Boolean);
+      if (comps.length) return Array.from(new Set(comps));
+    }
+    return [];
+  } catch {
+    return [];
   }
 }
 
@@ -1432,21 +1457,7 @@ app.get("/api/qaps", authenticateToken, async (req, res) => {
     const result = masters.map((m) => {
       const editCommentsParsed = parseEditChanges(m);
       const editedSnos = deriveEditedSnos(editCommentsParsed);
-      const editedBomComponents = (() => {
-        const evts = Array.isArray(editCommentsParsed)
-          ? editCommentsParsed
-          : [];
-        const last = evts.length ? evts[evts.length - 1] : null;
-        if (!last || !last.bom) return [];
-        const { changed = [], added = [], removed = [] } = last.bom || {};
-        return Array.from(
-          new Set(
-            [...changed, ...added, ...removed]
-              .map((x) => x && x.component)
-              .filter(Boolean)
-          )
-        );
-      })();
+      const editedBomComponents = deriveEditedBomComponents(editCommentsParsed);
 
       return {
         ...m,
@@ -1638,21 +1649,8 @@ app.get("/api/qaps/for-review", authenticateToken, async (req, res) => {
         // CMD+F: INCLUDE_EDIT_SNOS_CONST_FOR_REVIEW
         const editedSnos = deriveEditedSnos(editCommentsParsed);
         // NEW: list of BOM component names touched in the latest edit event
-        const editedBomComponents = (() => {
-          const evts = Array.isArray(editCommentsParsed)
-            ? editCommentsParsed
-            : [];
-          const last = evts.length ? evts[evts.length - 1] : null;
-          if (!last || !last.bom) return [];
-          const { changed = [], added = [], removed = [] } = last.bom || {};
-          return Array.from(
-            new Set(
-              [...changed, ...added, ...removed]
-                .map((x) => x && x.component)
-                .filter(Boolean)
-            )
-          );
-        })();
+        const editedBomComponents =
+          deriveEditedBomComponents(editCommentsParsed);
 
         return {
           ...m,
@@ -1664,6 +1662,7 @@ app.get("/api/qaps/for-review", authenticateToken, async (req, res) => {
           level2CommentFeed,
           editCommentsParsed,
           editedSnos,
+          editedBomComponents,
           // embed SR for the UI BOM tab
           salesRequest:
             m.salesRequestId && srById[m.salesRequestId]
@@ -1796,21 +1795,7 @@ app.get(
       const level2CommentFeed = flattenLevel2Feed(resp || []);
       const editCommentsParsed = parseEditChanges(master);
       const editedSnos = deriveEditedSnos(editCommentsParsed);
-      const editedBomComponents = (() => {
-        const evts = Array.isArray(editCommentsParsed)
-          ? editCommentsParsed
-          : [];
-        const last = evts.length ? evts[evts.length - 1] : null;
-        if (!last || !last.bom) return [];
-        const { changed = [], added = [], removed = [] } = last.bom || {};
-        return Array.from(
-          new Set(
-            [...changed, ...added, ...removed]
-              .map((x) => x && x.component)
-              .filter(Boolean)
-          )
-        );
-      })();
+      const editedBomComponents = deriveEditedBomComponents(editCommentsParsed);
       return res.json({
         ...master,
         specs: { mqp, visual },
@@ -2978,42 +2963,6 @@ function bumpBomDocRefJSON(bomJson) {
   }
 }
 
-// function to inflate a sales request row from DB + associated files into API response
-function inflateSalesRequestRow(row, filesMap) {
-  const files = filesMap[row.id] || [];
-  const toYMD = (d) =>
-    !d
-      ? null
-      : (typeof d?.toISOString === "function"
-          ? d.toISOString()
-          : new Date(d).toISOString()
-        ).slice(0, 10);
-  return {
-    ...row,
-    id: row.id,
-    projectCode: row.projectCode,
-    customerName: row.customerName,
-    // --- add normalized date strings for the UI ---
-    deliveryStartDate: toYMD(row.deliveryStartDate),
-    deliveryEndDate: toYMD(row.deliveryEndDate),
-    factoryAuditTentativeDate: toYMD(row.factoryAuditTentativeDate),
-    // NEW fields (null-safe)
-    projectCode: row.projectCode || null,
-    moduleCellType: row.moduleCellType || null,
-    cellTech: row.cellTech || null,
-    cutCells: row.cutCells != null ? Number(row.cutCells) : null,
-    certificationRequired: row.certificationRequired || null,
-    // existing + JSON handling
-    qapTypeAttachmentUrl: row.qapTypeAttachmentUrl || null,
-    primaryBomAttachmentUrl: row.primaryBomAttachmentUrl || null,
-    otherAttachments: files.map((f) => ({ title: f.title || "", url: f.url })),
-    bom: row.bom ? JSON.parse(row.bom) : null,
-    wattageBinningDist: row.wattageBinningDist
-      ? JSON.parse(row.wattageBinningDist)
-      : null,
-  };
-}
-
 // use the same multer instance you already created:
 const srUpload = upload.fields([
   { name: "qapTypeAttachment", maxCount: 1 },
@@ -3112,6 +3061,7 @@ app.get(
         changedBy: r.changedBy,
         changedAt: r.changedAt,
         changes: safeParseJson(r.changes, null),
+        snapshot: safeParseJson(r.snapshot, null),
       }));
       res.json(data);
     } catch (e) {
@@ -3293,12 +3243,23 @@ app.post(
       }
 
       // history
+      const filesMap = await fetchSrFilesMap([newId]);
+      const freshRow = (
+        await mssqlPool
+          .request()
+          .input("id", sql.UniqueIdentifier, newId)
+          .query("SELECT * FROM SalesRequests WHERE id=@id")
+      ).recordset[0];
+      const otherFilesList = filesMap[newId] || [];
+      const snap = snapshotForHistory(freshRow, otherFilesList);
+
       await mssqlPool
         .request()
         .input("sid", sql.UniqueIdentifier, newId)
-        .input("by", sql.NVarChar, pick(b.createdBy, req.user.username)).query(`
-        INSERT INTO SalesRequestHistory (salesRequestId, action, changedBy, changes)
-        VALUES (@sid, 'create', @by, NULL);
+        .input("by", sql.NVarChar, pick(b.createdBy, req.user.username))
+        .input("snap", sql.NVarChar, JSON.stringify(snap)).query(`
+        INSERT INTO SalesRequestHistory (salesRequestId, action, changedBy, changes, snapshot)
+        VALUES (@sid, 'create', @by, NULL, @snap);
       `);
 
       // return hydrated row
@@ -3308,7 +3269,7 @@ app.post(
           .input("id", sql.UniqueIdentifier, newId)
           .query("SELECT * FROM SalesRequests WHERE id=@id")
       ).recordset[0];
-      const filesMap = await fetchSrFilesMap([newId]);
+
       res.status(201).json(inflateSalesRequestRow(master, filesMap));
     } catch (e) {
       console.error("POST /api/sales-requests error:", e);
@@ -3511,14 +3472,18 @@ app.put(
       ];
       const diff = buildDiff(before, after, tracked);
 
+      // build a snapshot for the UI
+      const otherFilesList = (await fetchSrFilesMap([id]))[id] || [];
+      const snap = snapshotForHistory(fresh, otherFilesList);
+
       await mssqlPool
         .request()
         .input("sid", sql.UniqueIdentifier, id)
         .input("by", sql.NVarChar, req.user.username)
         .input("chg", sql.NVarChar, diff.length ? JSON.stringify(diff) : null)
-        .query(`
-        INSERT INTO SalesRequestHistory (salesRequestId, action, changedBy, changes)
-        VALUES (@sid, 'update', @by, @chg);
+        .input("snap", sql.NVarChar, JSON.stringify(snap)).query(`
+                INSERT INTO SalesRequestHistory (salesRequestId, action, changedBy, changes, snapshot)
+        VALUES (@sid, 'update', @by, @chg, @snap);
       `);
 
       // If BOM changed, propagate a BOM edit event into the linked QAP(s)
@@ -3576,30 +3541,9 @@ app.patch(
       }
 
       if (!sets.length) {
-        // nothing to update
+        // nothing to update (but if bom was provided, it's still a logical update request)
+        // We'll treat "bom provided but identical" as a no-op without reopening L2.
         const inflated = inflateSalesRequestRow(beforeRow, {});
-        // If BOM was patched, push BOM diff into linked QAP(s) and reopen L2
-        if (typeof bom !== "undefined") {
-          const beforeBom = safeParseJson(beforeRow.bom, null);
-          const afterBom = row.bom ? JSON.parse(row.bom) : null;
-          const bomDiff = computeBomDiff(beforeBom, afterBom);
-
-          const qaps = (
-            await mssqlPool
-              .request()
-              .input("sid", sql.UniqueIdentifier, id)
-              .query("SELECT id FROM QAPs WHERE salesRequestId=@sid")
-          ).recordset;
-
-          for (const q of qaps) {
-            await appendBomEditAndReopenL2(
-              q.id,
-              req.user?.username || "system",
-              bomDiff
-            );
-          }
-        }
-
         return res.json(inflated);
       }
 
@@ -3626,6 +3570,35 @@ app.patch(
            (salesRequestId, action, changedBy, changes)
            VALUES (@sid, @act, @by, @chg)`
         );
+
+      // 4.5) If BOM changed, propagate a BOM edit event into linked QAP(s)
+      if (typeof bom !== "undefined") {
+        const beforeBom = safeParseJson(beforeRow.bom, null);
+        const afterBom = bom ?? null;
+        const bomDiff = computeBomDiff(beforeBom, afterBom);
+
+        const hasBomDelta =
+          (bomDiff.changed && bomDiff.changed.length) ||
+          (bomDiff.added && bomDiff.added.length) ||
+          (bomDiff.removed && bomDiff.removed.length);
+
+        if (hasBomDelta) {
+          const qaps = (
+            await mssqlPool
+              .request()
+              .input("sid", sql.UniqueIdentifier, id)
+              .query("SELECT id FROM QAPs WHERE salesRequestId=@sid")
+          ).recordset;
+
+          for (const q of qaps) {
+            await appendBomEditAndReopenL2(
+              q.id,
+              req.user?.username || "system",
+              bomDiff
+            );
+          }
+        }
+      }
 
       // 5) return fresh row (inflated to FE shape)
       const afterReq = await mssqlPool

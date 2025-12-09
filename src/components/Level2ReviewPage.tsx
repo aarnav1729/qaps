@@ -187,7 +187,7 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
 
   // >>> CHANGE_SUMMARY_HELPERS (ADD)
   // Surface edit history (qap.editMeta) so reviewers can see what changed.
-  // editMeta is already attached to each QAP when the requestor edits/resubmits. :contentReference[oaicite:5]{index=5}
+  // editMeta is already attached to each QAP when the requestor edits/resubmits.
   const summarizeEditCounts = (em: any): string => {
     if (!em) return "";
     const parts: string[] = [];
@@ -320,64 +320,157 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
           )}
 
           {/* BOM edits */}
+          {/* BOM edits */}
           {em.bom && (
             <div>
               <div className="font-semibold mb-1">BOM Updates</div>
 
+              {/* Modified */}
               {Array.isArray(em.bom.changed) && em.bom.changed.length > 0 && (
                 <div className="mb-2">
                   <div className="italic text-xs text-gray-600">
                     Modified rows
                   </div>
                   <ul className="ml-4 list-disc space-y-1 text-xs md:text-sm">
-                    {em.bom.changed.map((c: any, idx: number) => (
-                      <li key={idx}>
-                        <span className="font-medium">
-                          {c.part || c.model || c.name || `Row ${idx + 1}`}:
-                        </span>{" "}
-                        <span className="line-through text-red-600">
-                          {String(c.before ?? "-")}
-                        </span>{" "}
-                        →{" "}
-                        <span className="text-green-700 font-semibold">
-                          {String(c.after ?? "-")}
-                        </span>
-                      </li>
-                    ))}
+                    {em.bom.changed.map((c: any, idx: number) => {
+                      // ✅ NEW SHAPE (from EnhancedQAPModal)
+                      if (
+                        c &&
+                        typeof c.comp === "string" &&
+                        typeof c.index === "number" &&
+                        Array.isArray(c.deltas)
+                      ) {
+                        return (
+                          <li key={idx}>
+                            <span className="font-medium">
+                              [{c.comp}] row {c.index + 1}:
+                            </span>{" "}
+                            {c.deltas.map((d: any, i: number) => (
+                              <span key={i} className="mr-2">
+                                <span className="font-mono">
+                                  {d.field || "field"}
+                                </span>{" "}
+                                <span className="line-through text-red-600">
+                                  {String(d.before ?? "-")}
+                                </span>{" "}
+                                →{" "}
+                                <span className="text-green-700 font-semibold">
+                                  {String(d.after ?? "-")}
+                                </span>
+                              </span>
+                            ))}
+                          </li>
+                        );
+                      }
+
+                      // 🔁 LEGACY FALLBACK SHAPE
+                      const label =
+                        c?.part || c?.model || c?.name || `Row ${idx + 1}`;
+                      return (
+                        <li key={idx}>
+                          <span className="font-medium">{label}:</span>{" "}
+                          <span className="line-through text-red-600">
+                            {String(c?.before ?? "-")}
+                          </span>{" "}
+                          →{" "}
+                          <span className="text-green-700 font-semibold">
+                            {String(c?.after ?? "-")}
+                          </span>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}
 
+              {/* Added */}
               {Array.isArray(em.bom.added) && em.bom.added.length > 0 && (
                 <div className="mb-2">
                   <div className="italic text-xs text-gray-600">Added rows</div>
                   <ul className="ml-4 list-disc space-y-1 text-xs md:text-sm">
-                    {em.bom.added.map((c: any, idx: number) => (
-                      <li key={idx}>
-                        <span className="text-green-700 font-semibold">
-                          + {c.part || c.model || c.name || `Row ${idx + 1}`}
-                        </span>
-                      </li>
-                    ))}
+                    {em.bom.added.map((a: any, idx: number) => {
+                      // ✅ NEW SHAPE
+                      if (
+                        a &&
+                        typeof a.comp === "string" &&
+                        typeof a.index === "number" &&
+                        a.row
+                      ) {
+                        return (
+                          <li key={idx}>
+                            <span className="text-green-700 font-semibold">
+                              + [{a.comp}] row {a.index + 1}:
+                            </span>{" "}
+                            model={a.row.model || "—"}, subVendor=
+                            {a.row.subVendor || "—"}, spec={a.row.spec || "—"}
+                          </li>
+                        );
+                      }
+
+                      // 🔁 FALLBACK
+                      const label =
+                        a?.part || a?.model || a?.name || `Row ${idx + 1}`;
+                      return (
+                        <li key={idx}>
+                          <span className="text-green-700 font-semibold">
+                            + {label}
+                          </span>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}
+
+              {/* Removed */}
               {Array.isArray(em.bom.removed) && em.bom.removed.length > 0 && (
                 <div className="mb-2">
                   <div className="italic text-xs text-gray-600">
                     Removed rows
                   </div>
                   <ul className="ml-4 list-disc space-y-1 text-xs md:text-sm">
-                    {em.bom.removed.map((c: any, idx: number) => (
-                      <li key={idx}>
-                        <span className="line-through text-red-600">
-                          − {c.part || c.model || c.name || `Row ${idx + 1}`}
-                        </span>
-                      </li>
-                    ))}
+                    {em.bom.removed.map((r: any, idx: number) => {
+                      // ✅ NEW SHAPE
+                      if (
+                        r &&
+                        typeof r.comp === "string" &&
+                        typeof r.index === "number" &&
+                        r.row
+                      ) {
+                        return (
+                          <li key={idx}>
+                            <span className="line-through text-red-600">
+                              − [{r.comp}] row {r.index + 1}:
+                            </span>{" "}
+                            model={r.row.model || "—"}, subVendor=
+                            {r.row.subVendor || "—"}, spec={r.row.spec || "—"}
+                          </li>
+                        );
+                      }
+
+                      // 🔁 FALLBACK
+                      const label =
+                        r?.part || r?.model || r?.name || `Row ${idx + 1}`;
+                      return (
+                        <li key={idx}>
+                          <span className="line-through text-red-600">
+                            − {label}
+                          </span>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}
+
+              {/* Empty guard */}
+              {!em.bom.changed?.length &&
+                !em.bom.added?.length &&
+                !em.bom.removed?.length && (
+                  <div className="text-xs text-gray-600">
+                    No BOM changes captured.
+                  </div>
+                )}
             </div>
           )}
         </div>
@@ -514,6 +607,70 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
     "bg-amber-50 border-amber-300 ring-1 ring-amber-300 shadow-inner transition-colors";
   // <<< L2_EDIT_HL_HELPERS
 
+  // Find the most recent edit event that actually contains BOM deltas
+  const latestBomEditEvent = (qapLocal: any): EditEvent | null => {
+    const history = getEditHistory(qapLocal);
+    if (!history.length) return null;
+
+    for (let i = history.length - 1; i >= 0; i--) {
+      const e = history[i] as any;
+      const b = e?.bom;
+      const count =
+        (b?.changed?.length || 0) +
+        (b?.added?.length || 0) +
+        (b?.removed?.length || 0);
+
+      if (count > 0) return e as EditEvent;
+    }
+
+    return null;
+  };
+
+  // >>> L2_BOM_EDIT_HL_HELPERS (ADD)
+  const buildBomEditedIndex = (qapLocal: any) => {
+    const ev = (latestBomEditEvent(qapLocal) ??
+      latestEditEvent(qapLocal)) as any;
+
+    const changed = new Set<string>();
+    const added = new Set<string>();
+    const removed = new Set<string>();
+
+    const pickName = (x: any) =>
+      String(x?.part || x?.model || x?.name || "")
+        .trim()
+        .toLowerCase();
+
+    const pushAll = (arr: any[] | undefined, set: Set<string>) => {
+      if (!Array.isArray(arr)) return;
+      for (const x of arr) {
+        const n = pickName(x);
+        if (n) set.add(n);
+      }
+    };
+
+    if (ev?.bom) {
+      pushAll(ev.bom.changed, changed);
+      pushAll(ev.bom.added, added);
+      pushAll(ev.bom.removed, removed);
+    }
+
+    return { changed, added, removed };
+  };
+
+  const bomRowEdited = (
+    idx: { changed: Set<string>; added: Set<string>; removed: Set<string> },
+    row: any
+  ) => {
+    const key = String(row?.model || row?.part || row?.name || "")
+      .trim()
+      .toLowerCase();
+    if (!key) return false;
+    return idx.changed.has(key) || idx.added.has(key);
+  };
+
+  const HL_BOM_ROW = "bg-amber-50 ring-1 ring-amber-300";
+  // <<< L2_BOM_EDIT_HL_HELPERS
+
   /* ───────────────────────── render ───────────────────────── */
   return (
     <div className="container mx-auto px-4 py-6">
@@ -559,6 +716,18 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
           // >>> L2_EDIT_INDEX (ADD)
           const editedIndex = buildEditedIndex(qap);
           // <<< L2_EDIT_INDEX
+
+          // >>> L2_BOM_EDIT_INDEX (ADD)
+          const bomEditedIndex = buildBomEditedIndex(qap);
+
+          const bomEv = latestBomEditEvent(qap) as any;
+          const hasBomEdits =
+            (bomEv?.bom?.changed?.length || 0) +
+              (bomEv?.bom?.added?.length || 0) +
+              (bomEv?.bom?.removed?.length || 0) >
+            0;
+
+          // <<< L2_BOM_EDIT_INDEX
 
           const specs = qap.allSpecs.filter((s) => {
             if (rowFilter === "all") return true;
@@ -654,7 +823,8 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                     {/* <<< CHANGE_SUMMARY_PANEL */}
 
                     {/* >>> L2_EDIT_LEGEND (ADD) */}
-                    {(editedIndex.mqp.size || editedIndex.visual.size) && (
+                    {(editedIndex.mqp.size > 0 ||
+                      editedIndex.visual.size > 0) && (
                       <div className="mb-3 text-xs text-gray-600">
                         <span className="inline-block h-3 w-3 rounded-sm align-middle mr-2 bg-amber-300 border border-amber-500"></span>
                         <span className="align-middle">
@@ -672,7 +842,17 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                         <TabsTrigger value="visual">
                           Visual/EL ({qap.specs.visual.length})
                         </TabsTrigger>
-                        <TabsTrigger value="bom">BOM</TabsTrigger>
+                        <TabsTrigger value="bom">
+                          BOM
+                          {hasBomEdits && (
+                            <Badge
+                              variant="outline"
+                              className="ml-2 bg-amber-50 border-amber-300 text-amber-800"
+                            >
+                              Edited
+                            </Badge>
+                          )}
+                        </TabsTrigger>
                       </TabsList>
 
                       {/* MQP TAB */}
@@ -701,7 +881,8 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                                         ? "bg-green-50"
                                         : "bg-red-50"
                                     } ${
-                                      isEdited("mqp", s.sno, qap.editedSnos)
+                                      isEdited("mqp", s.sno, qap.editedSnos) ||
+                                      editedIndex.mqp.has(s.sno)
                                         ? "ring-1 ring-amber-300"
                                         : ""
                                     }`}
@@ -859,7 +1040,9 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                                         ? "bg-green-50"
                                         : "bg-red-50"
                                     } ${
-                                      qap?.editedSnos?.visual?.includes(s.sno)
+                                      qap?.editedSnos?.visual?.includes(
+                                        s.sno
+                                      ) || editedIndex.visual.has(s.sno)
                                         ? "ring-1 ring-amber-300"
                                         : ""
                                     }`}
@@ -1135,7 +1318,14 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                                                       (r: any, i: number) => (
                                                         <tr
                                                           key={i}
-                                                          className="align-top"
+                                                          className={`align-top ${
+                                                            bomRowEdited(
+                                                              bomEditedIndex,
+                                                              r
+                                                            )
+                                                              ? HL_BOM_ROW
+                                                              : ""
+                                                          }`}
                                                         >
                                                           <td className="px-3 py-2 whitespace-nowrap">
                                                             {r.model || "-"}
