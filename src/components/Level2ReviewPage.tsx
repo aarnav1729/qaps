@@ -626,49 +626,92 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
     return null;
   };
 
-  // >>> L2_BOM_EDIT_HL_HELPERS (ADD)
+  // >>> L2_BOM_EDIT_HL_HELPERS (REPLACE)
+
   const buildBomEditedIndex = (qapLocal: any) => {
     const ev = (latestBomEditEvent(qapLocal) ??
       latestEditEvent(qapLocal)) as any;
 
+    // ✅ New "position-based" identity (best-effort, most accurate)
+    const changedPos = new Set<string>();
+    const addedPos = new Set<string>();
+    const removedPos = new Set<string>();
+
+    // 🔁 Legacy name-based fallback (kept for backward compatibility)
     const changed = new Set<string>();
     const added = new Set<string>();
     const removed = new Set<string>();
 
-    const pickName = (x: any) =>
-      String(x?.part || x?.model || x?.name || "")
+    const norm = (s: any) =>
+      String(s || "")
         .trim()
         .toLowerCase();
+    const posKey = (comp: string, index: number) =>
+      `${norm(comp)}::${Number(index)}`;
 
-    const pushAll = (arr: any[] | undefined, set: Set<string>) => {
+    const pickNameFromEditItem = (x: any) =>
+      norm(x?.row?.model || x?.model || x?.part || x?.name);
+
+    const pushAll = (
+      arr: any[] | undefined,
+      posSet: Set<string>,
+      nameSet: Set<string>
+    ) => {
       if (!Array.isArray(arr)) return;
+
       for (const x of arr) {
-        const n = pickName(x);
-        if (n) set.add(n);
+        // New shape from EnhancedQAPModal
+        if (typeof x?.comp === "string" && typeof x?.index === "number") {
+          posSet.add(posKey(x.comp, x.index));
+        }
+
+        // Try to also derive a name for fallback matching
+        const n = pickNameFromEditItem(x);
+        if (n) nameSet.add(n);
       }
     };
 
     if (ev?.bom) {
-      pushAll(ev.bom.changed, changed);
-      pushAll(ev.bom.added, added);
-      pushAll(ev.bom.removed, removed);
+      pushAll(ev.bom.changed, changedPos, changed);
+      pushAll(ev.bom.added, addedPos, added);
+      pushAll(ev.bom.removed, removedPos, removed);
     }
 
-    return { changed, added, removed };
+    return { changedPos, addedPos, removedPos, changed, added, removed };
   };
 
   const bomRowEdited = (
-    idx: { changed: Set<string>; added: Set<string>; removed: Set<string> },
+    idx: {
+      changedPos: Set<string>;
+      addedPos: Set<string>;
+      removedPos: Set<string>;
+      changed: Set<string>;
+      added: Set<string>;
+      removed: Set<string>;
+    },
+    compName: string,
+    rowIndex: number,
     row: any
   ) => {
-    const key = String(row?.model || row?.part || row?.name || "")
-      .trim()
-      .toLowerCase();
-    if (!key) return false;
-    return idx.changed.has(key) || idx.added.has(key);
+    const norm = (s: any) =>
+      String(s || "")
+        .trim()
+        .toLowerCase();
+    const keyPos = `${norm(compName)}::${Number(rowIndex)}`;
+
+    // ✅ Best signal: position match
+    if (idx.changedPos.has(keyPos) || idx.addedPos.has(keyPos)) return true;
+
+    // 🔁 Fallback: name match (legacy)
+    const keyName = norm(row?.model || row?.part || row?.name);
+    if (!keyName) return false;
+
+    return idx.changed.has(keyName) || idx.added.has(keyName);
   };
 
-  const HL_BOM_ROW = "bg-amber-50 ring-1 ring-amber-300";
+  const HL_BOM_ROW =
+    "bg-amber-50 ring-1 ring-amber-300 shadow-sm transition-colors";
+
   // <<< L2_BOM_EDIT_HL_HELPERS
 
   /* ───────────────────────── render ───────────────────────── */
@@ -1269,22 +1312,50 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                                             const selectedRows = Array.isArray(
                                               c.rows
                                             )
-                                              ? c.rows.filter(
-                                                  (r: any) =>
-                                                    r &&
-                                                    (r.isSelected === true ||
-                                                      r.selected === true ||
-                                                      r.model ||
-                                                      r.subVendor ||
-                                                      r.spec ||
-                                                      (typeof r.qty !==
-                                                        "undefined" &&
-                                                        r.qty !== null))
-                                                )
+                                              ? c.rows
+                                                  .map(
+                                                    (
+                                                      r: any,
+                                                      rowIndex: number
+                                                    ) => ({
+                                                      r,
+                                                      rowIndex,
+                                                    })
+                                                  )
+                                                  .filter(
+                                                    ({ r }: any) =>
+                                                      r &&
+                                                      (r.isSelected === true ||
+                                                        r.selected === true ||
+                                                        r.model ||
+                                                        r.subVendor ||
+                                                        r.spec ||
+                                                        (typeof r.qty !==
+                                                          "undefined" &&
+                                                          r.qty !== null))
+                                                  )
                                               : [];
 
-                                            if (selectedRows.length === 0)
-                                              return null;
+                                            // ✅ Apply top filter to BOM rows
+                                            const filteredRows =
+                                              rowFilter === "edited"
+                                                ? selectedRows.filter(
+                                                    ({ r, rowIndex }) =>
+                                                      bomRowEdited(
+                                                        bomEditedIndex,
+                                                        c.name,
+                                                        rowIndex,
+                                                        r
+                                                      )
+                                                  )
+                                                : selectedRows;
+
+                                            if (filteredRows.length === 0) {
+                                              // If user explicitly chose "edited", silently hide
+                                              // non-edited components (cleaner UX)
+                                              if (rowFilter === "edited")
+                                                return null;
+                                            }
 
                                             return (
                                               <div
@@ -1294,7 +1365,7 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                                                 <div className="font-medium mb-2">
                                                   {c.name}{" "}
                                                   <span className="text-xs text-gray-500">
-                                                    ({selectedRows.length}{" "}
+                                                    ({filteredRows.length}{" "}
                                                     selected)
                                                   </span>
                                                 </div>
@@ -1314,13 +1385,18 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
                                                     </tr>
                                                   </thead>
                                                   <tbody className="divide-y">
-                                                    {selectedRows.map(
-                                                      (r: any, i: number) => (
+                                                    {filteredRows.map(
+                                                      (
+                                                        { r, rowIndex }: any,
+                                                        i: number
+                                                      ) => (
                                                         <tr
                                                           key={i}
                                                           className={`align-top ${
                                                             bomRowEdited(
                                                               bomEditedIndex,
+                                                              c.name,
+                                                              rowIndex,
                                                               r
                                                             )
                                                               ? HL_BOM_ROW
