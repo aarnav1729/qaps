@@ -1211,8 +1211,9 @@ export const generateQapApprovalPdfHtml = (qap: QAPFormData): string => {
     *, *::before, *::after { box-sizing: border-box; }
 
     html, body {
-      margin: 0; padding: 0;
-      width: auto; max-width: 100%;
+      margin: 0;
+      padding: 0;
+      width: 100%;
       font-family: 'Hanken Grotesk', Arial, sans-serif;
       color: #0f172a;
       background: #fff;
@@ -1226,9 +1227,12 @@ export const generateQapApprovalPdfHtml = (qap: QAPFormData): string => {
     .doc {
       width: 100%;
       max-width: 100%;
+      margin: 0;
       padding: 26px;
       position: relative;
     }
+
+
 
     .header {
       display: flex;
@@ -1288,8 +1292,9 @@ export const generateQapApprovalPdfHtml = (qap: QAPFormData): string => {
     .ref-item b { color: #0f172a; }
 
     .section {
-      margin: 18px 0 22px;
-      page-break-inside: avoid;
+      margin: 0;
+      break-inside: auto;
+      page-break-inside: auto;
     }
 
     .section-title {
@@ -1345,16 +1350,39 @@ export const generateQapApprovalPdfHtml = (qap: QAPFormData): string => {
     }
 
     .table-wrap {
-      overflow: hidden;
+      overflow: visible;
       border: 1px solid #e5e7eb;
       border-radius: 8px;
     }
+
 
     table.data-table {
       width: 100%;
       border-collapse: collapse;
       font-size: 11px;
+
+      /* ✅ allow table to flow across pages */
+      page-break-inside: auto;
+      break-inside: auto;
     }
+
+    /* ✅ repeat headers on every printed page */
+    .data-table thead {
+      display: table-header-group;
+    }
+
+    /* ✅ prevent a single row splitting across pages */
+    .data-table tr {
+      break-inside: auto;
+      page-break-inside: auto;
+    }
+
+        .data-table td,
+    .data-table th {
+      break-inside: auto;
+      page-break-inside: auto;
+    }
+
 
     .data-table thead th {
       background: #f1f5f9;
@@ -1405,7 +1433,6 @@ export const generateQapApprovalPdfHtml = (qap: QAPFormData): string => {
       border-top: 3px solid #1e88e5;
       padding-top: 14px;
       text-align: center;
-      page-break-inside: avoid;
     }
 
     .footer-logo {
@@ -1428,6 +1455,8 @@ export const generateQapApprovalPdfHtml = (qap: QAPFormData): string => {
       width: 240px;
       pointer-events: none;
       z-index: 0;
+      print-color-adjust: exact;
+      -webkit-print-color-adjust: exact;
     }
 
     /* ---- New: Sales Summary micro-formatting ---- */
@@ -1502,10 +1531,66 @@ export const generateQapApprovalPdfHtml = (qap: QAPFormData): string => {
       background: #fcfcfd;
     }
 
-    @media print {
-      .doc { padding: 18px; }
-      .section, .table-wrap { break-inside: avoid; page-break-inside: avoid; }
+        @media print {
+      html, body {
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+
+      .doc {
+        width: 100% !important;
+        max-width: 100% !important;
+        padding: 0 !important;
+        margin: 0 !important;
+      }
+
+      /* ✅ absolutely no block-level "avoid" rules */
+      .header,
+      .ref-box,
+      .callout,
+      .empty-note,
+      .footer,
+      .mini-callout,
+      .mini-wrap,
+      .section,
+      .table-wrap {
+        break-inside: auto !important;
+        page-break-inside: auto !important;
+      }
+
+      /* ✅ allow rows to split if needed */
+      .data-table tr,
+      .data-table td,
+      .data-table th {
+        break-inside: auto !important;
+        page-break-inside: auto !important;
+      }
+
+      /* ✅ simplify layout so it never forces wide reflow */
+      .detail-grid {
+        display: block !important;
+      }
+
+      .detail-item {
+        background: transparent !important;
+        border-left: none !important;
+        padding: 0 !important;
+        margin: 0 0 6px 0 !important;
+      }
+
+      /* ✅ reduce visual spacing */
+      .section-title {
+        margin: 0 0 6px 0 !important;
+        padding: 0 0 4px 0 !important;
+      }
+
+      /* ✅ prevent any accidental clipping */
+      .table-wrap {
+        overflow: visible !important;
+      }
     }
+
+
   </style>
 </head>
 <body>
@@ -1583,11 +1668,17 @@ export const generateQapApprovalPdfHtml = (qap: QAPFormData): string => {
     </div>
 
     ${renderSpecsTable("MQP Specifications", mqp)}
+    <br/><br/>
     ${renderSpecsTable("Visual / EL Specifications", visual)}
+    <br/><br/>
     ${renderBomSection(anyQap)}
+    <br/><br/>
     ${renderEdits(anyQap)}
+    <br/><br/>
     ${renderApprovals(anyQap)}
+    <br/><br/>
     ${renderComments(anyQap)}
+
 
     <div class="footer">
       <img src="${LOGO_URL}" alt="Premier Energies" class="footer-logo" />

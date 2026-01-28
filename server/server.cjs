@@ -375,6 +375,18 @@ async function initMssql() {
       -- Only add a position column; do NOT add an id.
       IF COL_LENGTH('dbo.BomComponents','position') IS NULL
       ALTER TABLE dbo.BomComponents ADD position INT NULL;
+
+
+            ------------------------------------------------
+      -- Suggestions
+      IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Suggestions')
+      CREATE TABLE Suggestions (
+        id        UNIQUEIDENTIFIER DEFAULT NEWID() PRIMARY KEY,
+        message   NVARCHAR(MAX)    NOT NULL,
+        createdBy NVARCHAR(50)     NULL,
+        createdAt DATETIME2        NOT NULL DEFAULT SYSUTCDATETIME()
+      );
+      ------------------------------------------------
     `);
 
     console.log("✅ MSSQL schema ensured");
@@ -2697,94 +2709,206 @@ app.post(
         // Advance only when every required role has responded
         if (required.length > 0 && required.every((r) => done.includes(r))) {
           // fetch plant
-          const { recordset } = await tx
-            .request()
-            .input("qapId", sql.UniqueIdentifier, id)
-            .query(`SELECT plant FROM QAPs WHERE id=@qapId`);
-          const plant = recordset[0]?.plant?.trim()?.toLowerCase();
+          // fetch plant + finalCommentsAt + status for round awareness
+          const qRow =
+            (
+              await tx
+                .request()
+                .input("qapId", sql.UniqueIdentifier, id)
+                .query(
+                  `SELECT plant, finalCommentsAt, status FROM QAPs WHERE id=@qapId`
+                )
+            ).recordset[0] || {};
 
-          if (plant === "p2") {
-            await tx
-              .request()
-              .input("qapId", sql.UniqueIdentifier, id)
-              .input("newLvl", sql.Int, 4).query(`
+          const plant = String(qRow.plant || "")
+            .trim()
+            .toLowerCase();
+
+          const statusLc = String(qRow.status || "").toLowerCase();
+          const isPostFinal = !!qRow.finalCommentsAt && statusLc === "level-2";
+
+          // Normalize plant rule
+          const isP2P6 = ["p2", "p6"].includes(plant);
+
+          if (isPostFinal) {
+            // POST-FINAL L2 -> route to L3b or L4b
+            if (isP2P6) {
+              await tx
+                .request()
+                .input("qapId", sql.UniqueIdentifier, id)
+                .input("newLvl", sql.Int, 4).query(`
+        UPDATE QAPs
+        SET status='level-4b',
+            currentLevel=@newLvl,
+            lastModifiedAt=SYSUTCDATETIME()
+        WHERE id=@qapId;
+      `);
+
+              await tx
+                .request()
+                .input("qapId", sql.UniqueIdentifier, id)
+                .input("ts2", sql.DateTime2, new Date()).query(`
+        INSERT INTO TimelineEntries (qapId, level, action, [user], timestamp)
+        VALUES (@qapId, 2, 'Post-final Level 2 completed, skipped Level 3, sent to Level 4 (L4b)', 'system', @ts2);
+      `);
+            } else {
+              await tx
+                .request()
+                .input("qapId", sql.UniqueIdentifier, id)
+                .input("newLvl", sql.Int, 3).query(`
+        UPDATE QAPs
+        SET status='level-3b',
+            currentLevel=@newLvl,
+            lastModifiedAt=SYSUTCDATETIME()
+        WHERE id=@qapId;
+      `);
+
+              await tx
+                .request()
+                .input("qapId", sql.UniqueIdentifier, id)
+                .input("ts2", sql.DateTime2, new Date()).query(`
+        INSERT INTO TimelineEntries (qapId, level, action, [user], timestamp)
+        VALUES (@qapId, 2, 'Post-final Level 2 completed, sent to Level 3 (L3b)', 'system', @ts2);
+      `);
+            }
+          } else {
+            // INITIAL L2 -> keep existing plant-based skip
+            if (isP2P6) {
+              await tx
+                .request()
+                .input("qapId", sql.UniqueIdentifier, id)
+                .input("newLvl", sql.Int, 4).query(`
         UPDATE QAPs
         SET status='level-4',
             currentLevel=@newLvl,
             lastModifiedAt=SYSUTCDATETIME()
         WHERE id=@qapId;
       `);
-            await tx
-              .request()
-              .input("qapId", sql.UniqueIdentifier, id)
-              .input("ts2", sql.DateTime2, new Date()).query(`
+
+              await tx
+                .request()
+                .input("qapId", sql.UniqueIdentifier, id)
+                .input("ts2", sql.DateTime2, new Date()).query(`
         INSERT INTO TimelineEntries (qapId, level, action, [user], timestamp)
         VALUES (@qapId, 2, 'Level 2 completed, skipped Level 3, sent to Level 4', 'system', @ts2);
       `);
-          } else {
-            await tx
-              .request()
-              .input("qapId", sql.UniqueIdentifier, id)
-              .input("newLvl", sql.Int, 3).query(`
+            } else {
+              await tx
+                .request()
+                .input("qapId", sql.UniqueIdentifier, id)
+                .input("newLvl", sql.Int, 3).query(`
         UPDATE QAPs
         SET status='level-3',
             currentLevel=@newLvl,
             lastModifiedAt=SYSUTCDATETIME()
         WHERE id=@qapId;
       `);
-            await tx
-              .request()
-              .input("qapId", sql.UniqueIdentifier, id)
-              .input("ts2", sql.DateTime2, new Date()).query(`
+
+              await tx
+                .request()
+                .input("qapId", sql.UniqueIdentifier, id)
+                .input("ts2", sql.DateTime2, new Date()).query(`
         INSERT INTO TimelineEntries (qapId, level, action, [user], timestamp)
         VALUES (@qapId, 2, 'Level 2 completed, sent to Level 3', 'system', @ts2);
       `);
+            }
           }
         }
       }
 
       // 4) If this was Level 3, automatically advance to Level 4
+      // 4) If this was Level 3, automatically advance to Level 4
       if (level === 3) {
+        const qRow =
+          (
+            await tx
+              .request()
+              .input("qapId", sql.UniqueIdentifier, id)
+              .query(`SELECT status FROM QAPs WHERE id=@qapId`)
+          ).recordset[0] || {};
+
+        const statusLc = String(qRow.status || "").toLowerCase();
+        const isPostFinalL3 = statusLc === "level-3b";
+        const nextStatus = isPostFinalL3 ? "level-4b" : "level-4";
+
         await tx
           .request()
           .input("qapId", sql.UniqueIdentifier, id)
           .input("newLvl", sql.Int, 4).query(`
-            UPDATE QAPs
-            SET status='level-4',
-                currentLevel=@newLvl,
-                lastModifiedAt=SYSUTCDATETIME()
-            WHERE id=@qapId;
-          `);
+      UPDATE QAPs
+      SET status='${nextStatus}',
+          currentLevel=@newLvl,
+          lastModifiedAt=SYSUTCDATETIME()
+      WHERE id=@qapId;
+    `);
 
         await tx
           .request()
           .input("qapId", sql.UniqueIdentifier, id)
           .input("ts3", sql.DateTime2, new Date()).query(`
-            INSERT INTO TimelineEntries (qapId, level, action, [user], timestamp)
-            VALUES (@qapId, 3, 'Level 3 completed, sent to Level 4', 'system', @ts3);
-          `);
+      INSERT INTO TimelineEntries (qapId, level, action, [user], timestamp)
+      VALUES (@qapId, 3, '${
+        isPostFinalL3
+          ? "Post-final Level 3 completed, sent to Level 4 (L4b)"
+          : "Level 3 completed, sent to Level 4"
+      }', 'system', @ts3);
+    `);
       }
 
       // 5) If this was Level 4, send back to Requestor for final comments
+      // 5) If this was Level 4...
       if (level === 4) {
-        await tx
-          .request()
-          .input("qapId", sql.UniqueIdentifier, id)
-          .input("newLvl", sql.Int, 5).query(`
-            UPDATE QAPs
-            SET status='final-comments',
-                currentLevel=@newLvl,
-                lastModifiedAt=SYSUTCDATETIME()
-            WHERE id=@qapId;
-          `);
+        const qRow =
+          (
+            await tx
+              .request()
+              .input("qapId", sql.UniqueIdentifier, id)
+              .query(`SELECT status FROM QAPs WHERE id=@qapId`)
+          ).recordset[0] || {};
 
-        await tx
-          .request()
-          .input("qapId", sql.UniqueIdentifier, id)
-          .input("ts4", sql.DateTime2, new Date()).query(`
-            INSERT INTO TimelineEntries (qapId, level, action, [user], timestamp)
-            VALUES (@qapId, 4, 'Level 4 completed, sent back to Requestor for Final Comments', 'system', @ts4);
-          `);
+        const statusLc = String(qRow.status || "").toLowerCase();
+
+        // If this is post-final L4b, advance to Level 5
+        if (statusLc === "level-4b") {
+          await tx
+            .request()
+            .input("qapId", sql.UniqueIdentifier, id)
+            .input("newLvl", sql.Int, 5).query(`
+        UPDATE QAPs
+        SET status='level-5',
+            currentLevel=@newLvl,
+            lastModifiedAt=SYSUTCDATETIME()
+        WHERE id=@qapId;
+      `);
+
+          await tx
+            .request()
+            .input("qapId", sql.UniqueIdentifier, id)
+            .input("ts4", sql.DateTime2, new Date()).query(`
+        INSERT INTO TimelineEntries (qapId, level, action, [user], timestamp)
+        VALUES (@qapId, 4, 'Post-final Level 4 completed, sent to Plant Head (Level 5)', 'system', @ts4);
+      `);
+        } else {
+          // Pre-final Level 4 -> send back to Requestor for final comments
+          await tx
+            .request()
+            .input("qapId", sql.UniqueIdentifier, id)
+            .input("newLvl", sql.Int, 4).query(`
+        UPDATE QAPs
+        SET status='final-comments',
+            currentLevel=@newLvl,
+            lastModifiedAt=SYSUTCDATETIME()
+        WHERE id=@qapId;
+      `);
+
+          await tx
+            .request()
+            .input("qapId", sql.UniqueIdentifier, id)
+            .input("ts4", sql.DateTime2, new Date()).query(`
+        INSERT INTO TimelineEntries (qapId, level, action, [user], timestamp)
+        VALUES (@qapId, 4, 'Level 4 completed, sent back to Requestor for Final Comments', 'system', @ts4);
+      `);
+        }
       }
 
       // 6) commit all changes
@@ -2854,32 +2978,44 @@ app.post(
         `);
       }
 
-      // 2) Advance to Level 5
+      // 2) Reset Level 2 acknowledgements so all departments must re-respond
       await mssqlPool
         .request()
-        .input("qapId", sql.UniqueIdentifier, id)
-        .input("lvl", sql.Int, 5).query(`
-          UPDATE QAPs
-          SET status       = 'level-5',
-              currentLevel = @lvl,
-              lastModifiedAt = SYSUTCDATETIME()
-          WHERE id = @qapId;
-        `);
+        .input("id", sql.UniqueIdentifier, id)
+        .query(
+          `UPDATE LevelResponses SET acknowledged=0 WHERE qapId=@id AND level=2`
+        );
 
-      // 3) Log timeline entry for the transition
+      // 3) Advance to Level 2 (post-final round)
       await mssqlPool
         .request()
         .input("qapId", sql.UniqueIdentifier, id)
-        .input("level", sql.Int, 5)
-        .input("action", sql.NVarChar, "Sent to Plant Head for Approval")
+        .input("lvl", sql.Int, 2).query(`
+  UPDATE QAPs
+  SET status       = 'level-2',
+      currentLevel = @lvl,
+      lastModifiedAt = SYSUTCDATETIME()
+  WHERE id = @qapId;
+`);
+
+      // 4) Log timeline entry for the transition
+      await mssqlPool
+        .request()
+        .input("qapId", sql.UniqueIdentifier, id)
+        .input("level", sql.Int, 2)
+        .input(
+          "action",
+          sql.NVarChar,
+          "Final comments saved; reopened Level 2 for re-review"
+        )
         .input("user", sql.NVarChar, username)
         .input("ts", sql.DateTime2, now).query(`
-          INSERT INTO TimelineEntries (qapId, level, action, [user], timestamp)
-          VALUES (@qapId, @level, @action, @user, @ts);
-        `);
+  INSERT INTO TimelineEntries (qapId, level, action, [user], timestamp)
+  VALUES (@qapId, @level, @action, @user, @ts);
+`);
 
       return res.json({
-        message: "Final comments saved and QAP advanced to Level 5",
+        message: "Final comments saved; QAP reopened to Level 2 for re-review",
       });
     } catch (err) {
       console.error("POST /api/qaps/:id/final-comments error:", err);
@@ -4890,6 +5026,82 @@ app.post("/api/bom-components/reorder", authenticateToken, async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+// GET /api/suggestions → list latest suggestions (everyone)
+app.get("/api/suggestions", authenticateToken, async (_req, res) => {
+  try {
+    const r = await mssqlPool.request().query(`
+      SELECT TOP (500)
+        id, message, createdBy, createdAt
+      FROM Suggestions
+      ORDER BY createdAt DESC
+    `);
+
+    // Normalize to FE-friendly strings
+    const out = (r.recordset || []).map((row) => ({
+      id: String(row.id),
+      message: row.message || "",
+      createdBy: row.createdBy || null,
+      createdAt:
+        row.createdAt instanceof Date
+          ? row.createdAt.toISOString()
+          : new Date(row.createdAt).toISOString(),
+    }));
+
+    res.json(out);
+  } catch (e) {
+    console.error("GET /api/suggestions error:", e);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// POST /api/suggestions → add a suggestion
+app.post(
+  "/api/suggestions",
+  [
+    authenticateToken,
+    body("message")
+      .isString()
+      .trim()
+      .isLength({ min: 1, max: 2000 }),
+    handleValidation,
+  ],
+  async (req, res) => {
+    try {
+      const id = crypto.randomUUID();
+      const message = String(req.body.message || "").trim();
+      const createdBy = req.user?.username || null;
+
+      const ins = await mssqlPool
+        .request()
+        .input("id", sql.UniqueIdentifier, id)
+        .input("msg", sql.NVarChar, message)
+        .input("by", sql.NVarChar, createdBy)
+        .query(`
+          INSERT INTO Suggestions (id, message, createdBy)
+          OUTPUT inserted.id, inserted.message, inserted.createdBy, inserted.createdAt
+          VALUES (@id, @msg, @by);
+        `);
+
+      const row = ins.recordset?.[0];
+
+      const out = {
+        id: String(row.id),
+        message: row.message || "",
+        createdBy: row.createdBy || null,
+        createdAt:
+          row.createdAt instanceof Date
+            ? row.createdAt.toISOString()
+            : new Date(row.createdAt).toISOString(),
+      };
+
+      res.status(201).json(out);
+    } catch (e) {
+      console.error("POST /api/suggestions error:", e);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
 
 // certificates for HTTPS
 const httpsOptions = {

@@ -12,6 +12,7 @@ import {
   BomComponentName,
   BomComponentOption,
 } from "@/data/bomMaster";
+import { Badge } from "@/components/ui/badge";
 
 const API = window.location.origin;
 
@@ -179,6 +180,48 @@ export interface SalesRequest {
   bom?: BomPayload | null;
 }
 
+// Minimal QAP shape for linking to Sales Requests
+type QapLite = {
+  id: string;
+  status?: string | null;
+  currentLevel?: number | null;
+  salesRequestId?: string | null;
+  sales_request_id?: string | null;
+  salesRequestID?: string | null;
+  projectCode?: string | null;
+  project_code?: string | null;
+  submittedAt?: string | null;
+  updatedAt?: string | null;
+  createdAt?: string | null;
+  salesRequest?: { id?: string | null; projectCode?: string | null } | null;
+};
+
+// Safe string coercion (same spirit as QAPTable)
+const toStr = (v: any) => {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  try {
+    return String(v);
+  } catch {
+    return "";
+  }
+};
+
+const qapTime = (q: any) => {
+  const t =
+    q?.updatedAt ??
+    q?.submittedAt ??
+    q?.createdAt ??
+    q?.updated_at ??
+    q?.submitted_at ??
+    q?.created_at;
+  const dt = t ? new Date(String(t)) : null;
+  return dt && !Number.isNaN(dt.getTime()) ? dt.getTime() : 0;
+};
+
+const pickNewest = (a: any, b: any) => (qapTime(b) >= qapTime(a) ? b : a);
+
 /* ────────────────────────────────────────────────────────────────────────── */
 /*  BOM types                                                                */
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -242,6 +285,131 @@ const SalesRequestsPage: React.FC = () => {
       return r.json();
     },
   });
+
+  // ---------------------------------------------------------------------------
+  // Linked QAP status support (soft-fail if API not available)
+  // ---------------------------------------------------------------------------
+  const { data: qapList = [] } = useQuery<QapLite[]>({
+    queryKey: ["qap-lite-for-sales-requests"],
+    queryFn: async () => {
+      const endpoints = [`${API}/api/qaps`, `${API}/api/qap`];
+
+      for (const url of endpoints) {
+        try {
+          const r = await fetch(url, { credentials: "include" });
+          if (!r.ok) continue;
+
+          const json = await r.json();
+
+          // Support common shapes: array or { data: [] }
+          const arr = Array.isArray(json)
+            ? json
+            : Array.isArray((json as any)?.data)
+            ? (json as any).data
+            : [];
+
+          if (!Array.isArray(arr)) continue;
+
+          // normalize minimal needed fields
+          return arr.map((q: any) => ({
+            id: toStr(q?.id),
+            status: toStr(q?.status) || null,
+            currentLevel:
+              q?.currentLevel != null ? Number(q.currentLevel) : null,
+            salesRequestId:
+              toStr(
+                q?.salesRequestId ??
+                  q?.sales_request_id ??
+                  q?.salesRequestID ??
+                  q?.salesRequest?.id ??
+                  q?.requestId
+              ) || null,
+            projectCode:
+              toStr(
+                q?.projectCode ??
+                  q?.project_code ??
+                  q?.salesRequest?.projectCode
+              ) || null,
+            submittedAt: toStr(q?.submittedAt) || null,
+            updatedAt: toStr(q?.updatedAt) || null,
+            createdAt: toStr(q?.createdAt) || null,
+          }));
+        } catch {
+          // ignore and try next endpoint
+        }
+      }
+
+      return [];
+    },
+    staleTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 30,
+  });
+
+  const qapBySalesRequestId = useMemo(() => {
+    const m = new Map<string, QapLite>();
+    for (const q of qapList) {
+      const srId = toStr(q?.salesRequestId).trim();
+      if (!srId) continue;
+      const prev = m.get(srId);
+      m.set(srId, prev ? pickNewest(prev, q) : q);
+    }
+    return m;
+  }, [qapList]);
+
+  const qapByProjectCode = useMemo(() => {
+    const m = new Map<string, QapLite>();
+    for (const q of qapList) {
+      const pc = toStr(q?.projectCode).trim();
+      if (!pc) continue;
+      const prev = m.get(pc);
+      m.set(pc, prev ? pickNewest(prev, q) : q);
+    }
+    return m;
+  }, [qapList]);
+
+  const getLinkedQap = (sr: SalesRequest) => {
+    if (sr?.id) {
+      const byId = qapBySalesRequestId.get(sr.id);
+      if (byId) return byId;
+    }
+    const pc = toStr(sr?.projectCode).trim();
+    if (pc) {
+      const byPc = qapByProjectCode.get(pc);
+      if (byPc) return byPc;
+    }
+    return null;
+  };
+
+  const renderQapStatusBadge = (statusRaw?: string | null) => {
+    const status = String(statusRaw || "").trim();
+
+    const colors = {
+      draft: "bg-gray-100 text-gray-800",
+      submitted: "bg-yellow-100 text-yellow-800",
+      "level-2": "bg-orange-100 text-orange-800",
+      "level-3": "bg-purple-100 text-purple-800",
+      "level-4": "bg-indigo-100 text-indigo-800",
+      "final-comments": "bg-blue-100 text-blue-800",
+      "level-5": "bg-green-100 text-green-800",
+      approved: "bg-green-100 text-green-800",
+      rejected: "bg-red-100 text-red-800",
+      "edit-requested": "bg-orange-100 text-orange-800",
+    } as const;
+
+    if (!status) {
+      return <span className="text-gray-400">No QAP</span>;
+    }
+
+    return (
+      <Badge
+        className={`${
+          colors[status as keyof typeof colors] || "bg-gray-100 text-gray-800"
+        } capitalize`}
+      >
+        {status.replace("-", " ")}
+      </Badge>
+    );
+  };
 
   // Optional client-side filter via ?customer=NAME
   const customerFilter = useMemo(() => {
@@ -325,6 +493,7 @@ const SalesRequestsPage: React.FC = () => {
                   <tr className="text-left">
                     <Th>Actions</Th>
                     <Th>Customer Name</Th>
+                    <Th>QAP Status</Th>
                     <Th>Project Code</Th>
                     <Th>Plant</Th>
                     <Th>DCR Compliance?</Th>
@@ -335,6 +504,7 @@ const SalesRequestsPage: React.FC = () => {
                     <Th>Project Location</Th>
                     <Th>JB Cable Length</Th>
                     <Th>QAP From</Th>
+                    
                     <Th>BOM From</Th>
                     <Th>Inline Inspection</Th>
                     <Th>PDI</Th>
@@ -372,6 +542,7 @@ const SalesRequestsPage: React.FC = () => {
                         </div>
                       </Td>
                       <Td>{row.customerName}</Td>
+                      <Td>{renderQapStatusBadge(getLinkedQap(row)?.status)}</Td>
                       <Td className="font-mono text-xs">
                         {row.projectCode || "-"}
                       </Td>{" "}
@@ -415,6 +586,7 @@ const SalesRequestsPage: React.FC = () => {
                           </>
                         )}
                       </Td>
+                      
                       <Td>
                         {row.bomFrom || "-"}
                         {row.primaryBomAttachmentUrl && (

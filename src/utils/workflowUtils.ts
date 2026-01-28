@@ -6,28 +6,35 @@ export const getNextLevelUsers = (
   currentLevel: number
 ): string[] => {
   const plant = (qap.plant || "").toLowerCase();
+  const hasFinal = !!qap.finalCommentsAt;
 
   switch (currentLevel) {
     case 2: {
-      // After Level 2:
+      // L2 behaves the same for both rounds in terms of "who is next":
       // P4/P5 -> Level 3 (Head)
-      // P2/P6 -> bypass to Level 4 (Technical Head)
+      // P2/P6 -> Level 4 (Technical Head)
       if (["p4", "p5"].includes(plant)) return ["nrao"]; // head
       if (["p2", "p6"].includes(plant)) return ["jmr", "baskara"]; // technical-head
       return [];
     }
+
     case 3:
-      // Level 3 -> Level 4
+      // Level 3 -> Level 4 (both rounds)
       return ["jmr", "baskara"]; // technical-head
+
     case 4:
-      // Level 4 -> Level 5
-      return ["cmk"]; // plant-head
+      // Before final comments: L4 -> Requestor final comments
+      // After final comments round: L4b -> L5
+      if (hasFinal) return ["cmk"]; // plant-head
+      // If you ever show "next users" in UI for pre-final L4,
+      // it's the requestor (final comments owner).
+      return qap.submittedBy ? [qap.submittedBy] : [];
+
     default:
       return [];
   }
 };
 
-// src/utils/workflowUtils.ts
 export const processWorkflowTransition = (
   qap: QAPFormData,
   nextLevel: number
@@ -38,56 +45,50 @@ export const processWorkflowTransition = (
 
   switch (nextLevel) {
     case 3: {
+      // After Level 2 (initial or post-final L2):
+      // P4/P5 -> Level 3
+      // P2/P6 -> bypass to Level 4
       if (["p2", "p6"].includes(plant)) {
-        updatedQAP.status = "level-4";
+        updatedQAP.status = updatedQAP.finalCommentsAt ? "level-4b" : "level-4";
         updatedQAP.currentLevel = 4;
+
         updatedQAP.timeline.push({
           level: 3,
-          action: "Auto-bypassed (P2/P6)",
+          action: updatedQAP.finalCommentsAt
+            ? "Post-final: Auto-bypassed (P2/P6)"
+            : "Auto-bypassed (P2/P6)",
           user: "system",
           timestamp: now,
         });
         updatedQAP.timeline.push({
           level: 4,
-          action: "Sent to Technical Head",
+          action: updatedQAP.finalCommentsAt
+            ? "Post-final → Sent to Technical Head (L4b)"
+            : "Sent to Technical Head",
           user: "system",
           timestamp: now,
         });
       } else {
-        updatedQAP.status = "level-3";
+        updatedQAP.status = updatedQAP.finalCommentsAt ? "level-3b" : "level-3";
         updatedQAP.currentLevel = 3;
+
         updatedQAP.timeline.push({
           level: 3,
-          action: "Sent to Head for review",
+          action: updatedQAP.finalCommentsAt
+            ? "Post-final → Sent to Head (L3b)"
+            : "Sent to Head for review",
           user: "system",
           timestamp: now,
         });
       }
       break;
     }
+
     case 4: {
-      if (updatedQAP.finalCommentsAt) {
-        const plant = (qap.plant || "").toLowerCase();
-        if (["p2", "p6"].includes(plant)) {
-          updatedQAP.status = "level-4b";
-          updatedQAP.currentLevel = 4;
-          updatedQAP.timeline.push({
-            level: 4,
-            action: "Post-final → sent to Technical Head (L4b)",
-            user: "system",
-            timestamp: now,
-          });
-        } else {
-          updatedQAP.status = "level-3b";
-          updatedQAP.currentLevel = 3;
-          updatedQAP.timeline.push({
-            level: 3,
-            action: "Post-final → sent to Head (L3b)",
-            user: "system",
-            timestamp: now,
-          });
-        }
-      } else {
+      // This case is used as:
+      // - Pre-final: L4 completion -> send to Requestor final comments
+      // - Post-final: not directly used for routing since we label L3b/L4b via case 3 above
+      if (!updatedQAP.finalCommentsAt) {
         updatedQAP.status = "final-comments";
         updatedQAP.currentLevel = 4;
         updatedQAP.timeline.push({
@@ -99,6 +100,7 @@ export const processWorkflowTransition = (
       }
       break;
     }
+
     case 5: {
       updatedQAP.status = "level-5";
       updatedQAP.currentLevel = 5;
@@ -111,6 +113,7 @@ export const processWorkflowTransition = (
       break;
     }
   }
+
   return updatedQAP;
 };
 

@@ -17,6 +17,7 @@ import {
   Building2,
   Menu,
   X,
+  Lightbulb,
 } from "lucide-react";
 
 /**
