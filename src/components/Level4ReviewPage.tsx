@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { isEdited } from "@/lib/edited";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import BrandedLoadingScreen from "@/components/BrandedLoadingScreen";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,6 +15,20 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  getSpecCriteriaLabel,
+  getLevel1OutcomeText,
+  getLevel1Summary,
+  getMatchBadgeClasses,
+  getMatchLabel,
+  getSpecRowClassName,
+  matchesReviewerMatchFilter,
+  ReviewerRowFilter,
+} from "@/lib/qapLevel1";
+import InteractiveTutorialCard, {
+  tutorialSectionClass,
+} from "@/components/tutorial/InteractiveTutorialCard";
+import { useTutorialMode } from "@/hooks/useTutorialMode";
 
 /* ───────────────────────────────────────────────────────────── */
 /* Local lightweight types + helpers for rendering Sales/BOM     */
@@ -399,7 +414,7 @@ const HL_BOM_ROW =
 const SalesBOMPanel: React.FC<{
   initial?: SalesRequestLite | undefined;
   salesRequestId?: string | undefined;
-  rowFilter: "all" | "matched" | "unmatched" | "edited";
+  rowFilter: ReviewerRowFilter;
   bomEditedIndex: ReturnType<typeof buildBomEditedIndex>;
 }> = ({ initial, salesRequestId, rowFilter, bomEditedIndex }) => {
   const [sr, setSr] = useState<SalesRequestLite | undefined>(initial);
@@ -438,7 +453,13 @@ const SalesBOMPanel: React.FC<{
     );
   }
   if (loading) {
-    return <div className="text-sm text-gray-500">Loading BOM…</div>;
+    return (
+      <BrandedLoadingScreen
+        message="Loading BOM"
+        subtitle="Fetching the linked sales request BOM details for this review."
+        className="min-h-[220px]"
+      />
+    );
   }
   if (error) {
     return (
@@ -719,9 +740,12 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
 
   /* ───────────────────────── state ───────────────────────── */
   const [searchTerm, setSearchTerm] = useState("");
-  const [rowFilter, setRowFilter] = useState<
-    "all" | "matched" | "unmatched" | "edited"
-  >("all");
+  const [rowFilter, setRowFilter] = useState<ReviewerRowFilter>("all");
+  const [tutorialMode, setTutorialMode] = useTutorialMode(
+    "level-4-review-tutorial",
+    true
+  );
+  const [tutorialStepId, setTutorialStepId] = useState("overview");
 
   const [responses, setResponses] = useState<{
     [qapId: string]: Record<number, string>;
@@ -740,6 +764,8 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
     return qapData
       .filter((q) => {
         if (q.currentLevel !== 4) return false;
+        const statusLc = String(q.status || "").toLowerCase();
+        if (!["level-4", "level-4b"].includes(statusLc)) return false;
         const allow =
           plantRaw === "" || userPlants.includes(q.plant.toLowerCase());
         if (!allow) return false;
@@ -768,6 +794,37 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
     }));
 
   const submit = (qapId: string) => onNext(qapId, responses[qapId] || {});
+  const tutorialSteps = [
+    {
+      id: "overview",
+      title: "Check the Level 4 queue",
+      description:
+        "Start with the Level 4 queue summary to see what is waiting for the current reviewer.",
+      complete: reviewable.length > 0,
+    },
+    {
+      id: "filters",
+      title: "Search and filter the review",
+      description:
+        "Use the QAP search and row filter to focus on the records and mismatch states you want to work on.",
+      complete: searchTerm.trim().length > 0 || rowFilter !== "all",
+    },
+    {
+      id: "worklist",
+      title: "Inspect the full review history",
+      description:
+        "Expand a QAP to inspect MQP, Visual EL, BOM, prior comments, and second-round history before responding.",
+      complete: Object.keys(expanded).some((key) => expanded[key]),
+    },
+    {
+      id: "submit",
+      title: "Submit the Level 4 response",
+      description:
+        "Write your comments in the active QAP and submit from the action area at the bottom once the review is complete.",
+      complete: false,
+    },
+  ];
+  const activeTutorialStep = tutorialMode ? tutorialStepId : null;
 
   const timeRemaining = (submittedAt?: string) => {
     if (!submittedAt) return "Unknown";
@@ -782,64 +839,88 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
   /* ─────────────────────── render ────────────────────────── */
   return (
     <div className="container mx-auto px-4 py-6">
-      <h1 className="text-3xl font-bold mb-4">
-        Level 4 Review –{" "}
-        {user?.role
-          ? user.role.charAt(0).toUpperCase() + user.role.slice(1)
-          : ""}
-      </h1>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-w-0">
+          <div className={`${tutorialSectionClass(activeTutorialStep === "overview")} mb-4`}>
+            <h1 className="text-3xl font-bold">
+              Level 4 Review –{" "}
+              {user?.role
+                ? user.role.charAt(0).toUpperCase() + user.role.slice(1)
+                : ""}
+            </h1>
+          </div>
 
-      {/* Top controls */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 space-y-4 md:space-y-0">
-        <div className="flex items-center space-x-2">
-          <Input
-            placeholder="Search QAPs..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-64"
-          />
-          <label htmlFor="rowFilter" className="font-medium">
-            Show Rows:
-          </label>
-          <select
-            id="rowFilter"
-            value={rowFilter}
-            onChange={(e) => setRowFilter(e.target.value as any)}
-            className="border rounded px-2 py-1"
+          {/* Top controls */}
+          <div className={`${tutorialSectionClass(activeTutorialStep === "filters")} flex flex-col md:flex-row md:items-center md:justify-between mb-6 space-y-4 md:space-y-0`}>
+            <div className="flex items-center space-x-2">
+              <Input
+                placeholder="Search QAPs..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-64"
+              />
+              <label htmlFor="rowFilter" className="font-medium">
+                Show Rows:
+              </label>
+              <select
+                id="rowFilter"
+                value={rowFilter}
+                onChange={(e) => setRowFilter(e.target.value as any)}
+                className="border rounded px-2 py-1"
+              >
+                <option value="all">All</option>
+                <option value="matched">Matched (Green)</option>
+                <option value="unmatched">Unmatched (Red)</option>
+                <option value="agreed">Agreed (Yellow)</option>
+                <option value="edited">Edited (since last submission)</option>
+              </select>
+            </div>
+            <span className="text-sm text-gray-600">
+              Pending QAPs: {reviewable.length}
+            </span>
+          </div>
+
+          <div
+            className={tutorialSectionClass(
+              activeTutorialStep === "worklist" || activeTutorialStep === "submit"
+            )}
           >
-            <option value="all">All</option>
-            <option value="matched">Matched (Green)</option>
-            <option value="unmatched">Unmatched (Red)</option>
-            <option value="edited">Edited (since last submission)</option>
-          </select>
-        </div>
-        <span className="text-sm text-gray-600">
-          Pending QAPs: {reviewable.length}
-        </span>
-      </div>
-
-      {reviewable.length === 0 ? (
-        <div className="py-20 text-center text-gray-500">No QAPs to review</div>
-      ) : (
-        reviewable.map((qap) => {
+            {reviewable.length === 0 ? (
+              <div className="py-20 text-center text-gray-500">No QAPs to review</div>
+            ) : (
+              reviewable.map((qap) => {
           const editedIndex = buildEditedIndex(qap);
           const bomEditedIndex = buildBomEditedIndex(qap);
+          const hasRespondedOnce = Boolean(
+            qap.levelResponses?.[4]?.[user?.role || ""]?.acknowledged
+          );
+          const isActiveLevel4Status = ["level-4", "level-4b"].includes(
+            String(qap.status || "").toLowerCase()
+          );
+          const respondDisabled =
+            qap.currentLevel !== 4 || !isActiveLevel4Status || hasRespondedOnce;
 
-          const specs = qap.allSpecs.filter((s) => {
-            if (rowFilter === "all") return true;
-            if (rowFilter === "matched") return s.match === "yes";
-            if (rowFilter === "unmatched") return s.match === "no";
-
+          const includeSectionSpec = (
+            section: "mqp" | "visual",
+            spec: QAPSpecification
+          ) => {
             if (rowFilter === "edited") {
               return (
-                editedIndex.mqp.has(s.sno) ||
-                editedIndex.visual.has(s.sno) ||
-                isEdited("mqp", s.sno, (qap as any).editedSnos) ||
-                isEdited("visual", s.sno, (qap as any).editedSnos)
+                (section === "mqp"
+                  ? editedIndex.mqp.has(spec.sno)
+                  : editedIndex.visual.has(spec.sno)) ||
+                isEdited(section, spec.sno, (qap as any).editedSnos)
               );
             }
-            return true;
-          });
+            return matchesReviewerMatchFilter(rowFilter, spec.match);
+          };
+
+          const mqpSpecs = (qap.specs.mqp || []).filter((spec) =>
+            includeSectionSpec("mqp", spec as QAPSpecification)
+          );
+          const visualSpecs = (qap.specs.visual || []).filter((spec) =>
+            includeSectionSpec("visual", spec as QAPSpecification)
+          );
 
           /* Pull L2 & L3 comments */
           const l2 = qap.levelResponses?.[2] || {};
@@ -858,6 +939,9 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
           const finalAll = (qap as any).finalComments as string | undefined;
 
           const isOpen = expanded[qap.id] || false;
+          const level1Summary = getLevel1Summary(
+            qap as Pick<QAPFormData, "level1Summary" | "specs">
+          );
 
           const salesRequestEmbedded: SalesRequestLite | undefined = (
             qap as any
@@ -893,18 +977,33 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
                         <CardTitle className="text-lg">
                           {qap.customerName} – {qap.projectName}
                         </CardTitle>
-                        <div className="flex space-x-2 mt-1">
+                        <div className="flex space-x-2 mt-1 flex-wrap">
                           <Badge variant="outline">
                             {qap.plant.toUpperCase()}
                           </Badge>
                           <Badge variant="outline">{qap.productType}</Badge>
                           <Badge>{qap.orderQuantity} MW</Badge>
+                          {level1Summary.totalReviewed > 0 && (
+                            <Badge
+                              variant="outline"
+                              className="bg-amber-50 text-amber-900 border-amber-300"
+                            >
+                              L1 closed {level1Summary.closed}/
+                              {level1Summary.totalReviewed}
+                            </Badge>
+                          )}
                         </div>
                       </div>
                     </div>
                     <div className="flex items-center space-x-2 text-sm text-gray-600">
                       <Clock className="h-4 w-4 text-orange-500" />
                       <span>{timeRemaining(qap.submittedAt)}</span>
+                      {hasRespondedOnce && (
+                        <>
+                          <CheckCircle2 className="h-4 w-4 text-green-600" />
+                          <span className="text-green-600">Responded</span>
+                        </>
+                      )}
                     </div>
                   </CardHeader>
                 </Card>
@@ -987,9 +1086,7 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
                               </tr>
                             </thead>
                             <tbody>
-                              {specs
-                                .filter((s) => qap.specs.mqp.includes(s as any))
-                                .map((s) => {
+                              {mqpSpecs.map((s) => {
                                   const mqEdited = rowEdited(
                                     "mqp",
                                     s.sno,
@@ -1003,9 +1100,7 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
                                       className={`border-b ${
                                         mqEdited
                                           ? "bg-amber-50 ring-1 ring-amber-300"
-                                          : s.match === "yes"
-                                          ? "bg-green-50"
-                                          : "bg-red-50"
+                                          : getSpecRowClassName(s)
                                       }`}
                                     >
                                       <td className="p-2 border">
@@ -1031,7 +1126,7 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
                                             : ""
                                         }`}
                                       >
-                                        {s.criteria}
+                                        {getSpecCriteriaLabel(s, "MQP")}
                                       </td>
                                       <td
                                         className={`p-2 border ${
@@ -1072,7 +1167,12 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
                                             : ""
                                         }`}
                                       >
-                                        {s.customerSpecification}
+                                        <div>{s.customerSpecification || "—"}</div>
+                                        {getLevel1OutcomeText(s) && (
+                                          <div className="mt-1 text-xs text-amber-800">
+                                            {getLevel1OutcomeText(s)}
+                                          </div>
+                                        )}
                                       </td>
 
                                       <td className="p-2 border align-top">
@@ -1131,13 +1231,12 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
 
                                       <td className="p-2 border">
                                         <Badge
-                                          variant={
-                                            s.match === "yes"
-                                              ? "success"
-                                              : "destructive"
-                                          }
+                                          variant="outline"
+                                          className={getMatchBadgeClasses(
+                                            s.match
+                                          )}
                                         >
-                                          {s.match?.toUpperCase()}
+                                          {getMatchLabel(s.match)}
                                         </Badge>
                                       </td>
 
@@ -1208,11 +1307,7 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
                               </tr>
                             </thead>
                             <tbody>
-                              {specs
-                                .filter((s) =>
-                                  qap.specs.visual.includes(s as any)
-                                )
-                                .map((s) => {
+                              {visualSpecs.map((s) => {
                                   const vEdited = rowEdited(
                                     "visual",
                                     s.sno,
@@ -1226,9 +1321,7 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
                                       className={`border-b ${
                                         vEdited
                                           ? "bg-amber-50 ring-1 ring-amber-300"
-                                          : s.match === "yes"
-                                          ? "bg-green-50"
-                                          : "bg-red-50"
+                                          : getSpecRowClassName(s)
                                       }`}
                                     >
                                       <td className="p-2 border">
@@ -1254,7 +1347,7 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
                                             : ""
                                         }`}
                                       >
-                                        {s.criteria}
+                                        {getSpecCriteriaLabel(s, "Visual EL")}
                                       </td>
                                       <td
                                         className={`p-2 border ${
@@ -1295,7 +1388,12 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
                                             : ""
                                         }`}
                                       >
-                                        {s.customerSpecification}
+                                        <div>{s.customerSpecification || "—"}</div>
+                                        {getLevel1OutcomeText(s) && (
+                                          <div className="mt-1 text-xs text-amber-800">
+                                            {getLevel1OutcomeText(s)}
+                                          </div>
+                                        )}
                                       </td>
 
                                       <td className="p-2 border align-top">
@@ -1354,13 +1452,12 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
 
                                       <td className="p-2 border">
                                         <Badge
-                                          variant={
-                                            s.match === "yes"
-                                              ? "success"
-                                              : "destructive"
-                                          }
+                                          variant="outline"
+                                          className={getMatchBadgeClasses(
+                                            s.match
+                                          )}
                                         >
-                                          {s.match?.toUpperCase()}
+                                          {getMatchLabel(s.match)}
                                         </Badge>
                                       </td>
 
@@ -1402,22 +1499,36 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
                     <div className="mt-4 flex justify-end">
                       <Button
                         onClick={() => submit(qap.id)}
-                        disabled={
-                          Object.keys(responses[qap.id] || {}).length === 0
-                        }
+                        disabled={respondDisabled}
                         className="bg-blue-600 hover:bg-blue-700"
                       >
                         <Send className="h-4 w-4 mr-2" />
-                        Submit Review
+                        {hasRespondedOnce ? "Responded" : "Submit Review"}
                       </Button>
                     </div>
                   </CardContent>
                 </Card>
               </CollapsibleContent>
             </Collapsible>
-          );
-        })
-      )}
+              );
+            })
+          )}
+          </div>
+        </div>
+
+        <div className="xl:sticky xl:top-24 xl:self-start">
+          <InteractiveTutorialCard
+            storageKey="level-4-review-tutorial"
+            title="Level 4 Tutorial"
+            description="Search the queue, inspect the full history, and submit the Level 4 response from the open QAP."
+            steps={tutorialSteps}
+            activeStepId={activeTutorialStep}
+            onSelectStep={setTutorialStepId}
+            enabled={tutorialMode}
+            onEnabledChange={setTutorialMode}
+          />
+        </div>
+      </div>
     </div>
   );
 };

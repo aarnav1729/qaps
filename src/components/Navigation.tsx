@@ -17,7 +17,6 @@ import {
   Building2,
   Menu,
   X,
-  Lightbulb,
 } from "lucide-react";
 
 /**
@@ -134,6 +133,7 @@ const Navigation: React.FC = () => {
         icon: Home,
         roles: [
           "requestor",
+          "level-1-reviewer",
           "production",
           "quality",
           "technical",
@@ -143,6 +143,12 @@ const Navigation: React.FC = () => {
           "admin",
           "sales",
         ],
+      },
+      {
+        path: "/level1-review",
+        label: "Level 1 Review",
+        icon: ClipboardCheck,
+        roles: ["level-1-reviewer", "admin"],
       },
       {
         path: "/level2-review",
@@ -175,8 +181,20 @@ const Navigation: React.FC = () => {
         roles: ["plant-head", "admin"],
       },
       {
-        path: "/spec-builder",
-        label: "Spec Builder",
+        path: "/master-data/mqp",
+        label: "MQP Master",
+        icon: Building2,
+        roles: ["requestor", "admin"],
+      },
+      {
+        path: "/master-data/visual-el",
+        label: "Visual EL Master",
+        icon: FileText,
+        roles: ["requestor", "admin"],
+      },
+      {
+        path: "/master-data/bom",
+        label: "BOM Master",
         icon: Building2,
         roles: ["requestor", "admin"],
       },
@@ -300,70 +318,50 @@ const Navigation: React.FC = () => {
 
   return (
     <nav className="bg-white shadow-sm border-b relative z-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Top bar */}
-        <div className="flex justify-between h-16">
-          {/* Brand + Desktop Nav */}
-          <div className="flex items-center space-x-8">
-            <div className="flex-shrink-0">
-              <h1 className="text-xl font-bold text-gray-900">QAP System</h1>
+      <div className="mx-auto max-w-[1680px] px-4 sm:px-6 lg:px-8">
+        <div className="flex flex-wrap items-center justify-between gap-3 py-3">
+          <div className="min-w-0 flex items-center gap-3">
+            <div className="rounded-2xl bg-slate-900 px-3 py-2 text-sm font-semibold tracking-[0.16em] text-white">
+              QAP
             </div>
-
-            {/* Desktop nav */}
-            <div className="hidden md:flex space-x-1">
-              {visibleNavItems.map((item) => {
-                const Icon = item.icon;
-                const active = isActive(item.path);
-                return (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    className={[
-                      "inline-flex items-center px-3 py-2 rounded-md text-sm font-medium transition-all",
-                      "outline-none ring-0 focus-visible:ring-2 focus-visible:ring-blue-400",
-                      active
-                        ? "bg-blue-100 text-blue-700 shadow-sm"
-                        : "text-gray-600 hover:text-gray-900 hover:bg-gray-100",
-                    ].join(" ")}
-                  >
-                    <Icon className="w-4 h-4 mr-2" />
-                    {item.label}
-                  </Link>
-                );
-              })}
+            <div className="min-w-0">
+              <h1 className="truncate text-lg font-bold text-gray-900 sm:text-xl">
+                QAP System
+              </h1>
+              <p className="hidden text-xs text-gray-500 sm:block">
+                Workflow approvals, masters, analytics, and sales requests
+              </p>
             </div>
           </div>
 
-          {/* Right side: user + logout + mobile button */}
-          <div className="flex items-center space-x-3">
-            {/* User pill (hidden on very small widths) */}
-            <div className="hidden xs:flex items-center space-x-2">
-              <Badge variant="outline" className="capitalize">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+            <div className="hidden min-w-0 flex-wrap items-center justify-end gap-2 md:flex">
+              <Badge variant="outline" className="max-w-full capitalize">
                 {user?.role?.replace("-", " ")}
               </Badge>
-              <span className="text-sm text-gray-700 truncate max-w-[10rem]">
+              <span className="max-w-[12rem] truncate text-sm text-gray-700 xl:max-w-[16rem]">
                 {user?.username}
               </span>
               {user?.plant && (
-                <Badge variant="secondary">{user.plant.toUpperCase()}</Badge>
+                <Badge variant="secondary" className="shrink-0">
+                  {user.plant.toUpperCase()}
+                </Badge>
               )}
             </div>
 
-            {/* Desktop logout */}
-            <div className="hidden md:block">
+            <div className="hidden lg:block">
               <Button
                 onClick={handleLogout}
                 variant="ghost"
                 size="sm"
                 className="text-gray-600 hover:text-gray-900"
               >
-                <LogOut className="w-4 h-4 mr-2" />
+                <LogOut className="mr-2 h-4 w-4" />
                 Logout
               </Button>
             </div>
 
-            {/* Mobile hamburger */}
-            <div className="md:hidden">
+            <div className="lg:hidden">
               <button
                 ref={menuButtonRef}
                 onClick={toggleMobile}
@@ -373,7 +371,7 @@ const Navigation: React.FC = () => {
                 aria-expanded={mobileOpen}
                 aria-controls="mobile-menu"
                 className={[
-                  "inline-flex items-center justify-center p-2 rounded-md",
+                  "inline-flex items-center justify-center rounded-xl border border-gray-200 bg-white p-2",
                   "text-gray-700 hover:text-gray-900 hover:bg-gray-100",
                   "transition-all duration-200 ease-out",
                   "focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400",
@@ -389,6 +387,31 @@ const Navigation: React.FC = () => {
             </div>
           </div>
         </div>
+
+        <div className="hidden border-t border-gray-100 py-3 lg:block">
+          <div className="flex flex-wrap gap-2">
+            {visibleNavItems.map((item) => {
+              const Icon = item.icon;
+              const active = isActive(item.path);
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  className={[
+                    "inline-flex max-w-full items-center rounded-xl px-3 py-2 text-sm font-medium transition-all",
+                    "outline-none ring-0 focus-visible:ring-2 focus-visible:ring-blue-400",
+                    active
+                      ? "bg-blue-100 text-blue-700 shadow-sm"
+                      : "text-gray-600 hover:text-gray-900 hover:bg-gray-100",
+                  ].join(" ")}
+                >
+                  <Icon className="mr-2 h-4 w-4 shrink-0" />
+                  <span className="truncate">{item.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {/* Mobile Full-Screen Overlay Menu */}
@@ -397,7 +420,7 @@ const Navigation: React.FC = () => {
         role="dialog"
         aria-modal="true"
         className={[
-          "fixed inset-0 md:hidden",
+          "fixed inset-0 lg:hidden",
           "transition-opacity duration-300",
           mobileOpen
             ? "pointer-events-auto opacity-100"
@@ -465,7 +488,7 @@ const Navigation: React.FC = () => {
 
           {/* Menu items */}
           <div className="flex-1 overflow-y-auto">
-            <ul className="px-3 py-4 space-y-1">
+            <ul className="grid grid-cols-1 gap-2 px-3 py-4 sm:grid-cols-2">
               {visibleNavItems.map((item, idx) => {
                 const Icon = item.icon;
                 const active = isActive(item.path);
@@ -482,7 +505,7 @@ const Navigation: React.FC = () => {
                       }}
                       className={[
                         "group flex items-center w-full",
-                        "px-3 py-3 rounded-lg",
+                        "px-3 py-3 rounded-xl min-h-[60px]",
                         "outline-none ring-0 focus-visible:ring-2 focus-visible:ring-blue-400",
                         "transition-all duration-200",
                         active
@@ -525,13 +548,16 @@ const Navigation: React.FC = () => {
           </div>
 
           {/* Footer inside overlay */}
-          <div className="border-t px-4 py-3 text-sm text-gray-600 flex items-center justify-between">
-            <div className="flex items-center space-x-2 min-w-0">
-              <span className="truncate max-w-[12rem]">{user?.username}</span>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-sm text-gray-600">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="max-w-[12rem] truncate">{user?.username}</span>
               {user?.role && (
                 <Badge variant="outline" className="capitalize">
                   {user.role.replace("-", " ")}
                 </Badge>
+              )}
+              {user?.plant && (
+                <Badge variant="secondary">{user.plant.toUpperCase()}</Badge>
               )}
             </div>
             <button

@@ -3,16 +3,22 @@ import { useLocation } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
+import BrandedLoadingScreen from "@/components/BrandedLoadingScreen";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  BOM_MASTER,
-  getOptionsFor,
   VENDOR_NAME_LOCKIN,
   RFID_LOCATION_LOCKIN,
-  BomComponentName,
-  BomComponentOption,
 } from "@/data/bomMaster";
 import { Badge } from "@/components/ui/badge";
+import InteractiveTutorialCard from "@/components/tutorial/InteractiveTutorialCard";
+import { useTutorialMode } from "@/hooks/useTutorialMode";
+import { cn } from "@/lib/utils";
+import {
+  getBomComponentNames,
+  getBomOptionsFor,
+  type BomMasterComponent,
+  type BomMasterOption,
+} from "@/lib/bomMasterData";
 
 const API = window.location.origin;
 
@@ -231,7 +237,7 @@ type BomRow = {
   spec?: string | null;
 };
 type BomComponent = {
-  name: BomComponentName;
+  name: string;
   rows: BomRow[];
 };
 
@@ -259,12 +265,73 @@ type HistoryItem = {
   changes?: HistoryChange[] | null;
 };
 
+type GuidedFieldKey =
+  | "customerName"
+  | "plant"
+  | "productCategory"
+  | "moduleCellType"
+  | "cellTech"
+  | "cutCells"
+  | "wattPeak"
+  | "moduleModelNumber"
+  | "vendorNameLockIn"
+  | "rfidLocation"
+  | "moduleDimensions"
+  | "vendorAddress"
+  | "documentRef"
+  | "cellType"
+  | "wattageBinning"
+  | "deliveryTimeline"
+  | "projectLocation"
+  | "rfqOrderQtyMW"
+  | "premierBiddedOrderQtyMW"
+  | "qapType"
+  | "qapAttachment"
+  | "bomFrom"
+  | "bomAttachment"
+  | "inlineInspection"
+  | "pdi"
+  | "certificationRequired"
+  | "cellProcuredBy"
+  | "agreedCTM"
+  | "factoryAuditDate"
+  | "cableLengthRequired"
+  | "xPitchMm"
+  | "trackerDetails"
+  | "priority"
+  | "remarks"
+  | "otherAttachments"
+  | "bomReview";
+
+type GuideStep = {
+  key: GuidedFieldKey;
+  label: string;
+  hint: string;
+  required: boolean;
+  visible: boolean;
+  complete: boolean;
+};
+
 // Link Module Manufacturing Plant => Solar Module Vendor Address
 const PLANT_VENDOR_ADDRESS: Record<Plant, string> = {
   P2: "PEPPL",
   P4: "PEIPL",
   P5: "PEGEPL I",
   P6: "PEGEPL II",
+};
+
+const evaluateWattageBins = (rows: { range: string; pct: string }[]) => {
+  const nonEmpty = rows.filter(
+    (row) => row.range.trim() !== "" || row.pct.trim() !== ""
+  );
+  const sum = nonEmpty.reduce((acc, row) => acc + (Number(row.pct) || 0), 0);
+  const valid = Math.abs(sum - 100) < 0.001 && nonEmpty.length >= 1;
+
+  return {
+    nonEmpty,
+    sum,
+    valid,
+  };
 };
 
 const SalesRequestsPage: React.FC = () => {
@@ -340,6 +407,20 @@ const SalesRequestsPage: React.FC = () => {
       }
 
       return [];
+    },
+    staleTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 30,
+  });
+
+  const { data: bomMasterComponents = [] } = useQuery<BomMasterComponent[]>({
+    queryKey: ["bom-master-components", "sales-request"],
+    queryFn: async () => {
+      const r = await fetch(`${API}/api/bom-components`, {
+        credentials: "include",
+      });
+      if (!r.ok) return [];
+      const data = await r.json();
+      return Array.isArray(data) ? data : [];
     },
     staleTime: 1000 * 60 * 5,
     gcTime: 1000 * 60 * 30,
@@ -483,7 +564,11 @@ const SalesRequestsPage: React.FC = () => {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <div>Loading…</div>
+            <BrandedLoadingScreen
+              message="Loading sales requests"
+              subtitle="Pulling the latest request list and linked workflow status."
+              className="min-h-[280px]"
+            />
           ) : rows.length === 0 ? (
             <div className="text-gray-600">No sales requests yet.</div>
           ) : (
@@ -656,6 +741,7 @@ const SalesRequestsPage: React.FC = () => {
           creating={createMutation.isPending}
           currentUser={user?.username || "sales"}
           prefillCustomerName={customerFilter}
+          bomMasterComponents={bomMasterComponents}
         />
       )}
 
@@ -667,6 +753,7 @@ const SalesRequestsPage: React.FC = () => {
           onUpdate={(id, form) => updateMutation.mutate({ id, formData: form })}
           creating={updateMutation.isPending}
           currentUser={user?.username || "sales"}
+          bomMasterComponents={bomMasterComponents}
         />
       )}
 
@@ -766,6 +853,7 @@ const SalesRequestModal: React.FC<{
   creating: boolean;
   currentUser: string;
   prefillCustomerName?: string;
+  bomMasterComponents: BomMasterComponent[];
 }> = ({
   mode = "create",
   initial,
@@ -775,7 +863,24 @@ const SalesRequestModal: React.FC<{
   creating,
   currentUser,
   prefillCustomerName = "",
+  bomMasterComponents,
 }) => {
+  const [tutorialMode, setTutorialMode] = useTutorialMode(
+    "sales-request-tutorial",
+    true
+  );
+  const [skippedGuideSteps, setSkippedGuideSteps] = useState<
+    Partial<Record<GuidedFieldKey, boolean>>
+  >({});
+  const [selectedGuideStep, setSelectedGuideStep] =
+    useState<GuidedFieldKey | null>(null);
+  const componentNames = useMemo(
+    () => getBomComponentNames(bomMasterComponents),
+    [bomMasterComponents]
+  );
+  const bomOptionsFor = (name: string) =>
+    getBomOptionsFor(bomMasterComponents, name);
+
   // Core request fields (store numbers as strings for smooth typing)
   const [state, setState] = useState({
     customerName: prefillCustomerName || "",
@@ -876,10 +981,10 @@ const SalesRequestModal: React.FC<{
 
   // Model-picker modal state (scoped to SalesRequestModal)
   const [modelDialog, setModelDialog] = useState<
-    { open: false } | { open: true; comp: BomComponentName; idx: number }
+    { open: false } | { open: true; comp: string; idx: number }
   >({ open: false });
 
-  const openModelDialog = (comp: BomComponentName, idx: number) =>
+  const openModelDialog = (comp: string, idx: number) =>
     setModelDialog({ open: true, comp, idx });
 
   const closeModelDialog = () => setModelDialog({ open: false });
@@ -891,9 +996,8 @@ const SalesRequestModal: React.FC<{
   // Pre-populate all components by default on create
   useEffect(() => {
     if (mode === "create") {
-      const all = (Object.keys(BOM_MASTER) as BomComponentName[]).map(
-        (name) => {
-          const opts = getOptionsFor(name) as readonly BomComponentOption[];
+      const all = componentNames.map((name) => {
+          const opts = bomOptionsFor(name);
           // default one row; if there is exactly one option (e.g., RFID Tag) preselect it
           const defaultRow: BomRow =
             opts.length === 1
@@ -904,11 +1008,10 @@ const SalesRequestModal: React.FC<{
                 }
               : { model: "", subVendor: null, spec: null };
           return { name, rows: [defaultRow] };
-        }
-      );
+        });
       setComponents((prev) => (prev.length ? prev : all));
     }
-  }, [mode]);
+  }, [mode, componentNames]);
 
   useEffect(() => {
     // If editing and the item already has a projectCode, keep it.
@@ -1023,7 +1126,7 @@ const SalesRequestModal: React.FC<{
       setComponents((prev) =>
         prev.length
           ? prev
-          : (Object.keys(BOM_MASTER) as BomComponentName[]).map((name) => ({
+          : componentNames.map((name) => ({
               name,
               rows: [],
             }))
@@ -1040,12 +1143,12 @@ const SalesRequestModal: React.FC<{
     setComponents(
       b.components && b.components.length
         ? b.components
-        : (Object.keys(BOM_MASTER) as BomComponentName[]).map((name) => ({
+        : componentNames.map((name) => ({
             name,
             rows: [],
           }))
     );
-  }, [mode, initial]);
+  }, [mode, initial, componentNames]);
 
   // Auto-generate Document Ref when customer/tech/date change (only if docRef not prefilled)
   useEffect(() => {
@@ -1144,22 +1247,22 @@ const SalesRequestModal: React.FC<{
     setOtherFiles((p) => p.filter((_, i) => i !== idx));
 
   // BOM handlers
-  const addRow = (name: BomComponentName) => {
+  const addRow = (name: string) => {
     setComponents((prev) =>
       prev.map((c) =>
         c.name === name ? { ...c, rows: [...c.rows, { model: "" }] } : c
       )
     );
   };
-  const removeRow = (name: BomComponentName, idx: number) => {
+  const removeRow = (name: string, idx: number) => {
     setComponents((prev) =>
       prev.map((c) =>
         c.name === name ? { ...c, rows: c.rows.filter((_, i) => i !== idx) } : c
       )
     );
   };
-  const setRowModel = (name: BomComponentName, idx: number, model: string) => {
-    const options = getOptionsFor(name) as readonly BomComponentOption[];
+  const setRowModel = (name: string, idx: number, model: string) => {
+    const options = bomOptionsFor(name);
     const picked = options.find((o) => o.model === model);
     setComponents((prev) =>
       prev.map((c) => {
@@ -1231,7 +1334,13 @@ const SalesRequestModal: React.FC<{
     });
 
     if (isLoading)
-      return <div className="text-sm text-gray-600">Loading history…</div>;
+      return (
+        <BrandedLoadingScreen
+          message="Loading history"
+          subtitle="Gathering the change timeline for this sales request."
+          className="min-h-[180px]"
+        />
+      );
     if (!data.length)
       return <div className="text-sm text-gray-600">No changes yet.</div>;
 
@@ -1398,37 +1507,480 @@ const SalesRequestModal: React.FC<{
       ? [...base, moduleModelNumber]
       : base;
   }, [catCfg, moduleModelNumber]);
+  const wattageBinsState = useMemo(
+    () => evaluateWattageBins(wattBins),
+    [wattBins]
+  );
+  const allGuideSteps = useMemo<GuideStep[]>(
+    () => [
+      {
+        key: "customerName",
+        label: "Customer Name",
+        hint: "Start here so project code and downstream references stay tied to the right customer.",
+        required: true,
+        visible: true,
+        complete: !!state.customerName.trim(),
+      },
+      {
+        key: "plant",
+        label: "Module Manufacturing Plant",
+        hint: "Pick the plant early because it drives vendor address and plant-specific context.",
+        required: true,
+        visible: true,
+        complete: !!state.moduleManufacturingPlant,
+      },
+      {
+        key: "productCategory",
+        label: "Product Category",
+        hint: "Choose the product category before the derived technical fields so the modal can auto-fill them correctly.",
+        required: true,
+        visible: true,
+        complete: !!state.productCategory,
+      },
+      {
+        key: "moduleCellType",
+        label: "Cell Type",
+        hint: "Review the module cell type that was auto-filled from the selected product category.",
+        required: false,
+        visible: true,
+        complete: !!state.moduleCellType,
+      },
+      {
+        key: "cellTech",
+        label: "Cell Tech",
+        hint: "Confirm the technology value after the product category auto-fills it.",
+        required: false,
+        visible: true,
+        complete: !!state.cellTech,
+      },
+      {
+        key: "cutCells",
+        label: "No. of Cells",
+        hint: "Verify the cut-cell count that came from the chosen product category.",
+        required: false,
+        visible: true,
+        complete: !!state.cutCells,
+      },
+      {
+        key: "wattPeak",
+        label: "Min Watt Peak",
+        hint: "Check the derived minimum watt peak before continuing to the commercial details.",
+        required: true,
+        visible: true,
+        complete: !!wattPeakLabel,
+      },
+      {
+        key: "moduleModelNumber",
+        label: "Module Model Number",
+        hint: "Confirm or adjust the model number after the category defaults are applied.",
+        required: true,
+        visible: true,
+        complete: !!moduleModelNumber.trim(),
+      },
+      {
+        key: "vendorNameLockIn",
+        label: "Solar Module Vendor Name (lock-in)",
+        hint: "This lock-in field is system-driven. Review it before proceeding.",
+        required: false,
+        visible: true,
+        complete: !!VENDOR_NAME_LOCKIN,
+      },
+      {
+        key: "rfidLocation",
+        label: "Location of RFID in module (lock-in)",
+        hint: "This lock-in field is fixed by the master setup. Review it before moving on.",
+        required: false,
+        visible: true,
+        complete: !!RFID_LOCATION_LOCKIN,
+      },
+      {
+        key: "moduleDimensions",
+        label: "Module Dimensions",
+        hint: "Keep the dimensions aligned with the selected category and model.",
+        required: true,
+        visible: true,
+        complete: !!moduleDimensionsOption.trim(),
+      },
+      {
+        key: "vendorAddress",
+        label: "Solar Module Vendor Address",
+        hint: "Confirm the vendor address that the plant selection has populated.",
+        required: false,
+        visible: true,
+        complete: !!vendorAddress.trim(),
+      },
+      {
+        key: "documentRef",
+        label: "Document Ref (auto)",
+        hint: "Review the auto-generated document reference before submission.",
+        required: false,
+        visible: true,
+        complete: !!docRef.trim(),
+      },
+      {
+        key: "cellType",
+        label: "DCR Compliance?",
+        hint: "Set the DCR/NDCR compliance explicitly for this request.",
+        required: true,
+        visible: true,
+        complete: !!state.cellType,
+      },
+      {
+        key: "wattageBinning",
+        label: "Tentative Wattage Binning / Distribution",
+        hint: "Add the expected wattage mix and make sure the total equals exactly 100%.",
+        required: true,
+        visible: true,
+        complete: wattageBinsState.valid,
+      },
+      {
+        key: "rfqOrderQtyMW",
+        label: "RFQ Order Quantity (MW)",
+        hint: "Enter the requested quantity before moving into inspection and procurement details.",
+        required: true,
+        visible: true,
+        complete: Number(state.rfqOrderQtyMW) > 0,
+      },
+      {
+        key: "premierBiddedOrderQtyMW",
+        label: "Premier Bidded Actual Order Quantity in MW",
+        hint: "Fill this if you already know the internal bidded quantity; otherwise you can skip it for now.",
+        required: false,
+        visible: true,
+        complete: !!String(state.premierBiddedOrderQtyMW || "").trim(),
+      },
+      {
+        key: "deliveryTimeline",
+        label: "Delivery Timeline",
+        hint: "Set both dates before the project and planning details are finalized.",
+        required: true,
+        visible: true,
+        complete: !!state.deliveryStartDate && !!state.deliveryEndDate,
+      },
+      {
+        key: "projectLocation",
+        label: "Project Location",
+        hint: "This anchors the project summary and remains visible in the linked QAP context.",
+        required: true,
+        visible: true,
+        complete: !!state.projectLocation.trim(),
+      },
+      {
+        key: "qapType",
+        label: "QAP From",
+        hint: "Choose whether the QAP comes from the customer or Premier before attachments are decided.",
+        required: true,
+        visible: true,
+        complete: !!state.qapType,
+      },
+      {
+        key: "qapAttachment",
+        label: "QAP From Attachment",
+        hint: "Upload the customer-supplied QAP when the source is Customer.",
+        required: true,
+        visible: state.qapType === "Customer",
+        complete:
+          state.qapType !== "Customer" ||
+          !!qapTypeFile ||
+          (mode === "edit" && !!initial?.qapTypeAttachmentUrl),
+      },
+      {
+        key: "bomFrom",
+        label: "BOM From",
+        hint: "Choose the BOM source so the correct attachment path is applied.",
+        required: true,
+        visible: true,
+        complete: !!state.bomFrom,
+      },
+      {
+        key: "bomAttachment",
+        label: "BOM From Attachment",
+        hint: "Upload the customer BOM when the source is Customer.",
+        required: true,
+        visible: state.bomFrom === "Customer",
+        complete:
+          state.bomFrom !== "Customer" ||
+          !!primaryBomFile ||
+          (mode === "edit" && !!initial?.primaryBomAttachmentUrl),
+      },
+      {
+        key: "inlineInspection",
+        label: "Inline Inspection",
+        hint: "Confirm whether inline inspection is required for this request.",
+        required: true,
+        visible: true,
+        complete: !!state.inlineInspection,
+      },
+      {
+        key: "pdi",
+        label: "Pre-Dispatch Inspection (PDI)",
+        hint: "Set whether a pre-dispatch inspection is expected.",
+        required: true,
+        visible: true,
+        complete: !!state.pdi,
+      },
+      {
+        key: "certificationRequired",
+        label: "Certification Required?",
+        hint: "Record the expected certification combination when relevant. This can be skipped if not needed.",
+        required: false,
+        visible: true,
+        complete: !!state.certificationRequired,
+      },
+      {
+        key: "cellProcuredBy",
+        label: "Cell Procured By",
+        hint: "Identify who is responsible for cell procurement before approval.",
+        required: true,
+        visible: true,
+        complete: !!state.cellProcuredBy,
+      },
+      {
+        key: "agreedCTM",
+        label: "Agreed CTM",
+        hint: "Enter the agreed CTM if commercial discussions have already locked it.",
+        required: false,
+        visible: true,
+        complete: !!String(state.agreedCTM || "").trim(),
+      },
+      {
+        key: "factoryAuditDate",
+        label: "Factory Audit Tentative Date",
+        hint: "Use this when a tentative audit date is already available; otherwise it can be skipped.",
+        required: false,
+        visible: true,
+        complete: !!state.factoryAuditTentativeDate,
+      },
+      {
+        key: "cableLengthRequired",
+        label: "JB Cable Length (mm)",
+        hint: "Set the cable length requirement before finalizing the request.",
+        required: true,
+        visible: true,
+        complete: !!String(state.cableLengthRequired || "").trim(),
+      },
+      {
+        key: "xPitchMm",
+        label: "X Pitch (mm)",
+        hint: "Capture this only when the project already has X-pitch constraints.",
+        required: false,
+        visible: true,
+        complete: !!String(state.xPitchMm || "").trim(),
+      },
+      {
+        key: "trackerDetails",
+        label: "Tracker Details (790/1400mm)",
+        hint: "Fill tracker details when that information is available; otherwise skip and return later.",
+        required: false,
+        visible: true,
+        complete: !!String(state.trackerDetails || "").trim(),
+      },
+      {
+        key: "priority",
+        label: "Priority",
+        hint: "Mark the request priority before submission.",
+        required: true,
+        visible: true,
+        complete: !!state.priority,
+      },
+      {
+        key: "remarks",
+        label: "Remarks",
+        hint: "Add any supporting notes that reviewers should see. This can be skipped when not needed.",
+        required: false,
+        visible: true,
+        complete: !!state.remarks.trim(),
+      },
+      {
+        key: "otherAttachments",
+        label: "Any Other Attachments",
+        hint: "Add any supporting files with titles if they help the reviewers. This is optional.",
+        required: false,
+        visible: true,
+        complete: otherFiles.some(
+          (file) => !!file.title.trim() || !!file.file
+        ),
+      },
+      {
+        key: "bomReview",
+        label: "BOM (Bill of Materials) Review",
+        hint: "Expand the BOM section to review or adjust component selections before you finish.",
+        required: false,
+        visible: true,
+        complete: bomOpen,
+      },
+    ],
+    [
+      bomOpen,
+      docRef,
+      initial?.primaryBomAttachmentUrl,
+      initial?.qapTypeAttachmentUrl,
+      mode,
+      moduleDimensionsOption,
+      moduleModelNumber,
+      otherFiles,
+      primaryBomFile,
+      qapTypeFile,
+      state.agreedCTM,
+      state.bomFrom,
+      state.cableLengthRequired,
+      state.cellProcuredBy,
+      state.cellTech,
+      state.cellType,
+      state.certificationRequired,
+      state.customerName,
+      state.cutCells,
+      state.deliveryEndDate,
+      state.deliveryStartDate,
+      state.factoryAuditTentativeDate,
+      state.inlineInspection,
+      state.moduleCellType,
+      state.moduleManufacturingPlant,
+      state.pdi,
+      state.premierBiddedOrderQtyMW,
+      state.priority,
+      state.productCategory,
+      state.projectLocation,
+      state.qapType,
+      state.remarks,
+      state.rfqOrderQtyMW,
+      state.trackerDetails,
+      state.xPitchMm,
+      vendorAddress,
+      wattPeakLabel,
+      wattageBinsState.valid,
+    ]
+  );
+
+  const guidedSteps = useMemo(
+    () => allGuideSteps.filter((step) => step.visible),
+    [allGuideSteps]
+  );
+
+  const guideStepMap = useMemo(
+    () =>
+      Object.fromEntries(
+        allGuideSteps.map((step) => [step.key, step])
+      ) as Record<GuidedFieldKey, GuideStep>,
+    [allGuideSteps]
+  );
+
+  useEffect(() => {
+    setSkippedGuideSteps((prev) => {
+      const next = Object.fromEntries(
+        Object.entries(prev).filter(([key, skipped]) => {
+          const step = guideStepMap[key as GuidedFieldKey];
+          return !!skipped && !!step && step.visible && !step.required && !step.complete;
+        })
+      ) as Partial<Record<GuidedFieldKey, boolean>>;
+
+      return JSON.stringify(prev) === JSON.stringify(next) ? prev : next;
+    });
+  }, [guideStepMap]);
+
+  const currentGuideStep = useMemo(
+    () =>
+      tutorialMode
+        ? guidedSteps.find(
+            (step) =>
+              !step.complete &&
+              !(skippedGuideSteps[step.key] && !step.required)
+          ) || null
+        : null,
+    [guidedSteps, skippedGuideSteps, tutorialMode]
+  );
+
+  useEffect(() => {
+    if (!selectedGuideStep) return;
+    const step = guideStepMap[selectedGuideStep];
+    if (!step?.visible) {
+      setSelectedGuideStep(null);
+    }
+  }, [guideStepMap, selectedGuideStep]);
+
+  const activeGuideStep = useMemo(() => {
+    if (!tutorialMode) return null;
+    if (selectedGuideStep) {
+      const step = guideStepMap[selectedGuideStep];
+      if (step?.visible) return step;
+    }
+    return currentGuideStep;
+  }, [currentGuideStep, guideStepMap, selectedGuideStep, tutorialMode]);
+
+  const guideCardSteps = useMemo(
+    () =>
+      guidedSteps.map((step) => ({
+        id: step.key,
+        title: step.label,
+        description: step.hint,
+        required: step.required,
+        complete: step.complete,
+        skipped: !!skippedGuideSteps[step.key] && !step.complete,
+      })),
+    [guidedSteps, skippedGuideSteps]
+  );
+
+  const setGuideStepSkipped = (field: GuidedFieldKey, skipped: boolean) => {
+    setSkippedGuideSteps((prev) => {
+      const next = { ...prev };
+      if (skipped) next[field] = true;
+      else delete next[field];
+      return next;
+    });
+    if (skipped && selectedGuideStep === field) {
+      setSelectedGuideStep(null);
+    }
+  };
+
+  const isGuided = (field: GuidedFieldKey) =>
+    tutorialMode && activeGuideStep?.key === field;
+
+  const guideHintFor = (field: GuidedFieldKey) =>
+    isGuided(field) ? guideStepMap[field]?.hint : undefined;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-xl max-h-[92vh] w-full max-w-[95vw] md:max-w-screen-2xl overflow-auto">
-        <div className="p-4 border-b flex items-center justify-between sticky top-0 bg-white z-10">
-          <h2 className="text-lg font-semibold">
-            {mode === "edit" ? "Edit Sales Request" : "Create Sales Request"}
-          </h2>
-          <div className="flex items-center gap-2">
-            <Button
-              variant={showPreview ? "secondary" : "outline"}
-              onClick={() => setShowPreview((v) => !v)}
-            >
-              {showPreview ? "Back to Edit" : "Preview"}
-            </Button>
-            <Button variant="ghost" onClick={onClose}>
-              Close
-            </Button>
+      <div className="bg-white rounded-lg shadow-xl max-h-[95vh] w-full max-w-[98vw] 2xl:max-w-[1700px] overflow-auto">
+        <div className="sticky top-0 z-10 border-b bg-white p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">
+                {mode === "edit" ? "Edit Sales Request" : "Create Sales Request"}
+              </h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Start directly in the form. The integrated tutorial follows beside
+                the fields and highlights the current focus step.
+              </p>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant={showPreview ? "secondary" : "outline"}
+                  onClick={() => setShowPreview((v) => !v)}
+                >
+                  {showPreview ? "Back to Edit" : "Preview"}
+                </Button>
+                <Button variant="ghost" onClick={onClose}>
+                  Close
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
 
         {!showPreview ? (
-          <>
-            {/* Core form */}
-            <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="min-w-0">
+              {/* Core form */}
+              <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
               <Text
                 label="Customer Name"
                 required
                 value={state.customerName}
                 onChange={(v) => setState((s) => ({ ...s, customerName: v }))}
                 readOnly={mode === "edit" || !!prefillCustomerName}
+                highlighted={isGuided("customerName")}
+                hint={guideHintFor("customerName")}
               />
               <Select
                 label="Module Manufacturing Plant"
@@ -1438,6 +1990,8 @@ const SalesRequestModal: React.FC<{
                   setState((s) => ({ ...s, moduleManufacturingPlant: v }))
                 }
                 options={["P2", "P4", "P5", "P6"]}
+                highlighted={isGuided("plant")}
+                hint={guideHintFor("plant")}
               />
               <Select
                 label="Product Category"
@@ -1467,6 +2021,8 @@ const SalesRequestModal: React.FC<{
                   setModuleDimensionsOption(m.dimOptions[0] || "");
                 }}
                 options={PRODUCT_CATEGORY_OPTIONS}
+                highlighted={isGuided("productCategory")}
+                hint={guideHintFor("productCategory")}
               />
               {/* NEW sub-dropdowns under "Module Order Type" */}
               <Select
@@ -1477,6 +2033,8 @@ const SalesRequestModal: React.FC<{
                 }
                 // ⬇️ remove M10R here
                 options={["M10", "G12", "G12R"]}
+                highlighted={isGuided("moduleCellType")}
+                hint={guideHintFor("moduleCellType")}
               />
               <Select
                 label="Cell Tech"
@@ -1485,6 +2043,8 @@ const SalesRequestModal: React.FC<{
                   setState((s) => ({ ...s, cellTech: v as CellTech }))
                 }
                 options={["PERC", "TOPCon"]}
+                highlighted={isGuided("cellTech")}
+                hint={guideHintFor("cellTech")}
               />
               <Select
                 label="No. of Cells"
@@ -1493,9 +2053,16 @@ const SalesRequestModal: React.FC<{
                   setState((s) => ({ ...s, cutCells: v as CutCells }))
                 }
                 options={["60", "66", "72", "78"]}
+                highlighted={isGuided("cutCells")}
+                hint={guideHintFor("cutCells")}
               />
               {/* NEW: Min Watt Peak (moved up from BOM) */}
-              <ReadOnly label="Min Watt Peak" value={wattPeakLabel || "-"} />
+              <ReadOnly
+                label="Min Watt Peak"
+                value={wattPeakLabel || "-"}
+                highlighted={isGuided("wattPeak")}
+                hint={guideHintFor("wattPeak")}
+              />
               <Select
                 label="Module Model Number"
                 required
@@ -1504,14 +2071,20 @@ const SalesRequestModal: React.FC<{
                   setModuleModelNumber(v);
                 }}
                 options={modelOptions}
+                highlighted={isGuided("moduleModelNumber")}
+                hint={guideHintFor("moduleModelNumber")}
               />
               <ReadOnly
                 label="Solar Module Vendor Name (lock-in)"
                 value={VENDOR_NAME_LOCKIN}
+                highlighted={isGuided("vendorNameLockIn")}
+                hint={guideHintFor("vendorNameLockIn")}
               />
               <ReadOnly
                 label="Location of RFID in module (lock-in)"
                 value={RFID_LOCATION_LOCKIN}
+                highlighted={isGuided("rfidLocation")}
+                hint={guideHintFor("rfidLocation")}
               />
               {/* 3) Module Dimensions (matrix-driven; M10 auto-picked) */}
               <Select
@@ -1520,6 +2093,8 @@ const SalesRequestModal: React.FC<{
                 value={moduleDimensionsOption}
                 onChange={(v: string) => setModuleDimensionsOption(v)}
                 options={catDimOpts}
+                highlighted={isGuided("moduleDimensions")}
+                hint={guideHintFor("moduleDimensions")}
               />
               {/* 4) Module Model Number (auto-selected by Watt Peak) */}
               {/* Keep the rest as-is */}
@@ -1527,22 +2102,38 @@ const SalesRequestModal: React.FC<{
                 label="Solar Module Vendor Address"
                 value={vendorAddress}
                 onChange={setVendorAddress}
+                highlighted={isGuided("vendorAddress")}
+                hint={guideHintFor("vendorAddress")}
               />
-              <ReadOnly label="Document Ref (auto)" value={docRef} />{" "}
+              <ReadOnly
+                label="Document Ref (auto)"
+                value={docRef}
+                highlighted={isGuided("documentRef")}
+                hint={guideHintFor("documentRef")}
+              />{" "}
               <Select
                 label="DCR Compliance?"
                 required
                 value={state.cellType}
                 onChange={(v: any) => setState((s) => ({ ...s, cellType: v }))}
                 options={["DCR", "NDCR"]}
+                highlighted={isGuided("cellType")}
+                hint={guideHintFor("cellType")}
               />
-              <WattageDistTable rows={wattBins} onChange={setWattBins} />
+              <WattageDistTable
+                rows={wattBins}
+                onChange={setWattBins}
+                highlighted={isGuided("wattageBinning")}
+                hint={guideHintFor("wattageBinning")}
+              />
               <IntField
                 label="RFQ Order Quantity (MW)"
                 required
                 value={state.rfqOrderQtyMW}
                 onChange={(v) => setState((s) => ({ ...s, rfqOrderQtyMW: v }))}
                 placeholder="e.g., 20"
+                highlighted={isGuided("rfqOrderQtyMW")}
+                hint={guideHintFor("rfqOrderQtyMW")}
               />
               <IntField
                 label="Premier Bidded Actual Order Quantity in MW"
@@ -1551,6 +2142,8 @@ const SalesRequestModal: React.FC<{
                   setState((s) => ({ ...s, premierBiddedOrderQtyMW: v }))
                 }
                 placeholder="optional"
+                highlighted={isGuided("premierBiddedOrderQtyMW")}
+                hint={guideHintFor("premierBiddedOrderQtyMW")}
               />
               <DateRange
                 label="Delivery Timeline"
@@ -1563,6 +2156,8 @@ const SalesRequestModal: React.FC<{
                     deliveryEndDate: end,
                   }))
                 }
+                highlighted={isGuided("deliveryTimeline")}
+                hint={guideHintFor("deliveryTimeline")}
               />
               <Text
                 label="Project Location"
@@ -1571,6 +2166,8 @@ const SalesRequestModal: React.FC<{
                 onChange={(v) =>
                   setState((s) => ({ ...s, projectLocation: v }))
                 }
+                highlighted={isGuided("projectLocation")}
+                hint={guideHintFor("projectLocation")}
               />
               {/* Right column */}
               <Select
@@ -1579,9 +2176,16 @@ const SalesRequestModal: React.FC<{
                 value={state.qapType}
                 onChange={(v: any) => setState((s) => ({ ...s, qapType: v }))}
                 options={["Customer", "Premier Energies"]}
+                highlighted={isGuided("qapType")}
+                hint={guideHintFor("qapType")}
               />
               {state.qapType === "Customer" && (
-                <File label="QAP From Attachment" onChange={setQapTypeFile} />
+                <File
+                  label="QAP From Attachment"
+                  onChange={setQapTypeFile}
+                  highlighted={isGuided("qapAttachment")}
+                  hint={guideHintFor("qapAttachment")}
+                />
               )}
               <Select
                 label="BOM From"
@@ -1589,11 +2193,15 @@ const SalesRequestModal: React.FC<{
                 value={state.bomFrom}
                 onChange={(v: any) => setState((s) => ({ ...s, bomFrom: v }))}
                 options={["Premier Energies", "Customer"]}
+                highlighted={isGuided("bomFrom")}
+                hint={guideHintFor("bomFrom")}
               />
               {state.bomFrom === "Customer" && (
                 <File
                   label="BOM From Attachment"
                   onChange={setPrimaryBomFile}
+                  highlighted={isGuided("bomAttachment")}
+                  hint={guideHintFor("bomAttachment")}
                 />
               )}
               <Select
@@ -1604,6 +2212,8 @@ const SalesRequestModal: React.FC<{
                   setState((s) => ({ ...s, inlineInspection: v }))
                 }
                 options={["yes", "no"]}
+                highlighted={isGuided("inlineInspection")}
+                hint={guideHintFor("inlineInspection")}
               />
               <Select
                 label="Pre-Dispatch Inspection (PDI)"
@@ -1611,6 +2221,8 @@ const SalesRequestModal: React.FC<{
                 value={state.pdi}
                 onChange={(v: any) => setState((s) => ({ ...s, pdi: v }))}
                 options={["yes", "no"]}
+                highlighted={isGuided("pdi")}
+                hint={guideHintFor("pdi")}
               />
               <Select
                 label="Certification Required?"
@@ -1633,6 +2245,8 @@ const SalesRequestModal: React.FC<{
                   "BIS + IEC + 3xIEC",
                   "Not Required",
                 ]}
+                highlighted={isGuided("certificationRequired")}
+                hint={guideHintFor("certificationRequired")}
               />
               <Select
                 label="Cell Procured By"
@@ -1646,12 +2260,16 @@ const SalesRequestModal: React.FC<{
                   "Premier Energies",
                   "Financed By Customer",
                 ]}
+                highlighted={isGuided("cellProcuredBy")}
+                hint={guideHintFor("cellProcuredBy")}
               />
               <FloatField
                 label="Agreed CTM"
                 value={state.agreedCTM}
                 onChange={(v) => setState((s) => ({ ...s, agreedCTM: v }))}
                 placeholder="e.g., 0.9925"
+                highlighted={isGuided("agreedCTM")}
+                hint={guideHintFor("agreedCTM")}
               />
               <DateSingle
                 label="Factory Audit Tentative Date"
@@ -1659,6 +2277,8 @@ const SalesRequestModal: React.FC<{
                 onChange={(v) =>
                   setState((s) => ({ ...s, factoryAuditTentativeDate: v }))
                 }
+                highlighted={isGuided("factoryAuditDate")}
+                hint={guideHintFor("factoryAuditDate")}
               />
               <IntField
                 label="JB Cable Length (mm)"
@@ -1668,18 +2288,24 @@ const SalesRequestModal: React.FC<{
                   setState((s) => ({ ...s, cableLengthRequired: v }))
                 }
                 placeholder="in mm"
+                highlighted={isGuided("cableLengthRequired")}
+                hint={guideHintFor("cableLengthRequired")}
               />
               <IntField
                 label="X Pitch (mm)"
                 value={state.xPitchMm}
                 onChange={(v) => setState((s) => ({ ...s, xPitchMm: v }))}
                 placeholder="optional"
+                highlighted={isGuided("xPitchMm")}
+                hint={guideHintFor("xPitchMm")}
               />
               <IntField
                 label="Tracker Details (790/1400mm)"
                 value={state.trackerDetails}
                 onChange={(v) => setState((s) => ({ ...s, trackerDetails: v }))}
                 placeholder="optional"
+                highlighted={isGuided("trackerDetails")}
+                hint={guideHintFor("trackerDetails")}
               />
               <Select
                 label="Priority"
@@ -1687,14 +2313,22 @@ const SalesRequestModal: React.FC<{
                 value={state.priority}
                 onChange={(v: any) => setState((s) => ({ ...s, priority: v }))}
                 options={["high", "low"]}
+                highlighted={isGuided("priority")}
+                hint={guideHintFor("priority")}
               />
               <Textarea
                 label="Remarks (optional)"
                 value={state.remarks}
                 onChange={(v) => setState((s) => ({ ...s, remarks: v }))}
+                highlighted={isGuided("remarks")}
+                hint={guideHintFor("remarks")}
               />
               {/* Multi file attachments with titles */}
-              <div className="md:col-span-2">
+              <div
+                className={`md:col-span-2 ${fieldShellClasses(
+                  isGuided("otherAttachments")
+                )}`}
+              >
                 <div className="flex items-center justify-between mb-2">
                   <label className="font-medium">
                     Any Other Attachments (optional)
@@ -1752,214 +2386,275 @@ const SalesRequestModal: React.FC<{
                     ))}
                   </div>
                 )}
+                <FieldHint hint={guideHintFor("otherAttachments")} />
               </div>
-            </div>
+              </div>
 
-            {/* BOM section */}
-            <div className="px-4 pb-4">
-              <Card>
-                <CardHeader className="flex items-center justify-between">
-                  <CardTitle>BOM (Bill of Materials)</CardTitle>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setBomOpen((v) => !v)}
-                    aria-expanded={bomOpen}
-                    aria-controls="bom-editor"
-                  >
-                    {bomOpen ? "Collapse" : "Expand"}
-                  </Button>
-                </CardHeader>
+              {/* BOM section */}
+              <div className="px-4 pb-4">
+                <Card
+                  className={
+                    isGuided("bomReview")
+                      ? "border-amber-400 shadow-[0_0_0_3px_rgba(251,191,36,0.18)]"
+                      : undefined
+                  }
+                >
+                  <CardHeader className="flex items-center justify-between">
+                    <CardTitle>BOM (Bill of Materials)</CardTitle>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setBomOpen((v) => !v)}
+                      aria-expanded={bomOpen}
+                      aria-controls="bom-editor"
+                    >
+                      {bomOpen ? "Collapse" : "Expand"}
+                    </Button>
+                  </CardHeader>
+                  {!bomOpen && <FieldHint hint={guideHintFor("bomReview")} />}
 
-                {bomOpen && (
-                  <CardContent id="bom-editor" className="space-y-6">
-                    {/* Lock-ins & Header fields */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Module Model Number (dropdown by plant) */}
-                    </div>
+                  {bomOpen && (
+                    <CardContent id="bom-editor" className="space-y-6">
+                      <FieldHint hint={guideHintFor("bomReview")} />
+                      {/* Lock-ins & Header fields */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Module Model Number (dropdown by plant) */}
+                      </div>
 
-                    {/* Component tables */}
-                    <div className="space-y-6">
-                      {components.length === 0 ? (
-                        <div className="text-sm text-gray-500 p-3 border rounded">
-                          BOM has no components.
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="ml-2"
-                            onClick={() => {
-                              const all = (
-                                Object.keys(BOM_MASTER) as BomComponentName[]
-                              ).map((name) => {
-                                const opts = getOptionsFor(
-                                  name
-                                ) as readonly BomComponentOption[];
-                                const defaultRow: BomRow =
-                                  opts.length === 1
-                                    ? {
-                                        model: opts[0].model,
-                                        subVendor: opts[0].subVendor ?? null,
-                                        spec: opts[0].spec ?? null,
-                                      }
-                                    : {
-                                        model: "",
-                                        subVendor: null,
-                                        spec: null,
-                                      };
-                                return { name, rows: [defaultRow] };
-                              });
-                              setComponents(all);
-                            }}
-                          >
-                            Reset to defaults
-                          </Button>
-                        </div>
-                      ) : (
-                        components.map((c) => (
-                          <div key={c.name} className="border rounded-md">
-                            <div className="px-3 py-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b bg-gray-50">
-                              <div className="font-medium">{c.name}</div>
-                              <div className="flex items-center gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => addRow(c.name)}
-                                >
-                                  + Add Row
-                                </Button>
+                      {/* Component tables */}
+                      <div className="space-y-6">
+                        {components.length === 0 ? (
+                          <div className="text-sm text-gray-500 p-3 border rounded">
+                            BOM has no components.
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="ml-2"
+                              onClick={() => {
+                                const all = componentNames.map((name) => {
+                                  const opts = bomOptionsFor(name);
+                                  const defaultRow: BomRow =
+                                    opts.length === 1
+                                      ? {
+                                          model: opts[0].model,
+                                          subVendor: opts[0].subVendor ?? null,
+                                          spec: opts[0].spec ?? null,
+                                        }
+                                      : {
+                                          model: "",
+                                          subVendor: null,
+                                          spec: null,
+                                        };
+                                  return { name, rows: [defaultRow] };
+                                });
+                                setComponents(all);
+                              }}
+                            >
+                              Reset to defaults
+                            </Button>
+                          </div>
+                        ) : (
+                          components.map((c) => (
+                            <div key={c.name} className="border rounded-md">
+                              <div className="px-3 py-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b bg-gray-50">
+                                <div className="font-medium">{c.name}</div>
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => addRow(c.name)}
+                                  >
+                                    + Add Row
+                                  </Button>
+                                </div>
                               </div>
-                            </div>
 
-                            <div className="overflow-auto">
-                              <table className="min-w-full text-sm">
-                                <thead>
-                                  <tr className="bg-gray-50 text-left">
-                                    <Th>Part No / Type / Model</Th>
-                                    <Th>Name of Sub-vendor / Manufacturer</Th>
-                                    <Th>Specification</Th>
-                                    <Th>Action</Th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y">
-                                  {c.rows.length === 0 ? (
-                                    <tr>
-                                      <td
-                                        colSpan={4}
-                                        className="px-3 py-3 text-gray-500"
-                                      >
-                                        No rows yet. Click “Add Row”.
-                                      </td>
+                              <div className="overflow-auto">
+                                <table className="min-w-full text-sm">
+                                  <thead>
+                                    <tr className="bg-gray-50 text-left">
+                                      <Th>Part No / Type / Model</Th>
+                                      <Th>Name of Sub-vendor / Manufacturer</Th>
+                                      <Th>Specification</Th>
+                                      <Th>Action</Th>
                                     </tr>
-                                  ) : (
-                                    c.rows.map((r, idx) => {
-                                      return (
-                                        <tr key={idx} className="align-top">
-                                          <td className="px-3 py-2 min-w-[28rem]">
-                                            <div className="space-y-2">
-                                              <input
-                                                className="w-full border rounded px-3 py-2 bg-gray-50 font-mono"
-                                                value={r.model || ""}
-                                                placeholder="No model chosen"
-                                                readOnly
-                                              />
-                                              <div className="flex items-center gap-2">
-                                                <Button
-                                                  size="sm"
-                                                  variant="outline"
-                                                  onClick={() =>
-                                                    openModelDialog(c.name, idx)
-                                                  }
-                                                >
-                                                  {r.model
-                                                    ? "Change"
-                                                    : "Choose"}
-                                                </Button>
-                                                {r.model && (
+                                  </thead>
+                                  <tbody className="divide-y">
+                                    {c.rows.length === 0 ? (
+                                      <tr>
+                                        <td
+                                          colSpan={4}
+                                          className="px-3 py-3 text-gray-500"
+                                        >
+                                          No rows yet. Click “Add Row”.
+                                        </td>
+                                      </tr>
+                                    ) : (
+                                      c.rows.map((r, idx) => {
+                                        return (
+                                          <tr key={idx} className="align-top">
+                                            <td className="px-3 py-2 min-w-[28rem]">
+                                              <div className="space-y-2">
+                                                <input
+                                                  className="w-full border rounded px-3 py-2 bg-gray-50 font-mono"
+                                                  value={r.model || ""}
+                                                  placeholder="No model chosen"
+                                                  readOnly
+                                                />
+                                                <div className="flex items-center gap-2">
                                                   <Button
                                                     size="sm"
-                                                    variant="destructive"
+                                                    variant="outline"
                                                     onClick={() =>
-                                                      setRowModel(
-                                                        c.name,
-                                                        idx,
-                                                        ""
-                                                      )
+                                                      openModelDialog(c.name, idx)
                                                     }
                                                   >
-                                                    Clear
+                                                    {r.model
+                                                      ? "Change"
+                                                      : "Choose"}
                                                   </Button>
-                                                )}
+                                                  {r.model && (
+                                                    <Button
+                                                      size="sm"
+                                                      variant="destructive"
+                                                      onClick={() =>
+                                                        setRowModel(
+                                                          c.name,
+                                                          idx,
+                                                          ""
+                                                        )
+                                                      }
+                                                    >
+                                                      Clear
+                                                    </Button>
+                                                  )}
+                                                </div>
                                               </div>
-                                            </div>
-                                          </td>
+                                            </td>
 
-                                          <td className="px-3 py-2 min-w-[16rem]">
-                                            <input
-                                              className="w-full border rounded px-3 py-2 bg-gray-50"
-                                              value={r.subVendor ?? ""}
-                                              readOnly
-                                            />
-                                          </td>
-                                          <td className="px-3 py-2 min-w-[24rem]">
-                                            <div className="border rounded px-3 py-2 bg-gray-50 whitespace-pre-wrap">
-                                              {r.spec || "—"}
-                                            </div>
-                                          </td>
-                                          <td className="px-3 py-2">
-                                            <Button
-                                              size="sm"
-                                              variant="destructive"
-                                              onClick={() =>
-                                                removeRow(c.name, idx)
-                                              }
-                                            >
-                                              Remove
-                                            </Button>
-                                          </td>
-                                        </tr>
-                                      );
-                                    })
-                                  )}
-                                </tbody>
-                              </table>
+                                            <td className="px-3 py-2 min-w-[16rem]">
+                                              <input
+                                                className="w-full border rounded px-3 py-2 bg-gray-50"
+                                                value={r.subVendor ?? ""}
+                                                readOnly
+                                              />
+                                            </td>
+                                            <td className="px-3 py-2 min-w-[24rem]">
+                                              <div className="border rounded px-3 py-2 bg-gray-50 whitespace-pre-wrap">
+                                                {r.spec || "—"}
+                                              </div>
+                                            </td>
+                                            <td className="px-3 py-2">
+                                              <Button
+                                                size="sm"
+                                                variant="destructive"
+                                                onClick={() =>
+                                                  removeRow(c.name, idx)
+                                                }
+                                              >
+                                                Remove
+                                              </Button>
+                                            </td>
+                                          </tr>
+                                        );
+                                      })
+                                    )}
+                                  </tbody>
+                                </table>
+                              </div>
                             </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </CardContent>
-                )}
-              </Card>
-            </div>
-
-            {/* Change history (edit only) */}
-            {mode === "edit" && initial?.id && (
-              <div className="p-4 border-t">
-                <h3 className="font-semibold mb-2">Change History</h3>
-                <HistoryList id={initial.id} />
+                          ))
+                        )}
+                      </div>
+                    </CardContent>
+                  )}
+                </Card>
               </div>
-            )}
 
-            <div className="p-4 border-t flex items-center justify-end gap-3">
-              <Button variant="outline" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button
-                disabled={!canSubmit || creating}
-                onClick={submit}
-                className="bg-blue-600 hover:bg-blue-700"
-              >
-                {creating
-                  ? mode === "edit"
-                    ? "Saving…"
-                    : "Saving…"
-                  : mode === "edit"
-                  ? "Save Changes"
-                  : "Create"}
-              </Button>
+              {/* Change history (edit only) */}
+              {mode === "edit" && initial?.id && (
+                <div className="p-4 border-t">
+                  <h3 className="font-semibold mb-2">Change History</h3>
+                  <HistoryList id={initial.id} />
+                </div>
+              )}
+
+              <div className="p-4 border-t flex items-center justify-end gap-3">
+                <Button variant="outline" onClick={onClose}>
+                  Cancel
+                </Button>
+                <Button
+                  disabled={!canSubmit || creating}
+                  onClick={submit}
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  {creating
+                    ? mode === "edit"
+                      ? "Saving…"
+                      : "Saving…"
+                    : mode === "edit"
+                    ? "Save Changes"
+                    : "Create"}
+                </Button>
+              </div>
             </div>
-          </>
+            {guidedSteps.length > 0 ? (
+              <div className="px-4 pb-4 xl:pl-0">
+                <InteractiveTutorialCard
+                  storageKey="sales-request-tutorial"
+                  title="Sales Request Walkthrough"
+                  description="Work in the form first. Use this guide to move field-by-field, or jump to any step when you need help."
+                  steps={guideCardSteps}
+                  activeStepId={activeGuideStep?.key ?? null}
+                  onSelectStep={(stepId) =>
+                    setSelectedGuideStep(stepId as GuidedFieldKey)
+                  }
+                  enabled={tutorialMode}
+                  onEnabledChange={setTutorialMode}
+                  className="xl:sticky xl:top-24"
+                  footer={
+                    activeGuideStep ? (
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                          Current Focus
+                        </div>
+                        <div className="mt-2 text-sm text-slate-700">
+                          {activeGuideStep.hint}
+                        </div>
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <Badge variant="outline" className="bg-white">
+                            {activeGuideStep.required ? "Mandatory" : "Optional"}
+                          </Badge>
+                          {!activeGuideStep.required && !activeGuideStep.complete ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                setGuideStepSkipped(
+                                  activeGuideStep.key,
+                                  !skippedGuideSteps[activeGuideStep.key]
+                                )
+                              }
+                            >
+                              {skippedGuideSteps[activeGuideStep.key]
+                                ? "Revisit Step"
+                                : "Skip for now"}
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                        All visible mandatory steps are complete. You can still open any tutorial step to review optional fields before submitting.
+                      </div>
+                    )
+                  }
+                />
+              </div>
+            ) : null}
+          </div>
         ) : (
           // Preview
           <div className="p-4 space-y-6">
@@ -2283,7 +2978,7 @@ const SalesRequestModal: React.FC<{
             ? `${modelDialog.comp} – Select model`
             : "Select model"
         }
-        options={modelDialog.open ? getOptionsFor(modelDialog.comp) : []}
+        options={modelDialog.open ? bomOptionsFor(modelDialog.comp) : []}
         onClose={closeModelDialog}
         onPick={(model) => {
           if (modelDialog.open) {
@@ -2365,7 +3060,11 @@ const ViewSalesRequestModal: React.FC<{
 
         <div className="p-4 space-y-6">
           {loading ? (
-            <div>Loading…</div>
+            <BrandedLoadingScreen
+              message="Loading sales request"
+              subtitle="Bringing in the request details, attachments, and change history."
+              className="min-h-[360px]"
+            />
           ) : error ? (
             <div className="text-red-600">{error}</div>
           ) : data ? (
@@ -2722,7 +3421,7 @@ function stringifyForView(v: any) {
 const ModelPickerModal: React.FC<{
   open: boolean;
   title?: string;
-  options: readonly BomComponentOption[];
+  options: readonly BomMasterOption[];
   onClose: () => void;
   onPick: (model: string) => void;
 }> = ({ open, title = "Select model", options, onClose, onPick }) => {
@@ -2812,7 +3511,9 @@ const ModelPickerModal: React.FC<{
 const WattageDistTable: React.FC<{
   rows: { range: string; pct: string }[];
   onChange: (rows: { range: string; pct: string }[]) => void;
-}> = ({ rows, onChange }) => {
+  highlighted?: boolean;
+  hint?: string;
+}> = ({ rows, onChange, highlighted, hint }) => {
   const addRow = () => onChange([...rows, { range: "", pct: "" }]);
   const removeRow = (idx: number) =>
     onChange(rows.length > 1 ? rows.filter((_, i) => i !== idx) : rows);
@@ -2825,14 +3526,10 @@ const WattageDistTable: React.FC<{
     onChange(copy);
   };
 
-  const nonEmpty = rows.filter(
-    (r) => r.range.trim() !== "" || r.pct.trim() !== ""
-  );
-  const sum = nonEmpty.reduce((a, r) => a + (Number(r.pct) || 0), 0);
-  const valid = Math.abs(sum - 100) < 0.001 && nonEmpty.length >= 1;
+  const { sum, valid } = evaluateWattageBins(rows);
 
   return (
-    <div className="md:col-span-2">
+    <div className={`md:col-span-2 ${fieldShellClasses(highlighted)}`}>
       <div className="flex items-center justify-between mb-1">
         <label className="block text-sm text-gray-700">
           Tentative Wattage Binning / Distribution *
@@ -2902,6 +3599,7 @@ const WattageDistTable: React.FC<{
           ? "Looks good: total is 100%."
           : "Total must be exactly 100% and at least one row is required."}
       </div>
+      <FieldHint hint={hint} />
     </div>
   );
 };
@@ -2910,15 +3608,24 @@ const WattageDistTable: React.FC<{
 /*  Small field + preview components                                         */
 /* ────────────────────────────────────────────────────────────────────────── */
 
+const fieldShellClasses = (highlighted?: boolean) =>
+  highlighted
+    ? "min-w-0 rounded-xl border-2 border-amber-400 bg-amber-50/70 p-3 shadow-[0_0_0_3px_rgba(251,191,36,0.18)]"
+    : "min-w-0";
+
+const FieldHint: React.FC<{ hint?: string }> = ({ hint }) =>
+  hint ? <p className="mt-2 text-xs text-amber-900">{hint}</p> : null;
+
 const Text: React.FC<{
   label: string;
   value: string;
   onChange: (v: string) => void;
   required?: boolean;
-
   readOnly?: boolean;
-}> = ({ label, value, onChange, required, readOnly }) => (
-  <div>
+  highlighted?: boolean;
+  hint?: string;
+}> = ({ label, value, onChange, required, readOnly, highlighted, hint }) => (
+  <div className={fieldShellClasses(highlighted)}>
     <label className="block text-sm text-gray-700 mb-1">
       {label}
       {required && " *"}
@@ -2931,20 +3638,29 @@ const Text: React.FC<{
       onChange={(e) => onChange(e.target.value)}
       readOnly={!!readOnly}
     />
+    <FieldHint hint={hint} />
   </div>
 );
 
-const ReadOnly: React.FC<{ label: string; value: string }> = ({
+const ReadOnly: React.FC<{
+  label: string;
+  value: string;
+  highlighted?: boolean;
+  hint?: string;
+}> = ({
   label,
   value,
+  highlighted,
+  hint,
 }) => (
-  <div>
+  <div className={fieldShellClasses(highlighted)}>
     <label className="block text-sm text-gray-700 mb-1">{label}</label>
     <input
       className="w-full border rounded px-3 py-2 bg-gray-50"
       value={value}
       readOnly
     />
+    <FieldHint hint={hint} />
   </div>
 );
 
@@ -2952,14 +3668,17 @@ const Textarea: React.FC<{
   label: string;
   value: string;
   onChange: (v: string) => void;
-}> = ({ label, value, onChange }) => (
-  <div className="md:col-span-2">
+  highlighted?: boolean;
+  hint?: string;
+}> = ({ label, value, onChange, highlighted, hint }) => (
+  <div className={`md:col-span-2 ${fieldShellClasses(highlighted)}`}>
     <label className="block text-sm text-gray-700 mb-1">{label}</label>
     <textarea
       className="w-full border rounded px-3 py-2 min-h-[96px]"
       value={value}
       onChange={(e) => onChange(e.target.value)}
     />
+    <FieldHint hint={hint} />
   </div>
 );
 
@@ -2969,11 +3688,13 @@ const Select: React.FC<{
   onChange: (v: string) => void;
   options: string[];
   required?: boolean;
-}> = ({ label, value, onChange, options, required }) => {
+  highlighted?: boolean;
+  hint?: string;
+}> = ({ label, value, onChange, options, required, highlighted, hint }) => {
   const opts =
     value && !options.includes(value) ? [...options, value] : options;
   return (
-    <div>
+    <div className={fieldShellClasses(highlighted)}>
       <label className="block text-sm text-gray-700 mb-1">
         {label}
         {required && " *"}
@@ -2992,6 +3713,7 @@ const Select: React.FC<{
           </option>
         ))}
       </select>
+      <FieldHint hint={hint} />
     </div>
   );
 };
@@ -3003,8 +3725,10 @@ const IntField: React.FC<{
   onChange: (v: string) => void;
   required?: boolean;
   placeholder?: string;
-}> = ({ label, value, onChange, required, placeholder }) => (
-  <div>
+  highlighted?: boolean;
+  hint?: string;
+}> = ({ label, value, onChange, required, placeholder, highlighted, hint }) => (
+  <div className={fieldShellClasses(highlighted)}>
     <label className="block text-sm text-gray-700 mb-1">
       {label}
       {required && " *"}
@@ -3021,6 +3745,7 @@ const IntField: React.FC<{
       }}
       placeholder={placeholder}
     />
+    <FieldHint hint={hint} />
   </div>
 );
 
@@ -3031,8 +3756,10 @@ const FloatField: React.FC<{
   onChange: (v: string) => void;
   required?: boolean;
   placeholder?: string;
-}> = ({ label, value, onChange, required, placeholder }) => (
-  <div>
+  highlighted?: boolean;
+  hint?: string;
+}> = ({ label, value, onChange, required, placeholder, highlighted, hint }) => (
+  <div className={fieldShellClasses(highlighted)}>
     <label className="block text-sm text-gray-700 mb-1">
       {label}
       {required && " *"}
@@ -3048,6 +3775,7 @@ const FloatField: React.FC<{
       }}
       placeholder={placeholder}
     />
+    <FieldHint hint={hint} />
   </div>
 );
 
@@ -3055,8 +3783,10 @@ const DateSingle: React.FC<{
   label: string;
   value: string;
   onChange: (v: string) => void;
-}> = ({ label, value, onChange }) => (
-  <div>
+  highlighted?: boolean;
+  hint?: string;
+}> = ({ label, value, onChange, highlighted, hint }) => (
+  <div className={fieldShellClasses(highlighted)}>
     <label className="block text-sm text-gray-700 mb-1">{label}</label>
     <input
       type="date"
@@ -3064,6 +3794,7 @@ const DateSingle: React.FC<{
       value={value}
       onChange={(e) => onChange(e.target.value)}
     />
+    <FieldHint hint={hint} />
   </div>
 );
 
@@ -3072,10 +3803,12 @@ const DateRange: React.FC<{
   start: string;
   end: string;
   onChange: (s: string, e: string) => void;
-}> = ({ label, start, end, onChange }) => (
-  <div>
+  highlighted?: boolean;
+  hint?: string;
+}> = ({ label, start, end, onChange, highlighted, hint }) => (
+  <div className={fieldShellClasses(highlighted)}>
     <label className="block text-sm text-gray-700 mb-1">{label} *</label>
-    <div className="flex items-center gap-2">
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
       <input
         type="date"
         className="w-full border rounded px-3 py-2"
@@ -3090,20 +3823,24 @@ const DateRange: React.FC<{
         onChange={(e) => onChange(start, e.target.value)}
       />
     </div>
+    <FieldHint hint={hint} />
   </div>
 );
 
-const File: React.FC<{ label: string; onChange: (f: File | null) => void }> = ({
-  label,
-  onChange,
-}) => (
-  <div>
+const File: React.FC<{
+  label: string;
+  onChange: (f: File | null) => void;
+  highlighted?: boolean;
+  hint?: string;
+}> = ({ label, onChange, highlighted, hint }) => (
+  <div className={fieldShellClasses(highlighted)}>
     <label className="block text-sm text-gray-700 mb-1">{label}</label>
     <input
       type="file"
       className="w-full border rounded px-3 py-1.5"
       onChange={(e) => onChange(e.target.files?.[0] || null)}
     />
+    <FieldHint hint={hint} />
   </div>
 );
 

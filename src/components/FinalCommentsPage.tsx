@@ -21,6 +21,17 @@ import {
 import { QAPFormData, QAPSpecification } from "@/types/qap";
 import { useAuth } from "@/contexts/AuthContext";
 import { isEdited } from "@/lib/edited";
+import {
+  getLevel1OutcomeText,
+  getLevel1Summary,
+  getSpecRowClassName,
+  matchesReviewerMatchFilter,
+  ReviewerRowFilter,
+} from "@/lib/qapLevel1";
+import InteractiveTutorialCard, {
+  tutorialSectionClass,
+} from "@/components/tutorial/InteractiveTutorialCard";
+import { useTutorialMode } from "@/hooks/useTutorialMode";
 
 /* ───────────────────────────────────────────────────────────── */
 /* Local lightweight types just for rendering the BOM tab        */
@@ -200,9 +211,12 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
 
   /* ───────── state ───────── */
   const [searchTerm, setSearchTerm] = useState("");
-  const [rowFilter, setRowFilter] = useState<
-    "all" | "matched" | "unmatched" | "edited"
-  >("all");
+  const [rowFilter, setRowFilter] = useState<ReviewerRowFilter>("all");
+  const [tutorialMode, setTutorialMode] = useTutorialMode(
+    "final-comments-tutorial",
+    true
+  );
+  const [tutorialStepId, setTutorialStepId] = useState("overview");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [comments, setComments] = useState<
     Record<string, Record<number, string>>
@@ -444,6 +458,37 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
         ] as QAPSpecification[],
       }));
   }, [qapData, user, searchTerm]);
+  const tutorialSteps = [
+    {
+      id: "overview",
+      title: "Check the final comments queue",
+      description:
+        "Start here to confirm which QAPs have returned to the requestor for the final comment stage.",
+      complete: reviewable.length > 0,
+    },
+    {
+      id: "filters",
+      title: "Filter the remaining review",
+      description:
+        "Use search and row filters to focus on the exact QAP or mismatch state you want to finish.",
+      complete: searchTerm.trim().length > 0 || rowFilter !== "all",
+    },
+    {
+      id: "worklist",
+      title: "Review the full history",
+      description:
+        "Open a QAP to inspect every earlier reviewer note, Level 1 resolution, and BOM update before writing final comments.",
+      complete: Object.keys(expanded).some((key) => expanded[key]),
+    },
+    {
+      id: "submit",
+      title: "Submit for approval",
+      description:
+        "Enter final comments for the necessary rows, attach supporting files if needed, then push the QAP to approval.",
+      complete: Object.keys(comments).length > 0,
+    },
+  ];
+  const activeTutorialStep = tutorialMode ? tutorialStepId : null;
 
   /* ───────── handlers ───────── */
   const handleCommentChange = (qapId: string, sno: number, value: string) => {
@@ -505,50 +550,56 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
   /* ───────── render ───────── */
   return (
     <div className="container mx-auto px-4 py-6">
-      <h1 className="text-3xl font-bold mb-4">Final Comments</h1>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-w-0">
+          <div className={`${tutorialSectionClass(activeTutorialStep === "overview")} mb-4`}>
+            <h1 className="text-3xl font-bold">Final Comments</h1>
+          </div>
 
-      {/* top bar */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
-        <div className="flex items-center gap-2">
-          <Search className="w-4 h-4 text-gray-400" />
-          <Input
-            placeholder="Search QAPs…"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-64"
-          />
-          <label className="font-medium">Show Rows:</label>
-          <select
-            value={rowFilter}
-            onChange={(e) => setRowFilter(e.target.value as any)}
-            className="border rounded px-2 py-1"
+          {/* top bar */}
+          <div className={`${tutorialSectionClass(activeTutorialStep === "filters")} flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4`}>
+            <div className="flex items-center gap-2">
+              <Search className="w-4 h-4 text-gray-400" />
+              <Input
+                placeholder="Search QAPs…"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-64"
+              />
+              <label className="font-medium">Show Rows:</label>
+              <select
+                value={rowFilter}
+                onChange={(e) => setRowFilter(e.target.value as any)}
+                className="border rounded px-2 py-1"
+              >
+                <option value="all">All</option>
+                <option value="matched">Matched (Green)</option>
+                <option value="unmatched">Unmatched (Red)</option>
+                <option value="agreed">Agreed (Yellow)</option>
+                <option value="edited">Edited (since last submission)</option>
+              </select>
+            </div>
+            <span className="text-sm text-gray-600">
+              Pending QAPs: {reviewable.length}
+            </span>
+          </div>
+
+          <div
+            className={tutorialSectionClass(
+              activeTutorialStep === "worklist" || activeTutorialStep === "submit"
+            )}
           >
-            <option value="all">All</option>
-            <option value="matched">Matched (Green)</option>
-            <option value="unmatched">Unmatched (Red)</option>
-            <option value="edited">Edited (since last submission)</option>
-          </select>
-        </div>
-        <span className="text-sm text-gray-600">
-          Pending QAPs: {reviewable.length}
-        </span>
-      </div>
-
-      {reviewable.length === 0 ? (
-        <div className="text-center text-gray-500 py-20">
-          No QAPs awaiting final comments
-        </div>
-      ) : (
-        reviewable.map((qap) => {
+            {reviewable.length === 0 ? (
+              <div className="text-center text-gray-500 py-20">
+                No QAPs awaiting final comments
+              </div>
+            ) : (
+              reviewable.map((qap) => {
           const editedIndex = buildEditedIndex(qap);
           const bomEditedIndex = buildBomEditedIndex(qap);
 
           /* filter specs for current table view */
           const specs = qap.allSpecs.filter((s) => {
-            if (rowFilter === "all") return true;
-            if (rowFilter === "matched") return s.match === "yes";
-            if (rowFilter === "unmatched") return s.match === "no";
-
             if (rowFilter === "edited") {
               return (
                 editedIndex.mqp.has(s.sno) ||
@@ -557,7 +608,7 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                 isEdited("visual", s.sno, (qap as any).editedSnos)
               );
             }
-            return true;
+            return matchesReviewerMatchFilter(rowFilter, s.match);
           });
 
           /* IMPORTANT: unmatched across *all* specs for validation */
@@ -571,6 +622,9 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
           const l4Roles = Object.keys(L4);
 
           const isOpen = expanded[qap.id] || false;
+          const level1Summary = getLevel1Summary(
+            qap as Pick<QAPFormData, "level1Summary" | "specs">
+          );
 
           // Optional embedded Sales Request (server embeds this on /api/qaps)
           const salesRequest: SalesRequestLite | undefined = (qap as any)
@@ -604,12 +658,21 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                         <CardTitle className="text-lg">
                           {qap.customerName} – {qap.projectName}
                         </CardTitle>
-                        <div className="flex gap-2 mt-1">
+                        <div className="flex gap-2 mt-1 flex-wrap">
                           <Badge variant="outline">
                             {qap.plant.toUpperCase()}
                           </Badge>
                           <Badge variant="outline">{qap.productType}</Badge>
                           <Badge>{qap.orderQuantity} MW</Badge>
+                          {level1Summary.totalReviewed > 0 && (
+                            <Badge
+                              variant="outline"
+                              className="bg-amber-50 text-amber-900 border-amber-300"
+                            >
+                              L1 closed {level1Summary.closed}/
+                              {level1Summary.totalReviewed}
+                            </Badge>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -702,9 +765,7 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                                       className={`border-b ${
                                         mqEdited
                                           ? "bg-amber-50 ring-1 ring-amber-300"
-                                          : s.match === "yes"
-                                          ? "bg-green-50"
-                                          : "bg-red-50"
+                                          : getSpecRowClassName(s)
                                       }`}
                                     >
                                       <td className="p-2 border">
@@ -728,7 +789,12 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                                         {s.specification}
                                       </td>
                                       <td className="p-2 border">
-                                        {s.customerSpecification}
+                                        <div>{s.customerSpecification || "—"}</div>
+                                        {getLevel1OutcomeText(s) && (
+                                          <div className="mt-1 text-xs text-amber-800">
+                                            {getLevel1OutcomeText(s)}
+                                          </div>
+                                        )}
                                       </td>
                                       <td className="p-2 border align-top">
                                         <ThreadCell
@@ -853,9 +919,7 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                                       className={`border-b ${
                                         vEdited
                                           ? "bg-amber-50 ring-1 ring-amber-300"
-                                          : s.match === "yes"
-                                          ? "bg-green-50"
-                                          : "bg-red-50"
+                                          : getSpecRowClassName(s)
                                       }`}
                                     >
                                       <td className="p-2 border">
@@ -879,7 +943,12 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                                         {s.criteriaLimits}
                                       </td>
                                       <td className="p-2 border">
-                                        {s.customerSpecification}
+                                        <div>{s.customerSpecification || "—"}</div>
+                                        {getLevel1OutcomeText(s) && (
+                                          <div className="mt-1 text-xs text-amber-800">
+                                            {getLevel1OutcomeText(s)}
+                                          </div>
+                                        )}
                                       </td>
 
                                       <td className="p-2 border align-top">
@@ -1359,9 +1428,25 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
                 </Card>
               </CollapsibleContent>
             </Collapsible>
-          );
-        })
-      )}
+              );
+            })
+          )}
+          </div>
+        </div>
+
+        <div className="xl:sticky xl:top-24 xl:self-start">
+          <InteractiveTutorialCard
+            storageKey="final-comments-tutorial"
+            title="Final Comments Tutorial"
+            description="Filter the queue, review the full discussion, and then submit the QAP for approval."
+            steps={tutorialSteps}
+            activeStepId={activeTutorialStep}
+            onSelectStep={setTutorialStepId}
+            enabled={tutorialMode}
+            onEnabledChange={setTutorialMode}
+          />
+        </div>
+      </div>
     </div>
   );
 };

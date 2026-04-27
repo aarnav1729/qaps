@@ -23,6 +23,10 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import InteractiveTutorialCard, {
+  tutorialSectionClass,
+} from "@/components/tutorial/InteractiveTutorialCard";
+import { useTutorialMode } from "@/hooks/useTutorialMode";
 
 interface ApprovalsPageProps {
   qapData: QAPFormData[];
@@ -47,6 +51,11 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [feedback, setFeedback] = useState<string>("");
+  const [tutorialMode, setTutorialMode] = useTutorialMode(
+    "approvals-dashboard-tutorial",
+    true
+  );
+  const [tutorialStepId, setTutorialStepId] = useState("overview");
 
   // Built-in viewer fallback
   const [viewOpen, setViewOpen] = useState(false);
@@ -123,10 +132,36 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({
     const unmatched = allSpecs.filter((i) => i.match === "no").length;
     return { total: allSpecs.length, matched, unmatched };
   }, [selectedQap]);
+  const tutorialSteps = [
+    {
+      id: "overview",
+      title: "Check the approvals summary",
+      description:
+        "Start with the approvals dashboard totals to understand the current balance of approved, rejected, and pending items.",
+      complete: filteredQAPs.length > 0,
+    },
+    {
+      id: "filters",
+      title: "Filter the approvals list",
+      description:
+        "Use search and status filters to narrow the approval queue down to the items you want to inspect.",
+      complete: searchTerm.trim().length > 0 || filterStatus !== "all",
+    },
+    {
+      id: "table",
+      title: "Open the approval detail",
+      description:
+        "Use the approvals table to view a QAP, then approve or reject it with the available actions.",
+      complete: filteredQAPs.length > 0,
+    },
+  ];
+  const activeTutorialStep = tutorialMode ? tutorialStepId : null;
 
   return (
     <div className="container mx-auto px-4 py-6">
-      <div className="mb-6">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-w-0">
+      <div className={`${tutorialSectionClass(activeTutorialStep === "overview")} mb-6`}>
         <h1 className="text-3xl font-bold text-gray-900 mb-2">
           Approvals Dashboard
         </h1>
@@ -134,7 +169,7 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className={`${tutorialSectionClass(activeTutorialStep === "overview")} grid grid-cols-2 md:grid-cols-4 gap-4 mb-6`}>
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center space-x-2">
@@ -185,7 +220,7 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({
       </div>
 
       {/* Filters */}
-      <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+      <div className={`${tutorialSectionClass(activeTutorialStep === "filters")} mb-6 p-4 bg-gray-50 rounded-lg`}>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
@@ -218,6 +253,7 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({
       </div>
 
       {/* QAPs Table */}
+      <div className={tutorialSectionClass(activeTutorialStep === "table")}>
       <Card>
         <CardHeader>
           <CardTitle>QAP Approvals</CardTitle>
@@ -341,6 +377,22 @@ const ApprovalsPage: React.FC<ApprovalsPageProps> = ({
           )}
         </CardContent>
       </Card>
+      </div>
+        </div>
+
+        <div className="xl:sticky xl:top-24 xl:self-start">
+          <InteractiveTutorialCard
+            storageKey="approvals-dashboard-tutorial"
+            title="Approvals Tutorial"
+            description="Start with the summary, filter the queue, and then open the approval detail you want to act on."
+            steps={tutorialSteps}
+            activeStepId={activeTutorialStep}
+            onSelectStep={setTutorialStepId}
+            enabled={tutorialMode}
+            onEnabledChange={setTutorialMode}
+          />
+        </div>
+      </div>
 
       {/* Built-in View Dialog fallback */}
       <Dialog open={viewOpen} onOpenChange={setViewOpen}>

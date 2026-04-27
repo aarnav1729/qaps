@@ -2,16 +2,43 @@
 
 // ---- Auth / Users -----------------------------------------------------------
 
-export type UserRole =
-  | "requestor"
-  | "production"
-  | "quality"
-  | "technical"
-  | "head"
-  | "technical-head"
-  | "plant-head"
-  | "admin"
-  | "sales";
+export const USER_ROLES = [
+  "requestor",
+  "level-1-reviewer",
+  "production",
+  "quality",
+  "technical",
+  "head",
+  "technical-head",
+  "plant-head",
+  "admin",
+  "sales",
+] as const;
+
+export type UserRole = (typeof USER_ROLES)[number];
+
+export const REVIEWER_ROLES = [
+  "level-1-reviewer",
+  "production",
+  "quality",
+  "technical",
+  "head",
+  "technical-head",
+  "plant-head",
+] as const;
+
+export const ROLE_LABELS: Record<UserRole, string> = {
+  requestor: "Requestor",
+  "level-1-reviewer": "Level 1 Reviewer",
+  production: "Production",
+  quality: "Quality",
+  technical: "Technical",
+  head: "Head",
+  "technical-head": "Technical Head",
+  "plant-head": "Plant Head",
+  admin: "Admin",
+  sales: "Sales",
+};
 
 export interface User {
   id: string;
@@ -30,6 +57,7 @@ export interface User {
 export type QAPStatus =
   | "draft"
   | "submitted"
+  | "level-1"
   | "level-2"
   | "level-3"
   | "level-4"
@@ -44,11 +72,27 @@ export type QAPStatus =
 
 export type CurrentLevel = 1 | 2 | 3 | 4 | 5;
 
+export type QAPMatchStatus = "yes" | "no" | "agreed";
+export type Level1ResolutionStatus = "matched" | "agreed" | null;
+
+export interface ReviewThreadEntry {
+  by: string;
+  at: string;
+  responses: Record<number, string>;
+}
+
 export interface LevelResponseDetails {
   username: string;
   acknowledged: boolean;
-  /** keys are item indices (as numbers or numeric-like strings); values are comment text */
-  comments: { [itemIndex: number]: string };
+  /**
+   * Older UI paths treated this as a simple per-item map.
+   * The API now stores a thread array so both shapes must be supported.
+   */
+  comments:
+    | { [itemIndex: number]: string }
+    | ReviewThreadEntry[]
+    | null
+    | undefined;
   respondedAt?: string | Date;
 }
 
@@ -71,15 +115,24 @@ export interface TimelineEntry {
 // Core “base” for a spec row
 interface BaseSpec {
   sno: number;
+  criteria?: string;
   subCriteria?: string;
-  /** "yes" | "no" if the row matches customer's spec */
-  match?: "yes" | "no";
+  /** current state after requestor + level 1 review */
+  match?: QAPMatchStatus;
   /** free text typed by reviewer or mapped from customer */
   customerSpecification?: string;
   /** BE stores comma string; FE may use string[] — support both for safety */
   reviewBy?: string | string[];
   /** used by the UI to flag rows the requestor picked for review */
   selectedForReview?: boolean;
+  /** original requestor-entered state before Level 1 review closes the gap */
+  initialMatch?: Exclude<QAPMatchStatus, "agreed">;
+  initialCustomerSpecification?: string;
+  level1Resolution?: Level1ResolutionStatus;
+  level1ResolutionText?: string | null;
+  level1ResolvedBy?: string | null;
+  level1ResolvedAt?: string | Date | null;
+  level1Closed?: boolean;
 }
 
 // MQP spec row (process/measurement type)
@@ -111,6 +164,7 @@ export interface VisualSpecification extends BaseSpec {
 }
 
 export type AnyQAPSpec = MQPSpecification | VisualSpecification;
+export type QAPSpecification = AnyQAPSpec;
 
 /**
  * What the API now returns under each QAP: split spec arrays.
@@ -239,6 +293,15 @@ export interface QAPFormData {
 
   // optional embedded SR payload for the BOM/summary tabs
   salesRequest?: SalesRequestSummary;
+  level1Summary?: {
+    totalReviewed: number;
+    matched: number;
+    agreed: number;
+    closed: number;
+    pending: number;
+    reviewedBy?: string | null;
+    reviewedAt?: string | Date | null;
+  };
 }
 
 // ---- Misc small types -------------------------------------------------------

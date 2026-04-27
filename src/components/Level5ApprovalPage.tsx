@@ -23,6 +23,17 @@ import { QAPFormData, QAPSpecification } from "@/types/qap";
 import ExtraAdditions from "@/components/ExtraAdditions";
 import { isEdited } from "@/lib/edited";
 import { downloadQapAsPDF } from "@/utils/qapPdfGenerator";
+import {
+  getLevel1OutcomeText,
+  getLevel1Summary,
+  getSpecRowClassName,
+  matchesReviewerMatchFilter,
+  ReviewerRowFilter,
+} from "@/lib/qapLevel1";
+import InteractiveTutorialCard, {
+  tutorialSectionClass,
+} from "@/components/tutorial/InteractiveTutorialCard";
+import { useTutorialMode } from "@/hooks/useTutorialMode";
 
 /* ───────────────────────────────────────────────────────────── */
 /* Local lightweight types just for rendering the BOM tab        */
@@ -398,9 +409,12 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
 
   /* ───────── state ───────── */
   const [searchTerm, setSearchTerm] = useState("");
-  const [rowFilter, setRowFilter] = useState<
-    "all" | "matched" | "unmatched" | "edited"
-  >("all");
+  const [rowFilter, setRowFilter] = useState<ReviewerRowFilter>("all");
+  const [tutorialMode, setTutorialMode] = useTutorialMode(
+    "level-5-approval-tutorial",
+    true
+  );
+  const [tutorialStepId, setTutorialStepId] = useState("overview");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [decision, setDecision] = useState<{
     [qapId: string]: "approve" | "reject" | null;
@@ -445,6 +459,37 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
         ] as QAPSpecification[],
       }));
   }, [qapData, plantRaw, userPlants, searchTerm]);
+  const tutorialSteps = [
+    {
+      id: "overview",
+      title: "Check the approval queue",
+      description:
+        "Start with the Level 5 approval header to see how many QAPs are ready for the final decision.",
+      complete: reviewable.length > 0,
+    },
+    {
+      id: "filters",
+      title: "Filter the approval review",
+      description:
+        "Use search and row filters to narrow the approval packet down to the QAP and mismatch state you want to inspect.",
+      complete: searchTerm.trim().length > 0 || rowFilter !== "all",
+    },
+    {
+      id: "worklist",
+      title: "Inspect the full approval packet",
+      description:
+        "Open a QAP to review all reviewer inputs, final comments, BOM updates, and supporting context before deciding.",
+      complete: Object.keys(expanded).some((key) => expanded[key]),
+    },
+    {
+      id: "decision",
+      title: "Approve or reject",
+      description:
+        "Use the decision controls inside the expanded QAP to record feedback and complete the approval.",
+      complete: Object.keys(decision).length > 0,
+    },
+  ];
+  const activeTutorialStep = tutorialMode ? tutorialStepId : null;
 
   const submitDecision = (qap: QAPFormData) => {
     const action = decision[qap.id];
@@ -484,49 +529,55 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
   /* ───────── render ───────── */
   return (
     <div className="container mx-auto px-4 py-6">
-      <h1 className="text-3xl font-bold mb-4">Plant Head Approval – Level 5</h1>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-w-0">
+          <div className={`${tutorialSectionClass(activeTutorialStep === "overview")} mb-4`}>
+            <h1 className="text-3xl font-bold">Plant Head Approval – Level 5</h1>
+          </div>
 
-      {/* top bar */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
-        <div className="flex items-center gap-2">
-          <Search className="w-4 h-4 text-gray-400" />
-          <Input
-            placeholder="Search QAPs…"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-64"
-          />
-          <label className="font-medium">Show Rows:</label>
-          <select
-            value={rowFilter}
-            onChange={(e) => setRowFilter(e.target.value as any)}
-            className="border rounded px-2 py-1"
+          {/* top bar */}
+          <div className={`${tutorialSectionClass(activeTutorialStep === "filters")} flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4`}>
+            <div className="flex items-center gap-2">
+              <Search className="w-4 h-4 text-gray-400" />
+              <Input
+                placeholder="Search QAPs…"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-64"
+              />
+              <label className="font-medium">Show Rows:</label>
+              <select
+                value={rowFilter}
+                onChange={(e) => setRowFilter(e.target.value as any)}
+                className="border rounded px-2 py-1"
+              >
+                <option value="all">All</option>
+                <option value="matched">Matched (Green)</option>
+                <option value="unmatched">Unmatched (Red)</option>
+                <option value="agreed">Agreed (Yellow)</option>
+                <option value="edited">Edited (since last submission)</option>
+              </select>
+            </div>
+            <span className="text-sm text-gray-600">
+              Pending QAPs: {reviewable.length}
+            </span>
+          </div>
+
+          <div
+            className={tutorialSectionClass(
+              activeTutorialStep === "worklist" || activeTutorialStep === "decision"
+            )}
           >
-            <option value="all">All</option>
-            <option value="matched">Matched (Green)</option>
-            <option value="unmatched">Unmatched (Red)</option>
-            <option value="edited">Edited (since last submission)</option>
-          </select>
-        </div>
-        <span className="text-sm text-gray-600">
-          Pending QAPs: {reviewable.length}
-        </span>
-      </div>
-
-      {reviewable.length === 0 ? (
-        <div className="text-center text-gray-500 py-20">
-          No QAPs pending final approval
-        </div>
-      ) : (
-        reviewable.map((qap) => {
+            {reviewable.length === 0 ? (
+              <div className="text-center text-gray-500 py-20">
+                No QAPs pending final approval
+              </div>
+            ) : (
+              reviewable.map((qap) => {
           const editedIndex = buildEditedIndex(qap);
           const bomEditedIndex = buildBomEditedIndex(qap);
 
           const specs = qap.allSpecs.filter((s) => {
-            if (rowFilter === "all") return true;
-            if (rowFilter === "matched") return s.match === "yes";
-            if (rowFilter === "unmatched") return s.match === "no";
-
             if (rowFilter === "edited") {
               return (
                 editedIndex.mqp.has(s.sno) ||
@@ -535,8 +586,7 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
                 isEdited("visual", s.sno, (qap as any).editedSnos)
               );
             }
-
-            return true;
+            return matchesReviewerMatchFilter(rowFilter, s.match);
           });
 
           const L2 = qap.levelResponses?.[2] || {};
@@ -546,6 +596,9 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
           const [l4R1, l4R2] = splitPhaseRoles(L4);
 
           const isOpen = expanded[qap.id] || false;
+          const level1Summary = getLevel1Summary(
+            qap as Pick<QAPFormData, "level1Summary" | "specs">
+          );
 
           // Optional Sales Request with BOM (embedded by backend)
           const salesRequest: SalesRequestLite | undefined = (qap as any)
@@ -579,12 +632,21 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
                         <CardTitle className="text-lg">
                           {qap.customerName} – {qap.projectName}
                         </CardTitle>
-                        <div className="flex gap-2 mt-1">
+                        <div className="flex gap-2 mt-1 flex-wrap">
                           <Badge variant="outline">
                             {qap.plant.toUpperCase()}
                           </Badge>
                           <Badge variant="outline">{qap.productType}</Badge>
                           <Badge>{qap.orderQuantity} MW</Badge>
+                          {level1Summary.totalReviewed > 0 && (
+                            <Badge
+                              variant="outline"
+                              className="bg-amber-50 text-amber-900 border-amber-300"
+                            >
+                              L1 closed {level1Summary.closed}/
+                              {level1Summary.totalReviewed}
+                            </Badge>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -693,9 +755,7 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
                                       className={`border-b ${
                                         mqEdited
                                           ? "bg-amber-50 ring-1 ring-amber-300"
-                                          : s.match === "yes"
-                                          ? "bg-green-50"
-                                          : "bg-red-50"
+                                          : getSpecRowClassName(s)
                                       }`}
                                     >
                                       <td className="p-2 border">
@@ -719,7 +779,12 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
                                         {s.specification}
                                       </td>
                                       <td className="p-2 border">
-                                        {s.customerSpecification}
+                                        <div>{s.customerSpecification || "—"}</div>
+                                        {getLevel1OutcomeText(s) && (
+                                          <div className="mt-1 text-xs text-amber-800">
+                                            {getLevel1OutcomeText(s)}
+                                          </div>
+                                        )}
                                       </td>
                                       <td className="p-2 border align-top">
                                         <ThreadCell
@@ -874,9 +939,7 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
                                       className={`border-b ${
                                         vEdited
                                           ? "bg-amber-50 ring-1 ring-amber-300"
-                                          : s.match === "yes"
-                                          ? "bg-green-50"
-                                          : "bg-red-50"
+                                          : getSpecRowClassName(s)
                                       }`}
                                     >
                                       <td className="p-2 border">
@@ -900,7 +963,12 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
                                         {s.criteriaLimits}
                                       </td>
                                       <td className="p-2 border">
-                                        {s.customerSpecification}
+                                        <div>{s.customerSpecification || "—"}</div>
+                                        {getLevel1OutcomeText(s) && (
+                                          <div className="mt-1 text-xs text-amber-800">
+                                            {getLevel1OutcomeText(s)}
+                                          </div>
+                                        )}
                                       </td>
                                       <td className="p-2 border align-top">
                                         <ThreadCell
@@ -1427,9 +1495,25 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
                 </Card>
               </CollapsibleContent>
             </Collapsible>
-          );
-        })
-      )}
+              );
+            })
+          )}
+          </div>
+        </div>
+
+        <div className="xl:sticky xl:top-24 xl:self-start">
+          <InteractiveTutorialCard
+            storageKey="level-5-approval-tutorial"
+            title="Approval Tutorial"
+            description="Filter the queue, inspect the full approval packet, and then approve or reject from the open QAP."
+            steps={tutorialSteps}
+            activeStepId={activeTutorialStep}
+            onSelectStep={setTutorialStepId}
+            enabled={tutorialMode}
+            onEnabledChange={setTutorialMode}
+          />
+        </div>
+      </div>
     </div>
   );
 };

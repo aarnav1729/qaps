@@ -32,7 +32,13 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/use-toast";
-import { BOM_COMPONENTS, BomComponentName } from "@/data/components";
+import InteractiveTutorialCard, {
+  tutorialSectionClass,
+} from "@/components/tutorial/InteractiveTutorialCard";
+import { useTutorialMode } from "@/hooks/useTutorialMode";
+import { BOM_COMPONENTS } from "@/data/components";
+
+type BuilderMode = "all" | "mqp" | "visual" | "bom";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                              */
@@ -59,7 +65,8 @@ export interface BomComponentOption {
 
 export interface BomComponent {
   id: string;
-  name: BomComponentName;
+  name: string;
+  technology?: string | null;
   options: BomComponentOption[];
 }
 
@@ -89,11 +96,27 @@ function uuid() {
 /* ------------------------------------------------------------------ */
 /* Main Page                                                          */
 /* ------------------------------------------------------------------ */
-const SpecificationBuilder: React.FC = () => {
+const SpecificationBuilder: React.FC<{ mode?: BuilderMode }> = ({
+  mode = "all",
+}) => {
   const { toast } = useToast();
 
-  const [activeTab, setActiveTab] = useState<"specs" | "bom">("specs");
-  const [criteriaFilter, setCriteriaFilter] = useState<CriteriaType>("MQP");
+  const fixedCriteria =
+    mode === "mqp" ? "MQP" : mode === "visual" ? "Visual" : null;
+  const fixedTab = mode === "bom" ? "bom" : "specs";
+  const showTabs = mode === "all";
+  const [tutorialMode, setTutorialMode] = useTutorialMode(
+    `spec-builder-tutorial-${mode}`,
+    true
+  );
+  const [tutorialStepId, setTutorialStepId] = useState("overview");
+
+  const [activeTab, setActiveTab] = useState<"specs" | "bom">(
+    fixedTab as "specs" | "bom"
+  );
+  const [criteriaFilter, setCriteriaFilter] = useState<CriteriaType>(
+    fixedCriteria || "MQP"
+  );
 
   // Specs: search / filter / sort
   const [specSearch, setSpecSearch] = useState("");
@@ -135,6 +158,7 @@ const SpecificationBuilder: React.FC = () => {
   const emptyBom: BomComponent = {
     id: "",
     name: "Solar Cell",
+    technology: "M10",
     options: [{ model: "", subVendor: "", spec: "" }],
   };
   const [draftBom, setDraftBom] = useState<BomComponent>(emptyBom);
@@ -143,11 +167,27 @@ const SpecificationBuilder: React.FC = () => {
     "name-asc" | "name-desc" | "opts-asc" | "opts-desc"
   >("name-asc");
 
-  const safeName: BomComponentName = (
-    BOM_COMPONENTS as readonly string[]
-  ).includes(draftBom.name)
-    ? (draftBom.name as BomComponentName)
-    : (BOM_COMPONENTS[0] as BomComponentName);
+  const componentOptions = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...BOM_COMPONENTS,
+          ...bom.map((component) => component.name),
+          draftBom.name,
+        ].filter(Boolean))
+      ) as string[],
+    [bom, draftBom.name]
+  );
+
+  useEffect(() => {
+    setActiveTab(fixedTab as "specs" | "bom");
+  }, [fixedTab]);
+
+  useEffect(() => {
+    if (fixedCriteria) {
+      setCriteriaFilter(fixedCriteria);
+    }
+  }, [fixedCriteria]);
 
   /* ------------------------------ Loaders ------------------------------ */
   const loadSpecs = async () => {
@@ -308,6 +348,7 @@ const SpecificationBuilder: React.FC = () => {
     // sanitize options
     const clean = {
       ...draftBom,
+      technology: draftBom.technology || "M10",
       options: (draftBom.options || [])
         .filter((o) => (o.model || "").trim())
         .map((o) => ({
@@ -452,66 +493,116 @@ const SpecificationBuilder: React.FC = () => {
     };
     return [...list].sort(cmp);
   }, [specs, criteriaFilter, specClassFilter, specSearch, specSort]);
+  const tutorialSteps = [
+    {
+      id: "overview",
+      title: "Understand the live master",
+      description:
+        mode === "bom"
+          ? "This page controls the live BOM options used across sales requests and QAP reviews."
+          : "This page controls the live specification masters used throughout the workflow.",
+      complete: specs.length > 0 || bom.length > 0,
+    },
+    {
+      id: "tabs",
+      title: "Choose the master area",
+      description:
+        "Switch between specification and BOM builders when you need to maintain different master datasets.",
+      complete: showTabs ? activeTab !== "specs" : true,
+    },
+    {
+      id: "builder",
+      title: "Edit the live list",
+      description:
+        "Use filters, sorting, and the add/edit controls in the active builder card to maintain the master data safely.",
+      complete:
+        activeTab === "specs" ? filteredSpecs.length > 0 : filteredBom.length > 0,
+    },
+  ];
+  const activeTutorialStep = tutorialMode ? tutorialStepId : null;
   /* ------------------------------ UI ------------------------------ */
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
-      <div className="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-indigo-600 via-violet-500 to-fuchsia-500 p-6 sm:p-8 shadow-lg">
-        <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full bg-white/10 blur-3xl" />
-        <div className="absolute -left-24 -bottom-24 h-72 w-72 rounded-full bg-black/10 blur-3xl" />
-        <div className="relative z-10 flex items-end justify-between gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-semibold text-white tracking-tight">
-              Spec & BOM Builder
-            </h1>
-            <p className="text-white/90 mt-1">
-              Create, edit, reorder, and delete Specifications and BOM building
-              blocks.
-            </p>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-w-0">
+          <div className={tutorialSectionClass(activeTutorialStep === "overview")}>
+            <div className="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-indigo-600 via-violet-500 to-fuchsia-500 p-6 sm:p-8 shadow-lg">
+              <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full bg-white/10 blur-3xl" />
+              <div className="absolute -left-24 -bottom-24 h-72 w-72 rounded-full bg-black/10 blur-3xl" />
+              <div className="relative z-10 flex items-end justify-between gap-4">
+                <div>
+                  <h1 className="text-2xl sm:text-3xl font-semibold text-white tracking-tight">
+                    {mode === "mqp"
+                      ? "MQP Master"
+                      : mode === "visual"
+                      ? "Visual EL Master"
+                      : mode === "bom"
+                      ? "BOM Master"
+                      : "Spec & BOM Builder"}
+                  </h1>
+                  <p className="text-white/90 mt-1">
+                    {mode === "mqp"
+                      ? "Manage the live MQP master list used everywhere in the workflow."
+                      : mode === "visual"
+                      ? "Manage the live Visual EL master list used everywhere in the workflow."
+                      : mode === "bom"
+                      ? "Manage the live BOM master list used everywhere in sales requests and QAP reviews."
+                      : "Create, edit, reorder, and delete Specifications and BOM building blocks."}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={() => (activeTab === "specs" ? loadSpecs() : loadBom())}
+                  >
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Refresh
+                  </Button>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <Button
-              variant="secondary"
-              onClick={() => (activeTab === "specs" ? loadSpecs() : loadBom())}
-            >
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Refresh
-            </Button>
-          </div>
-        </div>
-      </div>
 
-      <Tabs
-        value={activeTab}
-        onValueChange={(v) => setActiveTab(v as any)}
-        className="mt-6"
-      >
-        <TabsList>
-          <TabsTrigger value="specs">Specification Builder</TabsTrigger>
-          <TabsTrigger value="bom">BOM Builder</TabsTrigger>
-        </TabsList>
+          <div className={tutorialSectionClass(activeTutorialStep === "tabs")}>
+            <Tabs
+              value={activeTab}
+              onValueChange={(v) => showTabs && setActiveTab(v as any)}
+              className="mt-6"
+            >
+        {showTabs && (
+          <TabsList>
+            <TabsTrigger value="specs">Specification Builder</TabsTrigger>
+            <TabsTrigger value="bom">BOM Builder</TabsTrigger>
+          </TabsList>
+        )}
 
         {/* ================== SPEC BUILDER ================== */}
         <TabsContent value="specs" className="mt-4">
+          <div className={tutorialSectionClass(activeTutorialStep === "builder" && activeTab === "specs")}>
           <Card>
             <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <CardTitle className="text-lg">Specifications</CardTitle>+{" "}
               <div className="flex gap-2 flex-col sm:flex-row sm:items-center">
                 {/* Criteria */}
-                <div className="flex items-center gap-2">
-                  <Label className="text-sm">Criteria</Label>
-                  <Select
-                    value={criteriaFilter}
-                    onValueChange={(v) => setCriteriaFilter(v as CriteriaType)}
-                  >
-                    <SelectTrigger className="w-[150px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="MQP">MQP</SelectItem>
-                      <SelectItem value="Visual">Visual / EL</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                {!fixedCriteria && (
+                  <div className="flex items-center gap-2">
+                    <Label className="text-sm">Criteria</Label>
+                    <Select
+                      value={criteriaFilter}
+                      onValueChange={(v) =>
+                        setCriteriaFilter(v as CriteriaType)
+                      }
+                    >
+                      <SelectTrigger className="w-[150px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="MQP">MQP</SelectItem>
+                        <SelectItem value="Visual">Visual / EL</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 {/* Class filter */}
                 <div className="flex items-center gap-2">
                   <Label className="text-sm">Class</Label>
@@ -667,10 +758,12 @@ const SpecificationBuilder: React.FC = () => {
               )}
             </CardContent>
           </Card>
+          </div>
         </TabsContent>
 
         {/* ================== BOM BUILDER ================== */}
         <TabsContent value="bom" className="mt-4">
+          <div className={tutorialSectionClass(activeTutorialStep === "builder" && activeTab === "bom")}>
           <Card>
             <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <CardTitle className="text-lg">BOM Components</CardTitle>
@@ -702,7 +795,7 @@ const SpecificationBuilder: React.FC = () => {
             </CardHeader>
 
             <CardContent>
-              {filteredBom.map ? (
+              {bomLoading ? (
                 <div className="grid gap-3">
                   {Array.from({ length: 6 }).map((_, i) => (
                     <div key={i} className="rounded-xl border p-4">
@@ -716,13 +809,13 @@ const SpecificationBuilder: React.FC = () => {
                 </div>
               ) : bomError ? (
                 <div className="text-red-600">{bomError}</div>
-              ) : bom.length === 0 ? (
+              ) : filteredBom.length === 0 ? (
                 <div className="text-muted-foreground text-center py-10">
                   No BOM components yet.
                 </div>
               ) : (
                 <div className="grid gap-3">
-                  {bom.map((b, idx) => (
+                  {filteredBom.map((b, idx) => (
                     <div
                       key={b.id}
                       className="rounded-xl border p-4 bg-gradient-to-r from-emerald-50 to-teal-50"
@@ -793,8 +886,25 @@ const SpecificationBuilder: React.FC = () => {
               )}
             </CardContent>
           </Card>
+          </div>
         </TabsContent>
-      </Tabs>
+            </Tabs>
+          </div>
+        </div>
+
+        <div className="xl:sticky xl:top-24 xl:self-start">
+          <InteractiveTutorialCard
+            storageKey={`spec-builder-tutorial-${mode}`}
+            title="Master Data Tutorial"
+            description="Start by understanding which live master you are editing, then work inside the active builder card."
+            steps={tutorialSteps}
+            activeStepId={activeTutorialStep}
+            onSelectStep={setTutorialStepId}
+            enabled={tutorialMode}
+            onEnabledChange={setTutorialMode}
+          />
+        </div>
+      </div>
 
       {/* --------- Spec Modal --------- */}
       <Dialog
@@ -807,8 +917,7 @@ const SpecificationBuilder: React.FC = () => {
               {editingSpec ? "Edit Specification" : "Add Specification"}
             </DialogTitle>
             <DialogDescription>
-              Save updates to regenerate{" "}
-              <code>src/data/qapSpecifications.ts</code>.
+              Save updates to the live specification master used by the QAP flow.
             </DialogDescription>
           </DialogHeader>
 
@@ -935,28 +1044,47 @@ const SpecificationBuilder: React.FC = () => {
               {editingBom ? "Edit Component" : "Add Component"}
             </DialogTitle>
             <DialogDescription>
-              Save updates to regenerate <code>src/data/bomMaster.ts</code>.
+              Save updates to the live BOM master used by sales requests and QAP reviews.
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Component *</Label>
+              <Input
+                list="bom-component-options"
+                value={draftBom.name}
+                onChange={(e) =>
+                  setDraftBom((p) => ({
+                    ...p,
+                    name: e.target.value,
+                  }))
+                }
+                placeholder="Enter or choose component name"
+              />
+              <datalist id="bom-component-options">
+                {componentOptions.map((component) => (
+                  <option key={component} value={component} />
+                ))}
+              </datalist>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Technology *</Label>
               <Select
-                value={safeName}
-                onValueChange={(v) =>
-                  setDraftBom((p) => ({ ...p, name: v as BomComponentName }))
+                value={draftBom.technology || "M10"}
+                onValueChange={(value) =>
+                  setDraftBom((prev) => ({ ...prev, technology: value }))
                 }
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {BOM_COMPONENTS.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="M10">M10</SelectItem>
+                  <SelectItem value="M10R">M10R</SelectItem>
+                  <SelectItem value="G12">G12</SelectItem>
+                  <SelectItem value="G12R">G12R</SelectItem>
                 </SelectContent>
               </Select>
             </div>

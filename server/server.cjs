@@ -99,6 +99,28 @@ let SPEC_STORE = [];
 /** @type {BomItem[]} */
 let BOM_STORE = [];
 
+const USER_ROLE_VALUES = [
+  "requestor",
+  "level-1-reviewer",
+  "production",
+  "quality",
+  "technical",
+  "head",
+  "technical-head",
+  "plant-head",
+  "admin",
+  "sales",
+];
+
+const LEVEL_RESPONSE_ROLE_VALUES = [
+  "level-1-reviewer",
+  "production",
+  "quality",
+  "technical",
+  "head",
+  "technical-head",
+];
+
 // ---- Load/Save JSON store ----
 function readJsonSafe(file, fallback) {
   try {
@@ -189,11 +211,34 @@ async function initMssql() {
         typeOfCheck           NVARCHAR(MAX),
         sampling              NVARCHAR(MAX),
         specification         NVARCHAR(MAX),
-        [match]               NVARCHAR(5),
+        [match]               NVARCHAR(10),
         customerSpecification NVARCHAR(MAX),
+        initialMatch          NVARCHAR(10),
+        initialCustomerSpecification NVARCHAR(MAX),
+        level1Resolution      NVARCHAR(20),
+        level1ResolutionText  NVARCHAR(MAX),
+        level1ResolvedBy      NVARCHAR(50),
+        level1ResolvedAt      DATETIME2,
+        level1Closed          BIT,
         reviewBy              NVARCHAR(MAX),
         PRIMARY KEY (qapId, sno)
       );
+
+      IF COL_LENGTH('MQPSpecs','initialMatch') IS NULL
+        ALTER TABLE MQPSpecs ADD initialMatch NVARCHAR(10) NULL;
+      IF COL_LENGTH('MQPSpecs','initialCustomerSpecification') IS NULL
+        ALTER TABLE MQPSpecs ADD initialCustomerSpecification NVARCHAR(MAX) NULL;
+      IF COL_LENGTH('MQPSpecs','level1Resolution') IS NULL
+        ALTER TABLE MQPSpecs ADD level1Resolution NVARCHAR(20) NULL;
+      IF COL_LENGTH('MQPSpecs','level1ResolutionText') IS NULL
+        ALTER TABLE MQPSpecs ADD level1ResolutionText NVARCHAR(MAX) NULL;
+      IF COL_LENGTH('MQPSpecs','level1ResolvedBy') IS NULL
+        ALTER TABLE MQPSpecs ADD level1ResolvedBy NVARCHAR(50) NULL;
+      IF COL_LENGTH('MQPSpecs','level1ResolvedAt') IS NULL
+        ALTER TABLE MQPSpecs ADD level1ResolvedAt DATETIME2 NULL;
+      IF COL_LENGTH('MQPSpecs','level1Closed') IS NULL
+        ALTER TABLE MQPSpecs ADD level1Closed BIT NULL;
+      ALTER TABLE MQPSpecs ALTER COLUMN [match] NVARCHAR(10) NULL;
 
       ------------------------------------------------
       -- 3b) Visual/EL Specs
@@ -207,11 +252,34 @@ async function initMssql() {
         defectClass           NVARCHAR(MAX),
         description           NVARCHAR(MAX),
         criteriaLimits        NVARCHAR(MAX),
-        [match]               NVARCHAR(5),
+        [match]               NVARCHAR(10),
         customerSpecification NVARCHAR(MAX),
+        initialMatch          NVARCHAR(10),
+        initialCustomerSpecification NVARCHAR(MAX),
+        level1Resolution      NVARCHAR(20),
+        level1ResolutionText  NVARCHAR(MAX),
+        level1ResolvedBy      NVARCHAR(50),
+        level1ResolvedAt      DATETIME2,
+        level1Closed          BIT,
         reviewBy              NVARCHAR(MAX),
         PRIMARY KEY (qapId, sno)
       );
+
+      IF COL_LENGTH('VisualSpecs','initialMatch') IS NULL
+        ALTER TABLE VisualSpecs ADD initialMatch NVARCHAR(10) NULL;
+      IF COL_LENGTH('VisualSpecs','initialCustomerSpecification') IS NULL
+        ALTER TABLE VisualSpecs ADD initialCustomerSpecification NVARCHAR(MAX) NULL;
+      IF COL_LENGTH('VisualSpecs','level1Resolution') IS NULL
+        ALTER TABLE VisualSpecs ADD level1Resolution NVARCHAR(20) NULL;
+      IF COL_LENGTH('VisualSpecs','level1ResolutionText') IS NULL
+        ALTER TABLE VisualSpecs ADD level1ResolutionText NVARCHAR(MAX) NULL;
+      IF COL_LENGTH('VisualSpecs','level1ResolvedBy') IS NULL
+        ALTER TABLE VisualSpecs ADD level1ResolvedBy NVARCHAR(50) NULL;
+      IF COL_LENGTH('VisualSpecs','level1ResolvedAt') IS NULL
+        ALTER TABLE VisualSpecs ADD level1ResolvedAt DATETIME2 NULL;
+      IF COL_LENGTH('VisualSpecs','level1Closed') IS NULL
+        ALTER TABLE VisualSpecs ADD level1Closed BIT NULL;
+      ALTER TABLE VisualSpecs ALTER COLUMN [match] NVARCHAR(10) NULL;
 
       ------------------------------------------------
       -- 4) LevelResponses
@@ -399,7 +467,61 @@ async function initMssql() {
 async function initDatabases() {
   await initMssql();
   await seedBomDbFromLocalIfEmpty(); // ← fill DB once from local JSON if empty
-  await upsertBomTsFromDb(); // ← then mirror DB → TS (only if DB has rows)
+  await reconcileDefaultUsers();
+}
+
+async function reconcileDefaultUsers() {
+  try {
+    const rq = mssqlPool.request();
+    const users = (
+      await rq.query(
+        "SELECT username, role FROM Users WHERE username IN ('praful','nagadevi','yamini')"
+      )
+    ).recordset;
+
+    const hasNagadevi = users.some((u) => u.username === "nagadevi");
+    const hasPraful = users.some((u) => u.username === "praful");
+
+    if (hasPraful && !hasNagadevi) {
+      await mssqlPool.request().query(`
+        UPDATE Users
+        SET username='nagadevi',
+            passwordHash='nagadevi',
+            role='requestor',
+            plant=NULL
+        WHERE username='praful'
+      `);
+    } else if (!hasNagadevi) {
+      await mssqlPool.request().query(`
+        INSERT INTO Users (username, passwordHash, role, plant)
+        VALUES ('nagadevi', 'nagadevi', 'requestor', NULL)
+      `);
+    } else {
+      await mssqlPool.request().query(`
+        UPDATE Users
+        SET passwordHash='nagadevi',
+            role='requestor',
+            plant=NULL
+        WHERE username='nagadevi'
+      `);
+    }
+
+    await mssqlPool.request().query(`
+      UPDATE Users
+      SET role='level-1-reviewer',
+          passwordHash='yamini',
+          plant=NULL
+      WHERE username='yamini'
+    `);
+
+    await mssqlPool.request().query(`
+      DELETE FROM Users
+      WHERE username='praful'
+        AND EXISTS (SELECT 1 FROM Users WHERE username='nagadevi')
+    `);
+  } catch (err) {
+    console.warn("User role reconciliation skipped:", err?.message || err);
+  }
 }
 
 // session management via JWT in httpOnly cookie
@@ -558,6 +680,85 @@ function diffHeader(oldM, newM) {
     }
   }
   return out;
+}
+
+function normalizeMatchValue(value) {
+  const safe = String(value || "")
+    .trim()
+    .toLowerCase();
+  return ["yes", "no", "agreed"].includes(safe) ? safe : null;
+}
+
+function normalizeInitialMatchValue(value) {
+  const safe = String(value || "")
+    .trim()
+    .toLowerCase();
+  return ["yes", "no"].includes(safe) ? safe : null;
+}
+
+function appendLevel1SpecInputs(rq, spec) {
+  return rq
+    .input("im", sql.NVarChar, normalizeInitialMatchValue(spec.initialMatch))
+    .input(
+      "ics",
+      sql.NVarChar,
+      spec.initialCustomerSpecification || null
+    )
+    .input("l1r", sql.NVarChar, spec.level1Resolution || null)
+    .input("l1rt", sql.NVarChar, spec.level1ResolutionText || null)
+    .input("l1by", sql.NVarChar, spec.level1ResolvedBy || null)
+    .input(
+      "l1at",
+      sql.DateTime2,
+      spec.level1ResolvedAt ? new Date(spec.level1ResolvedAt) : null
+    )
+    .input("l1c", sql.Bit, spec.level1Closed ? 1 : 0);
+}
+
+function buildLevel1SummaryFromSpecs(specs = []) {
+  const target = (specs || []).filter(
+    (spec) => spec.initialMatch === "no" || spec.level1Closed || spec.level1Resolution
+  );
+  const matched = target.filter(
+    (spec) =>
+      spec.level1Resolution === "matched" ||
+      (spec.level1Closed &&
+        String(spec.match || "").toLowerCase() === "yes")
+  ).length;
+  const agreed = target.filter(
+    (spec) =>
+      spec.level1Resolution === "agreed" ||
+      (spec.level1Closed &&
+        String(spec.match || "").toLowerCase() === "agreed")
+  ).length;
+  const closed = matched + agreed;
+  const latestResolved = [...target]
+    .reverse()
+    .find((spec) => spec.level1ResolvedBy || spec.level1ResolvedAt);
+
+  return {
+    totalReviewed: target.length,
+    matched,
+    agreed,
+    closed,
+    pending: Math.max(target.length - closed, 0),
+    reviewedBy: latestResolved?.level1ResolvedBy || null,
+    reviewedAt: latestResolved?.level1ResolvedAt || null,
+  };
+}
+
+function normalizeMqpSpecsForClient(rows = []) {
+  return (rows || []).map((row) => ({
+    ...row,
+    criteria: row.criteria || "MQP",
+  }));
+}
+
+function normalizeVisualSpecsForClient(rows = []) {
+  return (rows || []).map((row) => ({
+    ...row,
+    criteria: row.criteria || "Visual EL",
+  }));
 }
 
 // treat "" as "omit" on UPDATE so we never write NULLs accidentally
@@ -933,7 +1134,7 @@ async function appendBomEditAndReopenL2(qapId, by, bomDiff) {
   const r = await mssqlPool
     .request()
     .input("id", sql.UniqueIdentifier, qapId)
-    .query("SELECT editChanges FROM QAPs WHERE id=@id");
+    .query("SELECT editChanges, finalCommentsAt FROM QAPs WHERE id=@id");
   const history = (() => {
     try {
       return JSON.parse(r.recordset[0]?.editChanges || "[]");
@@ -941,6 +1142,14 @@ async function appendBomEditAndReopenL2(qapId, by, bomDiff) {
       return [];
     }
   })();
+
+  const reopenToLevel1 = !!r.recordset[0]?.finalCommentsAt;
+  const reopenLevel = reopenToLevel1 ? 1 : 2;
+  const reopenStatus = reopenToLevel1 ? "level-1" : "level-2";
+  const resetLevels = reopenToLevel1 ? [1, 2, 3, 4] : [2, 3, 4];
+  const timelineAction = reopenToLevel1
+    ? "BOM updated; reopened Level 1"
+    : "BOM updated; reopened Level 2";
 
   // 2) Push a BOM-only edit event
   history.push({
@@ -950,7 +1159,7 @@ async function appendBomEditAndReopenL2(qapId, by, bomDiff) {
     mqp: [],
     visual: [],
     bom: bomDiff || { changed: [], added: [], removed: [] },
-    scope: "reset-level-2",
+    scope: reopenToLevel1 ? "reset-level-1" : "reset-level-2",
   });
 
   // 3) Stamp edit fields
@@ -967,18 +1176,22 @@ async function appendBomEditAndReopenL2(qapId, by, bomDiff) {
       WHERE id=@id
     `);
 
-  // 4) Reset L2 acks and push back to Level-2
+  // 4) Reset acknowledgements and push back to the correct review entry point.
   await mssqlPool
     .request()
     .input("id", sql.UniqueIdentifier, qapId)
-    .query(
-      `UPDATE LevelResponses SET acknowledged=0 WHERE qapId=@id AND level=2`
-    );
+    .query(`UPDATE LevelResponses
+            SET acknowledged=0
+            WHERE qapId=@id AND level IN (${resetLevels.join(",")})`);
 
-  await mssqlPool.request().input("id", sql.UniqueIdentifier, qapId).query(`
+  await mssqlPool
+    .request()
+    .input("id", sql.UniqueIdentifier, qapId)
+    .input("status", sql.NVarChar, reopenStatus)
+    .input("lvl", sql.Int, reopenLevel).query(`
       UPDATE QAPs
-      SET status='level-2',
-          currentLevel=2,
+      SET status=@status,
+          currentLevel=@lvl,
           lastModifiedAt=SYSUTCDATETIME()
       WHERE id=@id
     `);
@@ -987,9 +1200,11 @@ async function appendBomEditAndReopenL2(qapId, by, bomDiff) {
     .request()
     .input("qapId", sql.UniqueIdentifier, qapId)
     .input("user", sql.NVarChar, by || "system")
+    .input("lvl", sql.Int, reopenLevel)
+    .input("action", sql.NVarChar, timelineAction)
     .input("ts", sql.DateTime2, new Date()).query(`
       INSERT INTO TimelineEntries (qapId, level, action, [user], timestamp)
-      VALUES (@qapId, 2, 'BOM updated; reopened Level 2', @user, @ts)
+      VALUES (@qapId, @lvl, @action, @user, @ts)
     `);
 }
 
@@ -1002,7 +1217,7 @@ app.use("/uploads", express.static(uploadDir));
 
 // serve frontend static files
 const distDir = path.join(__dirname, "../dist");
-const indexHtml = path.join(distDir, "../index.html");
+const indexHtml = path.join(distDir, "index.html");
 
 // serve SPA + static assets
 app.use(express.static(distDir));
@@ -1194,10 +1409,10 @@ function computeBomDiff(prev, next) {
 function buildApprovalsTrail(masterRow, respRows = []) {
   const out = [];
 
-  // Level-based acknowledgements (2,3,4)
+  // Level-based acknowledgements (1,2,3,4)
   for (const r of respRows) {
     const lvl = Number(r.level);
-    if (![2, 3, 4].includes(lvl)) continue;
+    if (![1, 2, 3, 4].includes(lvl)) continue;
 
     const ack = r.acknowledged === 1 || r.acknowledged === true;
     if (!ack) continue;
@@ -1216,7 +1431,7 @@ function buildApprovalsTrail(masterRow, respRows = []) {
         r.respondedAt instanceof Date
           ? r.respondedAt.toISOString()
           : new Date(r.respondedAt || Date.now()).toISOString(),
-      action: "approved",
+      action: lvl === 1 ? "reviewed" : "approved",
       commentCount: thread.length,
     });
   }
@@ -1268,7 +1483,16 @@ app.post(
       }
     });
 
-    if (!user || user.passwordHash !== password) {
+    const plainOk = !!user && user.passwordHash === password;
+    const bcryptOk =
+      !!user &&
+      !plainOk &&
+      typeof user.passwordHash === "string" &&
+      user.passwordHash.startsWith("$2")
+        ? await bcrypt.compare(password, user.passwordHash).catch(() => false)
+        : false;
+
+    if (!user || (!plainOk && !bcryptOk)) {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
@@ -1337,21 +1561,20 @@ app.post(
     authorizeRole("admin"),
     body("username").isString(),
     body("password").isLength({ min: 6 }),
-    body("role").isIn([
-      "requestor",
-      "production",
-      "quality",
-      "technical",
-      "head",
-      "technical-head",
-      "plant-head",
-      "admin",
-    ]),
+    body("role").isIn(USER_ROLE_VALUES),
     body("plant").optional().isString(),
   ],
   handleValidation,
   async (req, res) => {
     const { username, password, role, plant } = req.body;
+    if (
+      String(role || "").toLowerCase() === "requestor" &&
+      String(username || "").trim().toLowerCase() !== "nagadevi"
+    ) {
+      return res.status(400).json({
+        message: "Nagadevi must remain the sole requestor",
+      });
+    }
     const hash = await bcrypt.hash(password, 10);
     try {
       await tryMssql(async (db) => {
@@ -1385,22 +1608,41 @@ app.put(
     body("password").optional().isLength({ min: 6 }),
     body("role")
       .optional()
-      .isIn([
-        "requestor",
-        "production",
-        "quality",
-        "technical",
-        "head",
-        "technical-head",
-        "plant-head",
-        "admin",
-      ]),
+      .isIn(USER_ROLE_VALUES),
     body("plant").optional().isString(),
   ],
   handleValidation,
   async (req, res) => {
     const { id } = req.params;
     const { password, role, plant } = req.body;
+    const current =
+      (
+        await mssqlPool
+          .request()
+          .input("id", sql.UniqueIdentifier, id)
+          .query("SELECT username, role FROM Users WHERE id=@id")
+      ).recordset[0] || null;
+    if (!current) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    if (
+      role &&
+      String(role).toLowerCase() === "requestor" &&
+      String(current.username || "").toLowerCase() !== "nagadevi"
+    ) {
+      return res.status(400).json({
+        message: "Nagadevi must remain the sole requestor",
+      });
+    }
+    if (
+      role &&
+      String(current.username || "").toLowerCase() === "nagadevi" &&
+      String(role).toLowerCase() !== "requestor"
+    ) {
+      return res.status(400).json({
+        message: "Nagadevi must remain the sole requestor",
+      });
+    }
     const fields = [];
     const inputs = {};
     if (password) {
@@ -1499,16 +1741,7 @@ async function fetchBomFromDb() {
 
 // regenerate bomMaster.ts from DB
 async function upsertBomTsFromDb() {
-  try {
-    const list = await fetchBomFromDb();
-    if (!Array.isArray(list) || list.length === 0) {
-      console.warn("BOM DB is empty → skipping bomMaster.ts regeneration");
-      return;
-    }
-    fs.writeFileSync(BOM_TS, generateBomTs(list), "utf-8");
-  } catch (e) {
-    console.warn("Skipping bomMaster.ts regeneration:", e.message || e);
-  }
+  console.log("Skipping bomMaster.ts regeneration; static file is preserved.");
 }
 
 function buildBomFallbackFromList(list, srLike) {
@@ -1673,6 +1906,9 @@ app.get("/api/qaps", authenticateToken, async (req, res) => {
     // 5) assemble final result (embed salesRequest)
     // 5) assemble final result (embed salesRequest)
     const result = masters.map((m) => {
+      const mqpRows = normalizeMqpSpecsForClient(mqpMap[m.id] || []);
+      const visualRows = normalizeVisualSpecsForClient(visMap[m.id] || []);
+      const allSpecs = [...mqpRows, ...visualRows];
       const editCommentsParsed = parseEditChanges(m);
       const editedSnos = deriveEditedSnos(editCommentsParsed);
       const editedBomComponents = deriveEditedBomComponents(editCommentsParsed);
@@ -1686,9 +1922,10 @@ app.get("/api/qaps", authenticateToken, async (req, res) => {
 
         // ── nest specs ──────────────────────────────────────────────
         specs: {
-          mqp: mqpMap[m.id] || [],
-          visual: visMap[m.id] || [],
+          mqp: mqpRows,
+          visual: visualRows,
         },
+        level1Summary: buildLevel1SummaryFromSpecs(allSpecs),
 
         // ── level-responses as level → role → details ───────────────
         levelResponses: (respMap[m.id] || []).reduce((o, r) => {
@@ -1864,7 +2101,9 @@ app.get("/api/qaps/for-review", authenticateToken, async (req, res) => {
     // CMD+F: FOR_REVIEW_L3_VISIBILITY — expose L2 comments + edit changes to Level-3 list
     const reviewable = masters
       .map((m) => {
-        const specs = [...(mqpMap[m.id] || []), ...(visMap[m.id] || [])];
+        const mqpRows = normalizeMqpSpecsForClient(mqpMap[m.id] || []);
+        const visualRows = normalizeVisualSpecsForClient(visMap[m.id] || []);
+        const specs = [...mqpRows, ...visualRows];
 
         const rawResp = respMap[m.id] || [];
         const levelResponsesNested = nestResponses(rawResp);
@@ -1882,9 +2121,10 @@ app.get("/api/qaps/for-review", authenticateToken, async (req, res) => {
         return {
           ...m,
           specs: {
-            mqp: mqpMap[m.id] || [],
-            visual: visMap[m.id] || [],
+            mqp: mqpRows,
+            visual: visualRows,
           },
+          level1Summary: buildLevel1SummaryFromSpecs(specs),
           levelResponses: levelResponsesNested,
           level2CommentFeed,
           editCommentsParsed,
@@ -2029,9 +2269,13 @@ app.get(
       const editCommentsParsed = parseEditChanges(master);
       const editedSnos = deriveEditedSnos(editCommentsParsed);
       const editedBomComponents = deriveEditedBomComponents(editCommentsParsed);
+      mqp = normalizeMqpSpecsForClient(mqp || []);
+      visual = normalizeVisualSpecsForClient(visual || []);
+      const level1Summary = buildLevel1SummaryFromSpecs([...(mqp || []), ...(visual || [])]);
       return res.json({
         ...master,
         specs: { mqp, visual },
+        level1Summary,
         // parsed & nested for consistent UI usage
         levelResponses: levelResponsesNested,
         // CMD+F: L2_COMMENT_FEED_FOR_L3 — a flat feed for Level-3 UI
@@ -2138,8 +2382,10 @@ app.post(
 
           // MSSQL MQP specs insert
           for (const sp of specs.mqp || []) {
-            await mssqlPool
-              .request()
+            const rq = appendLevel1SpecInputs(
+              mssqlPool.request(),
+              sp || {}
+            )
               .input("id", sql.UniqueIdentifier, newId)
               .input("sno", sql.Int, sp.sno)
               .input("sub", sql.NVarChar, sp.subCriteria)
@@ -2149,23 +2395,27 @@ app.post(
               .input("tc", sql.NVarChar, sp.typeOfCheck)
               .input("sm", sql.NVarChar, sp.sampling)
               .input("spx", sql.NVarChar, sp.specification)
-              .input("m", sql.NVarChar, sp.match || null)
+              .input("m", sql.NVarChar, normalizeMatchValue(sp.match))
               .input("cs", sql.NVarChar, sp.customerSpecification || null)
-              .input("rb", sql.NVarChar, normReviewBy(sp.reviewBy) || null)
-              .query(`
+              .input("rb", sql.NVarChar, normReviewBy(sp.reviewBy) || null);
+            await rq.query(`
                 INSERT INTO MQPSpecs
                   (qapId,sno,subCriteria,componentOperation,characteristics,
                    class,typeOfCheck,sampling,specification,[match],
-                   customerSpecification,reviewBy)
+                   customerSpecification,initialMatch,initialCustomerSpecification,
+                   level1Resolution,level1ResolutionText,level1ResolvedBy,
+                   level1ResolvedAt,level1Closed,reviewBy)
                 VALUES
-                  (@id,@sno,@sub,@co,@ch,@clz,@tc,@sm,@spx,@m,@cs,@rb);
+                  (@id,@sno,@sub,@co,@ch,@clz,@tc,@sm,@spx,@m,@cs,@im,@ics,@l1r,@l1rt,@l1by,@l1at,@l1c,@rb);
               `);
           }
 
           // MSSQL Visual specs insert
           for (const sp of specs.visual || []) {
-            await mssqlPool
-              .request()
+            const rq = appendLevel1SpecInputs(
+              mssqlPool.request(),
+              sp || {}
+            )
               .input("id", sql.UniqueIdentifier, newId)
               .input("sno", sql.Int, sp.sno)
               .input("sub", sql.NVarChar, sp.subCriteria)
@@ -2173,15 +2423,17 @@ app.post(
               .input("dc", sql.NVarChar, sp.defectClass)
               .input("ds", sql.NVarChar, sp.description)
               .input("clz", sql.NVarChar, sp.criteriaLimits)
-              .input("m", sql.NVarChar, sp.match || null)
+              .input("m", sql.NVarChar, normalizeMatchValue(sp.match))
               .input("cs", sql.NVarChar, sp.customerSpecification || null)
-              .input("rb", sql.NVarChar, normReviewBy(sp.reviewBy) || null)
-              .query(`
+              .input("rb", sql.NVarChar, normReviewBy(sp.reviewBy) || null);
+            await rq.query(`
                 INSERT INTO VisualSpecs
                   (qapId,sno,subCriteria,defect,defectClass,description,
-                   criteriaLimits,[match],customerSpecification,reviewBy)
+                   criteriaLimits,[match],customerSpecification,initialMatch,
+                   initialCustomerSpecification,level1Resolution,level1ResolutionText,
+                   level1ResolvedBy,level1ResolvedAt,level1Closed,reviewBy)
                 VALUES
-                  (@id,@sno,@sub,@df,@dc,@ds,@clz,@m,@cs,@rb);
+                  (@id,@sno,@sub,@df,@dc,@ds,@clz,@m,@cs,@im,@ics,@l1r,@l1rt,@l1by,@l1at,@l1c,@rb);
               `);
           }
         }
@@ -2334,6 +2586,7 @@ app.put(
       if (!editEvent.summary) {
         editEvent.summary = buildEditSummary(editEvent);
       }
+      const editChangesStr = JSON.stringify([...historyPrev, editEvent]);
 
       // 3) Update master fields (keepIfPresent semantics)
       let rq = mssqlPool
@@ -2413,8 +2666,10 @@ app.put(
               typeof sp.reviewBy !== "undefined"
                 ? sp.reviewBy
                 : prevMqpRB[sp.sno];
-            await mssqlPool
-              .request()
+            const rq = appendLevel1SpecInputs(
+              mssqlPool.request(),
+              sp || {}
+            )
               .input("id", sql.UniqueIdentifier, id)
               .input("sno", sql.Int, sp.sno)
               .input("sub", sql.NVarChar, sp.subCriteria || "")
@@ -2424,15 +2679,18 @@ app.put(
               .input("tc", sql.NVarChar, sp.typeOfCheck || "")
               .input("sm", sql.NVarChar, sp.sampling || "")
               .input("spx", sql.NVarChar, sp.specification || "")
-              .input("m", sql.NVarChar, sp.match || null)
+              .input("m", sql.NVarChar, normalizeMatchValue(sp.match))
               .input("cs", sql.NVarChar, sp.customerSpecification || null)
-              .input("rb", sql.NVarChar, normReviewBy(rbRaw) || null).query(`
+              .input("rb", sql.NVarChar, normReviewBy(rbRaw) || null);
+            await rq.query(`
                 INSERT INTO MQPSpecs
                   (qapId,sno,subCriteria,componentOperation,characteristics,
                    class,typeOfCheck,sampling,specification,[match],
-                   customerSpecification,reviewBy)
+                   customerSpecification,initialMatch,initialCustomerSpecification,
+                   level1Resolution,level1ResolutionText,level1ResolvedBy,
+                   level1ResolvedAt,level1Closed,reviewBy)
                 VALUES
-                  (@id,@sno,@sub,@co,@ch,@clz,@tc,@sm,@spx,@m,@cs,@rb)
+                  (@id,@sno,@sub,@co,@ch,@clz,@tc,@sm,@spx,@m,@cs,@im,@ics,@l1r,@l1rt,@l1by,@l1at,@l1c,@rb)
               `);
           }
         }
@@ -2458,8 +2716,10 @@ app.put(
               typeof sp.reviewBy !== "undefined"
                 ? sp.reviewBy
                 : prevVisRB[sp.sno];
-            await mssqlPool
-              .request()
+            const rq = appendLevel1SpecInputs(
+              mssqlPool.request(),
+              sp || {}
+            )
               .input("id", sql.UniqueIdentifier, id)
               .input("sno", sql.Int, sp.sno)
               .input("sub", sql.NVarChar, sp.subCriteria || "")
@@ -2467,14 +2727,17 @@ app.put(
               .input("dc", sql.NVarChar, sp.defectClass || "")
               .input("ds", sql.NVarChar, sp.description || "")
               .input("clz", sql.NVarChar, sp.criteriaLimits || "")
-              .input("m", sql.NVarChar, sp.match || null)
+              .input("m", sql.NVarChar, normalizeMatchValue(sp.match))
               .input("cs", sql.NVarChar, sp.customerSpecification || null)
-              .input("rb", sql.NVarChar, normReviewBy(rbRaw) || null).query(`
+              .input("rb", sql.NVarChar, normReviewBy(rbRaw) || null);
+            await rq.query(`
                 INSERT INTO VisualSpecs
                   (qapId,sno,subCriteria,defect,defectClass,description,
-                   criteriaLimits,[match],customerSpecification,reviewBy)
+                   criteriaLimits,[match],customerSpecification,initialMatch,
+                   initialCustomerSpecification,level1Resolution,level1ResolutionText,
+                   level1ResolvedBy,level1ResolvedAt,level1Closed,reviewBy)
                 VALUES
-                  (@id,@sno,@sub,@df,@dc,@ds,@clz,@m,@cs,@rb)
+                  (@id,@sno,@sub,@df,@dc,@ds,@clz,@m,@cs,@im,@ics,@l1r,@l1rt,@l1by,@l1at,@l1c,@rb)
               `);
           }
         }
@@ -2502,39 +2765,68 @@ app.put(
         (Array.isArray(specs.mqp) || Array.isArray(specs.visual))
       );
 
-      if (
-        (editMeta &&
-          (editMeta.scope === "reset-level-2" ||
-            editMeta.scope === "reopen-level-2")) ||
-        hasAnyEditMeta ||
-        specsWereReplaced
-      ) {
-        // 1) Reset (do NOT delete) Level 2 responses so every department must respond again,
-        //    preserving existing comment threads for Level-3 visibility
+      const masterStatusLc = String(masterRow.status || "")
+        .trim()
+        .toLowerCase();
+      const legacyResetToLevel1 =
+        editMeta &&
+        (editMeta.scope === "reset-level-1" ||
+          editMeta.scope === "reopen-level-1");
+      const legacyResetToLevel2 =
+        editMeta &&
+        (editMeta.scope === "reset-level-2" ||
+          editMeta.scope === "reopen-level-2");
+      const shouldReopenWorkflow =
+        legacyResetToLevel1 ||
+        legacyResetToLevel2 ||
+        (req.user?.role === "requestor" &&
+          ["approved", "rejected", "level-5", "final-comments"].includes(
+            masterStatusLc
+          ) &&
+          (hasAnyEditMeta || specsWereReplaced));
+
+      if (shouldReopenWorkflow) {
+        const reopenToLevel1 =
+          legacyResetToLevel1 ||
+          (!legacyResetToLevel2 && !!masterRow.finalCommentsAt);
+        const reopenLevel = reopenToLevel1 ? 1 : 2;
+        const reopenStatus = reopenToLevel1 ? "level-1" : "level-2";
+        const resetLevels = reopenToLevel1 ? [1, 2, 3, 4] : [2, 3, 4];
+        const timelineAction = reopenToLevel1
+          ? "Reopened Level 1 after edit; workflow restarted for full re-review"
+          : "Reopened Level 2 after edit; downstream reviewers must respond again";
+
+        // Reset acknowledgements only; keep the prior threaded comments/history intact.
         await mssqlPool
           .request()
           .input("id", sql.UniqueIdentifier, id)
-          .query(
-            `UPDATE LevelResponses SET acknowledged=0 WHERE qapId=@id AND level=2`
-          );
+          .query(`UPDATE LevelResponses
+                  SET acknowledged=0
+                  WHERE qapId=@id AND level IN (${resetLevels.join(",")})`);
 
-        // 2) Push the QAP back to Level 2
-        await mssqlPool.request().input("id", sql.UniqueIdentifier, id).query(`
+        // Push the QAP back to the correct re-review entry point.
+        await mssqlPool
+          .request()
+          .input("id", sql.UniqueIdentifier, id)
+          .input("status", sql.NVarChar, reopenStatus)
+          .input("lvl", sql.Int, reopenLevel).query(`
     UPDATE QAPs
-    SET status='level-2',
-        currentLevel=2,
+    SET status=@status,
+        currentLevel=@lvl,
         lastModifiedAt=SYSUTCDATETIME()
     WHERE id=@id;
   `);
 
-        // 3) Timeline entry
+        // Timeline entry
         await mssqlPool
           .request()
           .input("qapId", sql.UniqueIdentifier, id)
           .input("user", sql.NVarChar, req.user?.username || "system")
+          .input("lvl", sql.Int, reopenLevel)
+          .input("action", sql.NVarChar, timelineAction)
           .input("ts", sql.DateTime2, new Date()).query(`
     INSERT INTO TimelineEntries (qapId, level, action, [user], timestamp)
-    VALUES (@qapId, 2, 'Reopened Level 2 after edit; all departments must respond again', @user, @ts);
+    VALUES (@qapId, @lvl, @action, @user, @ts);
   `);
       }
       // <<< L2_RESET_ON_EDIT
@@ -2585,6 +2877,189 @@ app.delete(
   }
 );
 
+// POST /api/qaps/:id/level-1-review → close Level 1 review and route to Level 2
+app.post(
+  "/api/qaps/:id/level-1-review",
+  [
+    authenticateToken,
+    authorizeRole("level-1-reviewer", "admin"),
+    param("id").isUUID(),
+    body("specs").isObject(),
+    body("comments").optional().isObject(),
+    handleValidation,
+  ],
+  async (req, res) => {
+    const { id } = req.params;
+    const { specs, comments = {} } = req.body;
+    const respondedAt = new Date();
+    const responderRole = "level-1-reviewer";
+
+    const tx = new sql.Transaction(mssqlPool);
+    try {
+      await tx.begin();
+
+      const master =
+        (
+          await tx
+            .request()
+            .input("id", sql.UniqueIdentifier, id)
+            .query("SELECT id, status, currentLevel FROM QAPs WHERE id=@id")
+        ).recordset[0] || null;
+
+      if (!master) {
+        await tx.rollback();
+        return res.status(404).json({ message: "Not found" });
+      }
+
+      const statusLc = String(master.status || "")
+        .trim()
+        .toLowerCase();
+      if (statusLc !== "level-1" || Number(master.currentLevel) !== 1) {
+        await tx.rollback();
+        return res.status(409).json({
+          message: "This QAP is not currently awaiting Level 1 review",
+        });
+      }
+
+      await tx
+        .request()
+        .input("id", sql.UniqueIdentifier, id)
+        .query("DELETE FROM MQPSpecs WHERE qapId=@id; DELETE FROM VisualSpecs WHERE qapId=@id;");
+
+      for (const sp of specs.mqp || []) {
+        const rq = appendLevel1SpecInputs(tx.request(), sp || {})
+          .input("id", sql.UniqueIdentifier, id)
+          .input("sno", sql.Int, sp.sno)
+          .input("sub", sql.NVarChar, sp.subCriteria || "")
+          .input("co", sql.NVarChar, sp.componentOperation || "")
+          .input("ch", sql.NVarChar, sp.characteristics || "")
+          .input("clz", sql.NVarChar, sp.class || "")
+          .input("tc", sql.NVarChar, sp.typeOfCheck || "")
+          .input("sm", sql.NVarChar, sp.sampling || "")
+          .input("spx", sql.NVarChar, sp.specification || "")
+          .input("m", sql.NVarChar, normalizeMatchValue(sp.match))
+          .input("cs", sql.NVarChar, sp.customerSpecification || null)
+          .input("rb", sql.NVarChar, normReviewBy(sp.reviewBy) || null);
+        await rq.query(`
+          INSERT INTO MQPSpecs
+            (qapId,sno,subCriteria,componentOperation,characteristics,
+             class,typeOfCheck,sampling,specification,[match],customerSpecification,
+             initialMatch,initialCustomerSpecification,level1Resolution,
+             level1ResolutionText,level1ResolvedBy,level1ResolvedAt,level1Closed,reviewBy)
+          VALUES
+            (@id,@sno,@sub,@co,@ch,@clz,@tc,@sm,@spx,@m,@cs,@im,@ics,@l1r,@l1rt,@l1by,@l1at,@l1c,@rb)
+        `);
+      }
+
+      for (const sp of specs.visual || []) {
+        const rq = appendLevel1SpecInputs(tx.request(), sp || {})
+          .input("id", sql.UniqueIdentifier, id)
+          .input("sno", sql.Int, sp.sno)
+          .input("sub", sql.NVarChar, sp.subCriteria || "")
+          .input("df", sql.NVarChar, sp.defect || "")
+          .input("dc", sql.NVarChar, sp.defectClass || "")
+          .input("ds", sql.NVarChar, sp.description || "")
+          .input("clz", sql.NVarChar, sp.criteriaLimits || "")
+          .input("m", sql.NVarChar, normalizeMatchValue(sp.match))
+          .input("cs", sql.NVarChar, sp.customerSpecification || null)
+          .input("rb", sql.NVarChar, normReviewBy(sp.reviewBy) || null);
+        await rq.query(`
+          INSERT INTO VisualSpecs
+            (qapId,sno,subCriteria,defect,defectClass,description,
+             criteriaLimits,[match],customerSpecification,initialMatch,
+             initialCustomerSpecification,level1Resolution,level1ResolutionText,
+             level1ResolvedBy,level1ResolvedAt,level1Closed,reviewBy)
+          VALUES
+            (@id,@sno,@sub,@df,@dc,@ds,@clz,@m,@cs,@im,@ics,@l1r,@l1rt,@l1by,@l1at,@l1c,@rb)
+        `);
+      }
+
+      const prev = (
+        await tx
+          .request()
+          .input("qapId", sql.UniqueIdentifier, id)
+          .input("lvl", sql.Int, 1)
+          .input("rl", sql.NVarChar, responderRole)
+          .query(`SELECT username, respondedAt, comments
+            FROM LevelResponses
+            WHERE qapId=@qapId AND level=@lvl AND role=@rl`)
+      ).recordset[0];
+
+      const threadPrev = coerceCommentsToThread(
+        prev?.comments,
+        prev?.username,
+        prev?.respondedAt
+      );
+      const entry = {
+        by: req.user.username,
+        at: respondedAt.toISOString(),
+        responses: comments || {},
+      };
+      const cmJson = JSON.stringify([...threadPrev, entry]);
+
+      await tx
+        .request()
+        .input("qapId", sql.UniqueIdentifier, id)
+        .input("lvl", sql.Int, 1)
+        .input("rl", sql.NVarChar, responderRole)
+        .input("un", sql.NVarChar, req.user.username)
+        .input("ack", sql.Bit, 1)
+        .input("dt", sql.DateTime2, respondedAt)
+        .input("cm", sql.NVarChar, cmJson).query(`
+          MERGE LevelResponses AS T
+          USING (SELECT @qapId AS qapId, @lvl AS level, @rl AS role) AS S
+            ON T.qapId=S.qapId AND T.level=S.level AND T.role=S.role
+          WHEN MATCHED THEN
+            UPDATE SET username=@un, acknowledged=@ack, respondedAt=@dt, comments=@cm
+          WHEN NOT MATCHED THEN
+            INSERT (qapId, level, role, username, acknowledged, respondedAt, comments)
+            VALUES (@qapId, @lvl, @rl, @un, @ack, @dt, @cm);
+        `);
+
+      await tx
+        .request()
+        .input("id", sql.UniqueIdentifier, id)
+        .query(`
+          UPDATE QAPs
+          SET status='level-2',
+              currentLevel=2,
+              lastModifiedAt=SYSUTCDATETIME()
+          WHERE id=@id
+        `);
+
+      await tx
+        .request()
+        .input("qapId", sql.UniqueIdentifier, id)
+        .input("level", sql.Int, 1)
+        .input(
+          "action",
+          sql.NVarChar,
+          "Level 1 review completed, sent to Level 2"
+        )
+        .input("user", sql.NVarChar, req.user.username)
+        .input("ts", sql.DateTime2, respondedAt).query(`
+          INSERT INTO TimelineEntries (qapId, level, action, [user], timestamp)
+          VALUES (@qapId, @level, @action, @user, @ts);
+        `);
+
+      await tx.commit();
+      res.json({
+        message: "Level 1 review recorded",
+        level1Summary: buildLevel1SummaryFromSpecs([
+          ...(specs.mqp || []),
+          ...(specs.visual || []),
+        ]),
+      });
+    } catch (e) {
+      try {
+        await tx.rollback();
+      } catch {}
+      console.error("POST /api/qaps/:id/level-1-review error:", e);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+
 // POST /api/qaps/:id/responses → add/update a level response
 app.post(
   "/api/qaps/:id/responses",
@@ -2595,7 +3070,8 @@ app.post(
       "quality",
       "technical",
       "head",
-      "technical-head"
+      "technical-head",
+      "admin"
     ),
     param("id").isUUID(),
     body("level").isInt({ min: 2, max: 4 }),
@@ -2611,6 +3087,75 @@ app.post(
     const tx = new sql.Transaction(mssqlPool);
     try {
       await tx.begin();
+
+      const master =
+        (
+          await tx
+            .request()
+            .input("qapId", sql.UniqueIdentifier, id)
+            .query(`SELECT id, status, currentLevel FROM QAPs WHERE id=@qapId`)
+        ).recordset[0] || null;
+
+      if (!master) {
+        await tx.rollback();
+        return res.status(404).json({ message: "QAP not found" });
+      }
+
+      const statusLc = String(master.status || "")
+        .trim()
+        .toLowerCase();
+      const activeStatusesByLevel = {
+        2: ["level-2"],
+        3: ["level-3", "level-3b"],
+        4: ["level-4", "level-4b"],
+      };
+
+      if (
+        Number(master.currentLevel) !== Number(level) ||
+        !(activeStatusesByLevel[level] || []).includes(statusLc)
+      ) {
+        await tx.rollback();
+        return res.status(409).json({
+          message: `This QAP is not currently awaiting a Level ${level} response`,
+        });
+      }
+
+      if (Number(level) === 2) {
+        const roleLc = String(responderRole || "")
+          .trim()
+          .toLowerCase();
+
+        if (["production", "quality", "technical"].includes(roleLc)) {
+          const mqpAssignments = (
+            await tx
+              .request()
+              .input("qapId", sql.UniqueIdentifier, id)
+              .query(
+                `SELECT reviewBy FROM MQPSpecs WHERE qapId=@qapId AND ISNULL(reviewBy,'') <> ''`
+              )
+          ).recordset;
+          const visualAssignments = (
+            await tx
+              .request()
+              .input("qapId", sql.UniqueIdentifier, id)
+              .query(
+                `SELECT reviewBy FROM VisualSpecs WHERE qapId=@qapId AND ISNULL(reviewBy,'') <> ''`
+              )
+          ).recordset;
+
+          const assignedToRole = [...mqpAssignments, ...visualAssignments].some(
+            (row) => rolesCsvToArrayLower(row.reviewBy).includes(roleLc)
+          );
+
+          if (!assignedToRole) {
+            await tx.rollback();
+            return res.status(403).json({
+              message:
+                "This QAP was not assigned to your Level 2 role selection",
+            });
+          }
+        }
+      }
 
       // 1) Upsert the reviewer’s response
       // 1) Load existing (if any) for this qapId+level+role
@@ -2978,21 +3523,22 @@ app.post(
         `);
       }
 
-      // 2) Reset Level 2 acknowledgements so all departments must re-respond
+      // 2) Reset acknowledgements so the full second round starts cleanly.
       await mssqlPool
         .request()
         .input("id", sql.UniqueIdentifier, id)
-        .query(
-          `UPDATE LevelResponses SET acknowledged=0 WHERE qapId=@id AND level=2`
-        );
+        .query(`UPDATE LevelResponses
+                SET acknowledged=0
+                WHERE qapId=@id AND level IN (1,2,3,4)`);
 
-      // 3) Advance to Level 2 (post-final round)
+      // 3) Advance to Level 1 for the post-final re-review round.
       await mssqlPool
         .request()
         .input("qapId", sql.UniqueIdentifier, id)
-        .input("lvl", sql.Int, 2).query(`
+        .input("lvl", sql.Int, 1)
+        .input("status", sql.NVarChar, "level-1").query(`
   UPDATE QAPs
-  SET status       = 'level-2',
+  SET status       = @status,
       currentLevel = @lvl,
       lastModifiedAt = SYSUTCDATETIME()
   WHERE id = @qapId;
@@ -3002,11 +3548,11 @@ app.post(
       await mssqlPool
         .request()
         .input("qapId", sql.UniqueIdentifier, id)
-        .input("level", sql.Int, 2)
+        .input("level", sql.Int, 1)
         .input(
           "action",
           sql.NVarChar,
-          "Final comments saved; reopened Level 2 for re-review"
+          "Final comments saved; reopened Level 1 for re-review"
         )
         .input("user", sql.NVarChar, username)
         .input("ts", sql.DateTime2, now).query(`
@@ -3015,7 +3561,7 @@ app.post(
 `);
 
       return res.json({
-        message: "Final comments saved; QAP reopened to Level 2 for re-review",
+        message: "Final comments saved; QAP reopened to Level 1 for re-review",
       });
     } catch (err) {
       console.error("POST /api/qaps/:id/final-comments error:", err);
@@ -3167,9 +3713,18 @@ app.post(
 // SPEC ENDPOINTS
 // GET /api/spec-templates → list available spec templates
 app.get("/api/spec-templates", authenticateToken, async (req, res) => {
-  // simply combine your in‑memory arrays
-  const { qapSpecifications } = require("../src/data/qapSpecifications");
-  res.json(qapSpecifications);
+  try {
+    const { recordset } = await mssqlPool.request().query(`
+      SELECT id, criteria, subCriteria, specification, [class] AS class,
+             [description], sampling, typeOfCheck, sno
+      FROM dbo.QAPSpecifications
+      ORDER BY COALESCE(sno, 2147483647), criteria, subCriteria
+    `);
+    res.json((recordset || []).map(mapSpecRow));
+  } catch (e) {
+    console.error("GET /api/spec-templates", e);
+    res.status(500).json({ message: "Server error" });
+  }
 });
 
 // helper for file URLs under sales-requests
@@ -4473,12 +5028,7 @@ async function seedBomDbFromLocalIfEmpty() {
     // keep TS in sync with (possibly) hydrated store
     fs.writeFileSync(SPEC_TS, generateSpecTs(SPEC_STORE), "utf-8");
   }
-  if (!fs.existsSync(BOM_TS)) {
-    fs.writeFileSync(BOM_TS, generateBomTs(BOM_STORE), "utf-8");
-  } else {
-    // keep TS in sync with (possibly) hydrated store
-    fs.writeFileSync(BOM_TS, generateBomTs(BOM_STORE), "utf-8");
-  }
+  // Preserve src/data/bomMaster.ts as a static fallback and stop rewriting it.
 })();
 
 // ---- Utilities ----
@@ -4486,24 +5036,9 @@ const isNonEmpty = (s) => typeof s === "string" && s.trim().length > 0;
 const SPEC_CLASSES = new Set(["Critical", "Major", "Minor"]);
 const CRITERIA_SET = new Set(["MQP", "Visual"]);
 
-const COMP_SET = new Set([
-  "Solar Cell",
-  "Front Cover",
-  "Back Cover",
-  "Encapsulation (EVA)",
-  "Back Sheet (Tedlar)",
-  "Frame",
-  "Junction Box",
-  "Bypass Diodes",
-  "Interconnect Ribbons",
-  "Bus Bar",
-  "Sealants",
-  "Label",
-  "Carton Box",
-]);
-
 // valid technologies (server-side validation for /api/bom-components POST/PUT)
 const TECH_SET = new Set(["M10", "M10R", "G12", "G12R"]);
+const DEFAULT_BOM_TECH = "M10";
 
 function regenerateSpecFile() {
   writeJson(SPEC_STORE_JSON, SPEC_STORE);
@@ -4512,7 +5047,6 @@ function regenerateSpecFile() {
 
 function regenerateBomFile() {
   writeJson(BOM_STORE_JSON, BOM_STORE);
-  fs.writeFileSync(BOM_TS, generateBomTs(BOM_STORE), "utf-8");
 }
 
 // ---- SPECS API ----
@@ -4801,10 +5335,13 @@ app.get("/api/bom-components", authenticateToken, async (_req, res) => {
 app.post("/api/bom-components", authenticateToken, async (req, res) => {
   const p = req.body || {};
   try {
-    if (!COMP_SET.has(p.name))
-      return res.status(400).json({ message: "Invalid component name" });
-    if (!TECH_SET.has(p.technology))
-      return res.status(400).json({ message: "Invalid technology" });
+    const name = String(p.name || "").trim();
+    if (!name)
+      return res.status(400).json({ message: "Component name is required" });
+
+    const technology = TECH_SET.has(String(p.technology || ""))
+      ? String(p.technology)
+      : DEFAULT_BOM_TECH;
 
     const opts = Array.isArray(p.options) ? p.options : [];
     const options = opts
@@ -4822,6 +5359,18 @@ app.post("/api/bom-components", authenticateToken, async (req, res) => {
     const tx = new sql.Transaction(mssqlPool);
     await tx.begin();
     try {
+      const exists = (
+        await tx
+          .request()
+          .input("n", sql.NVarChar, name)
+          .query("SELECT name FROM dbo.BomComponents WHERE name=@n")
+      ).recordset.length;
+
+      if (exists) {
+        await tx.rollback();
+        return res.status(409).json({ message: "Component already exists" });
+      }
+
       // position = max+1
       const nextPos = (
         await tx
@@ -4831,7 +5380,7 @@ app.post("/api/bom-components", authenticateToken, async (req, res) => {
 
       await tx
         .request()
-        .input("n", sql.NVarChar, p.name)
+        .input("n", sql.NVarChar, name)
         .input("pos", sql.Int, nextPos)
         .query(
           "INSERT INTO dbo.BomComponents(name, position) VALUES (@n, @pos)"
@@ -4840,7 +5389,7 @@ app.post("/api/bom-components", authenticateToken, async (req, res) => {
       for (const o of options) {
         await tx
           .request()
-          .input("cn", sql.NVarChar, p.name)
+          .input("cn", sql.NVarChar, name)
           .input("m", sql.NVarChar, o.model)
           .input("sv", sql.NVarChar, o.subVendor)
           .input("sp", sql.NVarChar, o.spec)
@@ -4851,7 +5400,7 @@ app.post("/api/bom-components", authenticateToken, async (req, res) => {
         await tx
           .request()
           .input("model", sql.NVarChar, o.model)
-          .input("tech", sql.NVarChar, p.technology).query(`
+          .input("tech", sql.NVarChar, technology).query(`
             IF NOT EXISTS (SELECT 1 FROM dbo.ModelMaster WHERE model=@model)
               INSERT INTO dbo.ModelMaster(model, technology) VALUES (@model, @tech);
           `);
@@ -4861,7 +5410,7 @@ app.post("/api/bom-components", authenticateToken, async (req, res) => {
 
       // return the single component freshly loaded
       const rows = (
-        await mssqlPool.request().input("n", sql.NVarChar, p.name).query(`
+        await mssqlPool.request().input("n", sql.NVarChar, name).query(`
             SELECT c.name AS componentName, c.position,
                    o.id AS optionId, o.model, o.subVendor, o.spec,
                    mm.technology
@@ -4889,12 +5438,13 @@ app.put("/api/bom-components/:id", authenticateToken, async (req, res) => {
   const id = req.params.id; // current name
   const p = req.body || {};
   try {
-    if (p.name && !COMP_SET.has(p.name))
-      return res.status(400).json({ message: "Invalid component name" });
+    const newName = String(p.name || id || "").trim();
+    if (!newName)
+      return res.status(400).json({ message: "Component name is required" });
     if (p.technology && !TECH_SET.has(p.technology))
       return res.status(400).json({ message: "Invalid technology" });
 
-    const newName = p.name || id;
+    const technology = p.technology || DEFAULT_BOM_TECH;
     const options = (Array.isArray(p.options) ? p.options : [])
       .filter((o) => o && typeof o.model === "string" && o.model.trim())
       .map((o) => ({
@@ -4953,7 +5503,7 @@ app.put("/api/bom-components/:id", authenticateToken, async (req, res) => {
           await tx
             .request()
             .input("model", sql.NVarChar, o.model)
-            .input("tech", sql.NVarChar, p.technology).query(`
+            .input("tech", sql.NVarChar, technology).query(`
               IF NOT EXISTS (SELECT 1 FROM dbo.ModelMaster WHERE model=@model)
                 INSERT INTO dbo.ModelMaster(model, technology) VALUES (@model, @tech);
             `);

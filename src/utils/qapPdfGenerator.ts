@@ -1,4 +1,12 @@
 import { QAPFormData } from "@/types/qap";
+import { buildQapTimelineEvents, getQapCommentEvents } from "@/lib/qapAudit";
+
+type PdfMeta = {
+  approvedLevel?: number;
+  approvedBy?: string;
+  approvalNote?: string;
+  approvedAt?: string;
+};
 
 // ----------------------------- Helpers -----------------------------
 
@@ -118,7 +126,7 @@ type ApprovalEntry = {
   role: string;
   by: string;
   at: string;
-  action: "approved" | "rejected";
+  action: string;
   commentCount?: number;
   feedback?: string | null;
 };
@@ -227,8 +235,8 @@ export function buildApprovalsTableRows(qap: any): ApprovalEntry[] {
   const out: ApprovalEntry[] = [];
   const lr = qap?.levelResponses || {};
 
-  // levels 2,3,4
-  [2, 3, 4].forEach((lvl) => {
+  // levels 1,2,3,4
+  [1, 2, 3, 4].forEach((lvl) => {
     const rolesObj = lr?.[lvl] || {};
     for (const role of Object.keys(rolesObj)) {
       const r = rolesObj[role];
@@ -243,7 +251,7 @@ export function buildApprovalsTableRows(qap: any): ApprovalEntry[] {
         role,
         by: username,
         at: respondedAt,
-        action: "approved",
+        action: lvl === 1 ? "reviewed" : "approved",
         commentCount: commentsArr.length,
       });
     }
@@ -679,6 +687,15 @@ const normalizeSpecRow = (row: any) => {
       row.reason ||
       "-",
 
+    level1Note:
+      row.level1Resolution === "matched"
+        ? row.initialCustomerSpecification
+          ? `Level 1 matched requestor spec ${row.initialCustomerSpecification}`
+          : "Level 1 matched this item"
+        : row.level1Resolution === "agreed"
+        ? `Level 1 agreed measure ${row.customerSpecification || row.level1ResolutionText || "-"}`
+        : "",
+
     // Match status
     match: row.match || row.status || row.result || "-",
 
@@ -717,18 +734,23 @@ const renderSpecsTable = (title: string, specs: any[]) => {
       const matchClass =
         matchLower === "yes" || matchLower === "matched" || matchLower === "ok"
           ? "pill pill-green"
+          : matchLower === "agreed"
+          ? "pill pill-amber"
           : matchLower === "no" ||
             matchLower === "unmatched" ||
             matchLower === "ng"
           ? "pill pill-red"
           : "pill pill-gray";
+      const remarks = [r.remarks, (r as any).level1Note]
+        .filter(Boolean)
+        .join(" | ");
 
       return `
         <tr>
           <td>${escapeHtml(r.parameter)}</td>
           <td>${escapeHtml(r.customerSpec)}</td>
           <td>${escapeHtml(r.pelSpec)}</td>
-          <td>${escapeHtml(r.remarks)}</td>
+          <td>${escapeHtml(remarks || "-")}</td>
           <td><span class="${matchClass}">${escapeHtml(
         titleCase(String(r.match || "-"))
       )}</span></td>
@@ -1105,11 +1127,55 @@ const renderEdits = (qap: any) => {
 };
 
 const renderComments = (qap: any) => {
+  const commentEvents = getQapCommentEvents(qap);
+  if (commentEvents.length) {
+    const rows = commentEvents
+      .map((event, idx) => {
+        const context =
+          event.source === "final-comments"
+            ? "Final Comments"
+            : event.source === "approval-feedback"
+            ? "Approval Feedback"
+            : event.stage;
+
+        return `
+          <tr>
+            <td>${idx + 1}</td>
+            <td>${escapeHtml(String(event.actor || "-"))}</td>
+            <td>${escapeHtml(String(context || "-"))}</td>
+            <td>${escapeHtml(formatPremierDateTime(event.timestamp))}</td>
+            <td>${escapeHtml(String(event.comment || "-"))}</td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    return `
+      <div class="section">
+        <div class="section-title">Comments With Timestamp</div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>By</th>
+                <th>Stage</th>
+                <th>Timestamp</th>
+                <th>Comment</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
   const comments = getComments(qap);
   if (!comments.length) {
     return `
       <div class="section">
-        <div class="section-title">Comments</div>
+        <div class="section-title">Comments With Timestamp</div>
         <div class="empty-note">No comments recorded.</div>
       </div>
     `;
@@ -1145,7 +1211,7 @@ const renderComments = (qap: any) => {
 
   return `
     <div class="section">
-      <div class="section-title">Comments</div>
+      <div class="section-title">Comments With Timestamp</div>
       <div class="table-wrap">
         <table class="data-table">
           <thead>
@@ -1163,10 +1229,106 @@ const renderComments = (qap: any) => {
   `;
 };
 
+const renderTimeline = (qap: any) => {
+  const timelineEvents = buildQapTimelineEvents(qap);
+  if (!timelineEvents.length) {
+    return `
+      <div class="section">
+        <div class="section-title">Timeline</div>
+        <div class="empty-note">No timeline events recorded.</div>
+      </div>
+    `;
+  }
+
+  const rows = timelineEvents
+    .map((event, idx) => {
+      const pillClass =
+        event.kind === "approval"
+          ? "pill pill-green"
+          : event.kind === "rejection"
+          ? "pill pill-red"
+          : event.kind === "final-comments"
+          ? "pill pill-amber"
+          : event.kind === "edit"
+          ? "pill pill-amber"
+          : event.kind === "response"
+          ? "pill pill-blue"
+          : "pill pill-gray";
+
+      return `
+        <tr>
+          <td>${idx + 1}</td>
+          <td>${escapeHtml(formatPremierDateTime(event.timestamp))}</td>
+          <td>${escapeHtml(String(event.actor || "-"))}</td>
+          <td>${escapeHtml(String(event.stage || "-"))}</td>
+          <td><span class="${pillClass}">${escapeHtml(
+        titleCase(String(event.kind || "event"))
+      )}</span></td>
+          <td>${escapeHtml(String(event.title || "-"))}</td>
+          <td>${escapeHtml(String(event.detail || "-"))}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  return `
+    <div class="section">
+      <div class="section-title">Timeline</div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Timestamp</th>
+              <th>Actor</th>
+              <th>Stage</th>
+              <th>Type</th>
+              <th>Event</th>
+              <th>Detail</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+};
+
 // ----------------------------- Main Template -----------------------------
 
-export const generateQapApprovalPdfHtml = (qap: QAPFormData): string => {
-  const anyQap = qap as any;
+const mergePdfMetaIntoQap = (qap: any, meta?: PdfMeta) => {
+  if (!meta?.approvedBy) return qap;
+
+  const approvedAt = meta.approvedAt || new Date().toISOString();
+  const approvalsTrail = Array.isArray(qap?.approvalsTrail)
+    ? [
+        ...qap.approvalsTrail,
+        {
+          level: meta.approvedLevel || 5,
+          role: "plant-head",
+          by: meta.approvedBy,
+          at: approvedAt,
+          action: "approved",
+          feedback: meta.approvalNote || null,
+        },
+      ]
+    : qap?.approvalsTrail;
+
+  return {
+    ...qap,
+    status: meta.approvedLevel === 5 ? "approved" : qap?.status,
+    approver: meta.approvedBy,
+    approvedAt,
+    feedback: meta.approvalNote || qap?.feedback,
+    approvalsTrail,
+  };
+};
+
+export const generateQapApprovalPdfHtml = (
+  qap: QAPFormData,
+  meta?: PdfMeta
+): string => {
+  const anyQap = mergePdfMetaIntoQap(qap as any, meta);
 
   const mqp = asArray(
     anyQap?.specs?.mqp ??
@@ -1194,7 +1356,7 @@ export const generateQapApprovalPdfHtml = (qap: QAPFormData): string => {
     anyQap.submittedAt || anyQap.createdAt || anyQap.requestedAt || null;
 
   // ✅ You want "Approved At" to be current system time during PDF generation
-  const approvedAtDisplay = new Date();
+  const approvedAtDisplay = meta?.approvedAt || new Date();
 
   const docRef =
     anyQap.qapRefNumber || anyQap.referenceNumber || `QAP-${Date.now()}`;
@@ -1414,7 +1576,9 @@ export const generateQapApprovalPdfHtml = (qap: QAPFormData): string => {
       text-transform: uppercase;
     }
     .pill-green { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+    .pill-amber { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
     .pill-red   { background: #fee2e2; color: #7f1d1d; border: 1px solid #fecaca; }
+    .pill-blue  { background: #dbeafe; color: #1d4ed8; border: 1px solid #bfdbfe; }
     .pill-gray  { background: #f1f5f9; color: #334155; border: 1px solid #e2e8f0; }
 
     .muted { color: #64748b; font-size: 10px; }
@@ -1675,6 +1839,8 @@ export const generateQapApprovalPdfHtml = (qap: QAPFormData): string => {
     <br/><br/>
     ${renderEdits(anyQap)}
     <br/><br/>
+    ${renderTimeline(anyQap)}
+    <br/><br/>
     ${renderApprovals(anyQap)}
     <br/><br/>
     ${renderComments(anyQap)}
@@ -1721,14 +1887,21 @@ export const downloadQapApprovalPdf = (qap: QAPFormData) => {
 // Backward/Unified name used by Level5ApprovalPage
 export const downloadQapAsPDF = (
   qap: QAPFormData,
-  _meta?: {
-    approvedLevel?: number;
-    approvedBy?: string;
-    approvalNote?: string;
-    approvedAt?: string;
-  }
+  meta?: PdfMeta
 ) => {
-  // Meta currently optional/non-blocking for build safety.
-  // You can embed meta into HTML later if desired.
-  return downloadQapApprovalPdf(qap);
+  const html = generateQapApprovalPdfHtml(qap, meta);
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) return;
+
+  printWindow.document.write(html);
+  printWindow.document.close();
+
+  printWindow.onload = () => {
+    try {
+      printWindow.focus();
+      printWindow.print();
+    } catch (e) {
+      console.error("QAP PDF print failed:", e);
+    }
+  };
 };

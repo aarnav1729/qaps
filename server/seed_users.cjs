@@ -35,8 +35,8 @@ const mssqlConfig = {
 // 2) Hard‑coded users
 // ─────────────────────────────────────────────────────────────────────────────
 const hardcodedUsers = [
-  { username: 'praful',   password: 'praful',   role: 'requestor' },
-  { username: 'yamini',   password: 'yamini',   role: 'requestor' },
+  { username: 'nagadevi', password: 'nagadevi', role: 'requestor' },
+  { username: 'yamini',   password: 'yamini',   role: 'level-1-reviewer' },
   { username: 'manoj',    password: 'manoj',    role: 'production',    plant: 'p2' },
   { username: 'malik',    password: 'malik',    role: 'production',    plant: 'p4' },
   { username: 'siva',     password: 'siva',     role: 'production',    plant: 'p5' },

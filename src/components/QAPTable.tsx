@@ -18,6 +18,8 @@ import {
 import { QAPFormData } from "@/types/qap";
 import { Eye, Edit, Trash2, Share, ArrowRight } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { getLevel1Summary, isAgreed } from "@/lib/qapLevel1";
+import { qapRequiresLevel2Role } from "@/utils/workflowUtils";
 
 const API = window.location.origin;
 
@@ -241,10 +243,30 @@ const QAPTable: React.FC<QAPTableProps> = ({
     const allowedPlant = plantRaw === "" || userPlants.includes(qapPlant);
 
     switch (user?.role) {
+      case "level-1-reviewer":
+        if (qap.currentLevel === 1 && qap.status === "level-1") {
+          return (
+            <Button
+              onClick={() => navigate("/level1-review")}
+              size="sm"
+              className="bg-amber-600 hover:bg-amber-700"
+            >
+              <ArrowRight className="h-4 w-4 mr-1" />
+              Review
+            </Button>
+          );
+        }
+        break;
+
       case "production":
       case "quality":
       case "technical":
-        if (qap.currentLevel === 2 && allowedPlant) {
+        if (
+          qap.currentLevel === 2 &&
+          String(qap.status || "").toLowerCase() === "level-2" &&
+          allowedPlant &&
+          qapRequiresLevel2Role(qap, user?.role)
+        ) {
           return (
             <Button
               onClick={() => navigate("/level2-review")}
@@ -329,6 +351,7 @@ const QAPTable: React.FC<QAPTableProps> = ({
     const colors = {
       draft: "bg-gray-100 text-gray-800",
       submitted: "bg-yellow-100 text-yellow-800",
+      "level-1": "bg-amber-100 text-amber-900",
       "level-2": "bg-orange-100 text-orange-800",
       "level-3": "bg-purple-100 text-purple-800",
       "level-4": "bg-indigo-100 text-indigo-800",
@@ -406,9 +429,15 @@ const QAPTable: React.FC<QAPTableProps> = ({
                 const matchedItems = items.filter(
                   (i: any) => i.match === "yes"
                 ).length;
+                const agreedItems = items.filter((i: any) =>
+                  isAgreed(i.match)
+                ).length;
                 const unmatchedItems = items.filter(
                   (i: any) => i.match === "no"
                 ).length;
+                const level1Summary = getLevel1Summary(
+                  qap as Pick<QAPFormData, "level1Summary" | "specs">
+                );
 
                 const productTypeLabel = resolveProductType(qap);
 
@@ -462,9 +491,20 @@ const QAPTable: React.FC<QAPTableProps> = ({
                         <span className="text-green-600">
                           ✓ {matchedItems} matched
                         </span>
+                        {agreedItems > 0 && (
+                          <span className="text-amber-700">
+                            ≈ {agreedItems} agreed
+                          </span>
+                        )}
                         <span className="text-red-600">
                           ✗ {unmatchedItems} unmatched
                         </span>
+                        {level1Summary.totalReviewed > 0 && (
+                          <span className="text-amber-700">
+                            L1 closed: {level1Summary.closed}/
+                            {level1Summary.totalReviewed}
+                          </span>
+                        )}
                         <span className="text-gray-500">
                           Total: {items.length}
                         </span>

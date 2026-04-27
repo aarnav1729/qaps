@@ -1,6 +1,36 @@
 // src/utils/workflowUtils.ts
 import { QAPFormData, User } from "@/types/qap";
 
+const normalizeReviewBy = (reviewBy?: string | string[]) => {
+  if (Array.isArray(reviewBy)) {
+    return reviewBy
+      .map((role) => String(role || "").trim().toLowerCase())
+      .filter(Boolean);
+  }
+
+  return String(reviewBy || "")
+    .split(",")
+    .map((role) => role.trim().toLowerCase())
+    .filter(Boolean);
+};
+
+export const qapRequiresLevel2Role = (
+  qap: Pick<QAPFormData, "specs">,
+  role?: string | null
+) => {
+  const roleLc = String(role || "")
+    .trim()
+    .toLowerCase();
+
+  if (!["production", "quality", "technical"].includes(roleLc)) {
+    return false;
+  }
+
+  return [...(qap.specs?.mqp || []), ...(qap.specs?.visual || [])].some(
+    (spec) => normalizeReviewBy(spec.reviewBy).includes(roleLc)
+  );
+};
+
 export const getNextLevelUsers = (
   qap: QAPFormData,
   currentLevel: number
@@ -9,6 +39,9 @@ export const getNextLevelUsers = (
   const hasFinal = !!qap.finalCommentsAt;
 
   switch (currentLevel) {
+    case 1:
+      return ["yamini"];
+
     case 2: {
       // L2 behaves the same for both rounds in terms of "who is next":
       // P4/P5 -> Level 3 (Head)
@@ -129,11 +162,18 @@ export const canUserAccessQAP = (user: User, qap: QAPFormData): boolean => {
     case "requestor":
       return qap.submittedBy === user.username;
 
+    case "level-1-reviewer":
+      return qap.currentLevel === 1 && qap.status === "level-1";
+
     case "production":
     case "quality":
     case "technical":
-      // Level 2 reviewers (any plant match)
-      return userPlants.includes(qapPlant) && qap.currentLevel === 2;
+      return (
+        userPlants.includes(qapPlant) &&
+        qap.currentLevel === 2 &&
+        String(qap.status || "").toLowerCase() === "level-2" &&
+        qapRequiresLevel2Role(qap, user.role)
+      );
 
     case "head":
       // Only P4/P5 use Level 3
@@ -171,10 +211,18 @@ export const getUserAccessibleQAPs = (
       case "requestor":
         return qap.submittedBy === user.username;
 
+      case "level-1-reviewer":
+        return qap.currentLevel === 1 && qap.status === "level-1";
+
       case "production":
       case "quality":
       case "technical":
-        return userPlants.includes(qapPlant);
+        return (
+          userPlants.includes(qapPlant) &&
+          qap.currentLevel === 2 &&
+          String(qap.status || "").toLowerCase() === "level-2" &&
+          qapRequiresLevel2Role(qap, user.role)
+        );
 
       case "head":
         // Heads see P4/P5 plants they own

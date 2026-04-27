@@ -9,7 +9,7 @@ export const BOM_COMPONENTS = [
   "Junction Box",
   "MC4 Compatible Connector",
   "Sealant (Adhesives)",
-  "Potting Materials",
+  "Potting Material",
   "EVA (Encapsulation) Front",
   "EVA (Encapsulation) Back",
   "Bypass Diode",

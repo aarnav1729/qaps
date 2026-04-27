@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
+import { formatRoleLabel } from "@/lib/roles";
 
 import { LogIn, Users, Eye, EyeOff } from "lucide-react";
 
@@ -30,10 +31,19 @@ const LoginPage: React.FC = () => {
       users: [{ username: "sales", password: "sales", role: "Sales" }],
     },
     {
-      category: "Level 1 - Requestors",
+      category: "Requestor",
       users: [
-        { username: "praful", password: "praful", role: "Requestor" },
-        { username: "yamini", password: "yamini", role: "Requestor" },
+        { username: "nagadevi", password: "nagadevi", role: "requestor" },
+      ],
+    },
+    {
+      category: "Level 1 - Reviewer",
+      users: [
+        {
+          username: "yamini",
+          password: "yamini",
+          role: "level-1-reviewer",
+        },
       ],
     },
     {
@@ -229,7 +239,7 @@ const LoginPage: React.FC = () => {
                               </div>
                               <div className="flex items-center gap-1 mt-1">
                                 <Badge variant="outline" className="text-xs">
-                                  {user.role}
+                                  {formatRoleLabel(user.role as any)}
                                 </Badge>
                                 {user.plant && (
                                   <Badge

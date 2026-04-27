@@ -27,6 +27,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
+import InteractiveTutorialCard, {
+  tutorialSectionClass,
+} from "@/components/tutorial/InteractiveTutorialCard";
+import { useTutorialMode } from "@/hooks/useTutorialMode";
 import {
   Building2,
   CalendarClock,
@@ -68,6 +72,11 @@ const CustomersPage: React.FC = () => {
   >(null);
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name-asc");
+  const [tutorialMode, setTutorialMode] = useTutorialMode(
+    "customers-tutorial",
+    true
+  );
+  const [tutorialStepId, setTutorialStepId] = useState("overview");
 
   const {
     data: customers = [],
@@ -177,138 +186,166 @@ const CustomersPage: React.FC = () => {
     () => customers.reduce((sum, c) => sum + (c.salesRequestCount ?? 0), 0),
     [customers]
   );
+  const tutorialSteps = [
+    {
+      id: "overview",
+      title: "Read the customer summary",
+      description:
+        "Start with the hero card to understand customer volume, recent activity, and where to create a new record.",
+      complete: customers.length > 0,
+    },
+    {
+      id: "filters",
+      title: "Filter the customer list",
+      description:
+        "Use search and sorting to narrow down the customer you want before opening sales requests.",
+      complete: query.trim().length > 0 || sortKey !== "name-asc",
+    },
+    {
+      id: "customers",
+      title: "Open a customer workspace",
+      description:
+        "Each customer card lets you jump into sales requests or maintain the customer record itself.",
+      complete: sorted.length > 0,
+    },
+  ];
+  const activeTutorialStep = tutorialMode ? tutorialStepId : null;
 
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
-      {/* Page header with gradient and stats */}
-      <div className="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-emerald-600 via-emerald-500 to-teal-500 p-6 sm:p-8 shadow-lg">
-        <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full bg-white/10 blur-3xl" />
-        <div className="absolute -left-24 -bottom-24 h-72 w-72 rounded-full bg-black/10 blur-3xl" />
-        <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-semibold text-white tracking-tight">
-              Customers
-            </h1>
-            <p className="text-emerald-50/90 mt-1">
-              Manage customer records and jump into their Sales Requests.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              onClick={() => setOpenModal({ mode: "create" })}
-              className="bg-white text-emerald-700 hover:bg-emerald-50"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Create New Customer
-            </Button>
-          </div>
-        </div>
-
-        {/* Stats */}
-        <div className="relative z-10 mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Card className="bg-white/10 text-white backdrop-blur-sm border-white/20">
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="rounded-xl bg-white/20 p-2">
-                <Building2 className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="text-sm text-white/80">Total Customers</div>
-                <div className="text-lg font-semibold">{customers.length}</div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="bg-white/10 text-white backdrop-blur-sm border-white/20">
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="rounded-xl bg-white/20 p-2">
-                <FileText className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="text-sm text-white/80">
-                  Total Sales Requests
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-w-0">
+          {/* Page header with gradient and stats */}
+          <div className={tutorialSectionClass(activeTutorialStep === "overview")}>
+            <div className="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-emerald-600 via-emerald-500 to-teal-500 p-6 sm:p-8 shadow-lg">
+              <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full bg-white/10 blur-3xl" />
+              <div className="absolute -left-24 -bottom-24 h-72 w-72 rounded-full bg-black/10 blur-3xl" />
+              <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <h1 className="text-2xl sm:text-3xl font-semibold text-white tracking-tight">
+                    Customers
+                  </h1>
+                  <p className="text-emerald-50/90 mt-1">
+                    Manage customer records and jump into their Sales Requests.
+                  </p>
                 </div>
-                <div className="text-lg font-semibold">{totalRequests}</div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card className="bg-white/10 text-white backdrop-blur-sm border-white/20">
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="rounded-xl bg-white/20 p-2">
-                <CalendarClock className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="text-sm text-white/80">Last Updated</div>
-                <div className="text-lg font-semibold">
-                  {customers.length
-                    ? new Date(
-                        Math.max(
-                          ...customers.map(
-                            (c) => +new Date(c.updatedAt || c.createdAt)
-                          )
-                        )
-                      ).toLocaleString()
-                    : "—"}
+                <div className="flex items-center gap-2">
+                  <Button
+                    onClick={() => setOpenModal({ mode: "create" })}
+                    className="bg-white text-emerald-700 hover:bg-emerald-50"
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    Create New Customer
+                  </Button>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
 
-      {/* Controls */}
-      <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2 w-full sm:w-96">
-          <div className="relative w-full">
-            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search customers..."
-              className="pl-8"
-            />
+              <div className="relative z-10 mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <Card className="bg-white/10 text-white backdrop-blur-sm border-white/20">
+                  <CardContent className="p-4 flex items-center gap-3">
+                    <div className="rounded-xl bg-white/20 p-2">
+                      <Building2 className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="text-sm text-white/80">Total Customers</div>
+                      <div className="text-lg font-semibold">{customers.length}</div>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="bg-white/10 text-white backdrop-blur-sm border-white/20">
+                  <CardContent className="p-4 flex items-center gap-3">
+                    <div className="rounded-xl bg-white/20 p-2">
+                      <FileText className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="text-sm text-white/80">
+                        Total Sales Requests
+                      </div>
+                      <div className="text-lg font-semibold">{totalRequests}</div>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="bg-white/10 text-white backdrop-blur-sm border-white/20">
+                  <CardContent className="p-4 flex items-center gap-3">
+                    <div className="rounded-xl bg-white/20 p-2">
+                      <CalendarClock className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="text-sm text-white/80">Last Updated</div>
+                      <div className="text-lg font-semibold">
+                        {customers.length
+                          ? new Date(
+                              Math.max(
+                                ...customers.map(
+                                  (c) => +new Date(c.updatedAt || c.createdAt)
+                                )
+                              )
+                            ).toLocaleString()
+                          : "—"}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline">
-                <ArrowUpDown className="mr-2 h-4 w-4" />
-                Sort
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem onClick={() => setSortKey("name-asc")}>
-                Name (A → Z)
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSortKey("name-desc")}>
-                Name (Z → A)
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSortKey("newest")}>
-                Newest
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSortKey("oldest")}>
-                Oldest
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSortKey("most-requests")}>
-                Most Requests
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSortKey("least-requests")}>
-                Least Requests
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
 
-      {/* Content */}
-      <Card className="mt-4">
-        <CardHeader className="flex items-center justify-between">
-          <CardTitle className="text-base sm:text-lg">All Customers</CardTitle>
-          <Badge variant="secondary" className="rounded-full">
-            {sorted.length} shown
-          </Badge>
-        </CardHeader>
+          {/* Controls */}
+          <div className={`${tutorialSectionClass(activeTutorialStep === "filters")} mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between`}>
+            <div className="flex items-center gap-2 w-full sm:w-96">
+              <div className="relative w-full">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search customers..."
+                  className="pl-8"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline">
+                    <ArrowUpDown className="mr-2 h-4 w-4" />
+                    Sort
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem onClick={() => setSortKey("name-asc")}>
+                    Name (A → Z)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setSortKey("name-desc")}>
+                    Name (Z → A)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setSortKey("newest")}>
+                    Newest
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setSortKey("oldest")}>
+                    Oldest
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setSortKey("most-requests")}>
+                    Most Requests
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setSortKey("least-requests")}>
+                    Least Requests
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
 
-        <CardContent>
+          {/* Content */}
+          <div className={tutorialSectionClass(activeTutorialStep === "customers")}>
+            <Card className="mt-4">
+              <CardHeader className="flex items-center justify-between">
+                <CardTitle className="text-base sm:text-lg">All Customers</CardTitle>
+                <Badge variant="secondary" className="rounded-full">
+                  {sorted.length} shown
+                </Badge>
+              </CardHeader>
+
+              <CardContent>
           {isLoading ? (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {Array.from({ length: 6 }).map((_, i) => (
@@ -503,8 +540,24 @@ const CustomersPage: React.FC = () => {
               </div>
             </TooltipProvider>
           )}
-        </CardContent>
-      </Card>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        <div className="xl:sticky xl:top-24 xl:self-start">
+          <InteractiveTutorialCard
+            storageKey="customers-tutorial"
+            title="Customers Tutorial"
+            description="The customer page starts with the live list, then helps you narrow down and open the right workspace."
+            steps={tutorialSteps}
+            activeStepId={activeTutorialStep}
+            onSelectStep={setTutorialStepId}
+            enabled={tutorialMode}
+            onEnabledChange={setTutorialMode}
+          />
+        </div>
+      </div>
 
       {openModal && (
         <CustomerModal

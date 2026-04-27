@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Dialog,
   DialogContent,
@@ -26,14 +27,17 @@ import {
 } from "@/data/qapSpecifications";
 import { useAuth } from "@/contexts/AuthContext";
 import { Save, Send, RotateCcw } from "lucide-react";
-
-// ADD: use same BOM option source as SalesRequestPage
 import {
-  BOM_MASTER,
-  getOptionsFor,
-  BomComponentName,
-  BomComponentOption,
-} from "@/data/bomMaster";
+  getBomOptionsFor,
+  type BomMasterComponent,
+  type BomMasterOption,
+} from "@/lib/bomMasterData";
+import {
+  getLevel1OutcomeText,
+  getSpecRowClassName,
+  isUnmatched,
+} from "@/lib/qapLevel1";
+
 import { createPortal } from "react-dom";
 
 const API = window.location.origin;
@@ -230,6 +234,20 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
   allowAssignL2 = true, // allow editing by default
 }) => {
   const { user } = useAuth();
+  const { data: bomMasterComponents = [] } = useQuery<BomMasterComponent[]>({
+    queryKey: ["bom-master-for-qap-modal"],
+    queryFn: async () => {
+      const response = await fetch(`${API}/api/bom-components`, {
+        credentials: "include",
+      });
+      if (!response.ok) return [];
+      return (await response.json()) as BomMasterComponent[];
+    },
+    staleTime: 1000 * 60 * 5,
+  });
+  const bomOptionsFor = (name: string) =>
+    getBomOptionsFor(bomMasterComponents, name);
+
   // NEW: Requestor can always edit, regardless of QAP status
   const hasEditRights = !editingQAP
     ? user?.role === "requestor"
@@ -359,17 +377,13 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
 
   // ⬇️ add after other BOM state
   const [modelDialog, setModelDialog] = useState<
-    { open: false } | { open: true; comp: BomComponentName; idx: number }
+    { open: false } | { open: true; comp: string; idx: number }
   >({ open: false });
 
-  const openModelDialog = (comp: BomComponentName, idx: number) =>
+  const openModelDialog = (comp: string, idx: number) =>
     setModelDialog({ open: true, comp, idx });
 
   const closeModelDialog = () => setModelDialog({ open: false });
-
-  // after the BOM imports
-  const isBomName = (n: string): n is BomComponentName =>
-    Object.prototype.hasOwnProperty.call(BOM_MASTER, n);
 
   // lock unchanged by default in edit mode
   const [lockUnchanged, setLockUnchanged] = useState<boolean>(!!editingQAP);
@@ -834,6 +848,11 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
     terminalStatuses.has(
       String((editingQAP as any)?.status || "").toLowerCase()
     );
+  const resetWorkflowLevel = mustReset
+    ? (editingQAP?.finalCommentsAt ? 1 : 2)
+    : null;
+  const resetWorkflowLabel =
+    resetWorkflowLevel === 1 ? "Level 1" : "Level 2";
 
   // ⬇️ Put near other helpers
   const hasBomChanges = bomDirty;
@@ -852,6 +871,33 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
     if (bAdd + bChg + bRem) parts.push(`BOM:+${bAdd}/Δ${bChg}/−${bRem}`);
     return parts.join(" • ") || "No changes";
   };
+
+  const toApiSpecs = (arr: QAPSpecification[], forLevel1 = false) =>
+    arr.map((row) => {
+      const normalizedMatch = row.match;
+      const needsInitialState =
+        !row.initialMatch && (normalizedMatch === "yes" || normalizedMatch === "no");
+
+      return {
+        ...row,
+        initialMatch: needsInitialState ? normalizedMatch : row.initialMatch,
+        initialCustomerSpecification:
+          row.initialCustomerSpecification ??
+          (normalizedMatch === "no" ? row.customerSpecification || "" : undefined),
+        ...(forLevel1
+          ? {}
+          : {
+              level1Resolution: row.level1Resolution ?? null,
+              level1ResolutionText: row.level1ResolutionText ?? null,
+              level1ResolvedBy: row.level1ResolvedBy ?? null,
+              level1ResolvedAt: row.level1ResolvedAt ?? null,
+              level1Closed: row.level1Closed ?? false,
+            }),
+        reviewBy: Array.isArray(row.reviewBy)
+          ? row.reviewBy.join(",")
+          : row.reviewBy || "",
+      };
+    });
 
   // REPLACE existing handleSave with this
   const handleSave = async () => {
@@ -877,14 +923,6 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
       },
     ];
 
-    const toApiSpecs = (arr: QAPSpecification[]) =>
-      arr.map((r) => ({
-        ...r,
-        reviewBy: Array.isArray(r.reviewBy)
-          ? r.reviewBy.join(",")
-          : r.reviewBy || "",
-      }));
-
     const payload: Partial<QAPFormData> = {
       ...(editingQAP ? { id: editingQAP.id } : {}),
       customerName,
@@ -898,8 +936,14 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
       salesRequestId: linkedSR?.id,
 
       // Keep routing behavior
-      status: mustReset ? "draft" : (editingQAP as any)?.status || "draft",
-      currentLevel: mustReset ? 1 : (editingQAP as any)?.currentLevel || 1,
+      status: mustReset
+        ? resetWorkflowLevel === 1
+          ? "level-1"
+          : "level-2"
+        : (editingQAP as any)?.status || "draft",
+      currentLevel: mustReset
+        ? resetWorkflowLevel || 1
+        : (editingQAP as any)?.currentLevel || 1,
 
       // Persist diffs + human timeline
       editMeta,
@@ -933,19 +977,12 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
     const timeline = [
       ...(editingQAP?.timeline || []),
       {
-        level: 2,
-        action: `Submitted to Level-2 — ${summary}`,
+        level: 1,
+        action: `Submitted to Level-1 Review — ${summary}`,
         user: user?.username || "unknown",
         timestamp: now,
       },
     ];
-    const toApiSpecs = (arr: QAPSpecification[]) =>
-      arr.map((r) => ({
-        ...r,
-        reviewBy: Array.isArray(r.reviewBy)
-          ? r.reviewBy.join(",")
-          : r.reviewBy || "",
-      }));
 
     const payload: Partial<QAPFormData> = {
       ...(editingQAP ? { id: editingQAP.id } : {}),
@@ -955,9 +992,12 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
       orderQuantity,
       productType,
       plant,
-      status: "level-2",
-      currentLevel: 2,
-      specs: { mqp: toApiSpecs(mqpData), visual: toApiSpecs(visualElData) },
+      status: "level-1",
+      currentLevel: 1,
+      specs: {
+        mqp: toApiSpecs(mqpData, true),
+        visual: toApiSpecs(visualElData, true),
+      },
 
       submittedBy: user?.username,
       salesRequestId: linkedSR?.id,
@@ -970,7 +1010,7 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
     (payload as any).bomSnapshot = bomDraft;
     (payload as any).bom = bomDraft; // compat
 
-    onSave(payload as QAPFormData, "level-2");
+    onSave(payload as QAPFormData, "level-1");
     onClose();
     resetForm();
     setShowReviewSelection(false);
@@ -998,7 +1038,9 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
   // customerName is already derived from project code in onPickProjectCode
 
   const getUnmatchedItems = () => {
-    return [...mqpData, ...visualElData].filter((item) => item.match === "no");
+    return [...mqpData, ...visualElData].filter((item) =>
+      isUnmatched(item.match)
+    );
   };
 
   function diffHeaderLocal(before: any, after: any) {
@@ -1277,7 +1319,7 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
             disabled={!canSendNow}
           >
             <Send className="w-4 h-4 mr-2" />
-            Send for Review
+            Send to Level 1 Review
           </Button>
         </div>
       </div>
@@ -1285,8 +1327,8 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
   };
 
   const getRowClassName = (item: QAPSpecification) => {
-    if (item.match === "yes") return "bg-green-50 border-green-200";
-    if (item.match === "no") return "bg-red-50 border-red-200";
+    const rowClass = getSpecRowClassName(item);
+    if (rowClass) return `${rowClass} border-gray-200`;
     return "bg-white border-gray-200";
   };
 
@@ -1407,17 +1449,26 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
                     placeholder={
                       item.match === "no"
                         ? "Enter custom specification..."
+                        : item.match === "agreed"
+                        ? "Agreed measure"
                         : "Auto-filled from Premier Spec"
                     }
                     disabled={item.match === "yes"}
                     className={`text-xs ${
                       item.match === "yes"
                         ? "bg-green-100 text-green-800 border-green-300"
+                        : item.match === "agreed"
+                        ? "bg-amber-50 text-amber-900 border-amber-300"
                         : item.match === "no"
                         ? "bg-red-50 border-red-300"
                         : "bg-white"
                     }`}
                   />
+                  {getLevel1OutcomeText(item) && (
+                    <div className="mt-2 text-[11px] text-amber-800">
+                      {getLevel1OutcomeText(item)}
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}
@@ -1536,17 +1587,26 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
                     placeholder={
                       item.match === "no"
                         ? "Enter custom specification..."
+                        : item.match === "agreed"
+                        ? "Agreed measure"
                         : "Auto-filled from Criteria Limits"
                     }
                     disabled={item.match === "yes"}
                     className={`text-xs ${
                       item.match === "yes"
                         ? "bg-green-100 text-green-800 border-green-300"
+                        : item.match === "agreed"
+                        ? "bg-amber-50 text-amber-900 border-amber-300"
                         : item.match === "no"
                         ? "bg-red-50 border-red-300"
                         : "bg-white"
                     }`}
                   />
+                  {getLevel1OutcomeText(item) && (
+                    <div className="mt-2 text-[11px] text-amber-800">
+                      {getLevel1OutcomeText(item)}
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}
@@ -1720,9 +1780,9 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
                       <tr key={i} className="align-top">
                         <td className="px-3 py-2 min-w-[28rem]">
                           {(() => {
-                            const options = getOptionsFor(
-                              comp.name as BomComponentName
-                            ) as readonly BomComponentOption[];
+                            const options = bomOptionsFor(
+                              comp.name
+                            ) as readonly BomMasterOption[];
                             const model = r.model || "";
                             return (
                               <div className="space-y-2">
@@ -1738,7 +1798,7 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
                                     variant="outline"
                                     onClick={() =>
                                       openModelDialog(
-                                        comp.name as BomComponentName,
+                                        comp.name,
                                         i
                                       )
                                     }
@@ -1877,7 +1937,8 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
                     <div className="text-xs text-red-700 mt-1">
                       Editing an{" "}
                       {String((editingQAP as any).status).toUpperCase()} QAP —
-                      it will <b>reset to Draft (Level 1)</b> on save.
+                      it will <b>reopen {resetWorkflowLabel} for re-review</b>{" "}
+                      on save.
                     </div>
                   )}
                 </div>
@@ -2481,13 +2542,13 @@ const EnhancedQAPModal: React.FC<EnhancedQAPModalProps> = ({
             ? `${modelDialog.comp} – Select model`
             : "Select model"
         }
-        options={modelDialog.open ? getOptionsFor(modelDialog.comp) : []}
+        options={modelDialog.open ? bomOptionsFor(modelDialog.comp) : []}
         onClose={closeModelDialog}
         onPick={(model) => {
           if (modelDialog.open) {
-            const opts = getOptionsFor(
+            const opts = bomOptionsFor(
               modelDialog.comp
-            ) as readonly BomComponentOption[];
+            ) as readonly BomMasterOption[];
             const picked = opts.find((o) => o.model === model);
             setBomCell(modelDialog.comp, modelDialog.idx, {
               model,
@@ -2515,7 +2576,7 @@ export default EnhancedQAPModal;
 const ModelPickerModal: React.FC<{
   open: boolean;
   title?: string;
-  options: readonly BomComponentOption[];
+  options: readonly BomMasterOption[];
   onClose: () => void;
   onPick: (model: string) => void;
 }> = ({ open, title = "Select model", options, onClose, onPick }) => {

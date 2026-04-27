@@ -7,8 +7,12 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import InteractiveTutorialCard, {
+  tutorialSectionClass,
+} from '@/components/tutorial/InteractiveTutorialCard';
 import { QAPFormData, QAPSpecification } from '@/types/qap';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTutorialMode } from '@/hooks/useTutorialMode';
 import { ArrowLeft, Save, Search, Filter, Edit3, Eye } from 'lucide-react';
 
 interface QAPViewEditPageProps {
@@ -27,6 +31,11 @@ const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave }) =>
   const [filterType, setFilterType] = useState('all'); // all, visual, mqp
   const [filterMatch, setFilterMatch] = useState('all'); // all, matched, unmatched
   const [editedQAP, setEditedQAP] = useState<QAPFormData | null>(null);
+  const [tutorialMode, setTutorialMode] = useTutorialMode(
+    'qap-view-edit-tutorial',
+    true
+  );
+  const [tutorialStepId, setTutorialStepId] = useState('overview');
 
   React.useEffect(() => {
     if (qap) {
@@ -127,11 +136,40 @@ const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave }) =>
     if (item.match === 'no') return 'bg-red-50 border-red-200';
     return 'bg-white border-gray-200';
   };
+  const tutorialSteps = [
+    {
+      id: 'overview',
+      title: 'Start with the QAP summary',
+      description:
+        'Begin at the header and QAP details so you know the customer, project, plant, and status before editing.',
+      complete: true,
+    },
+    {
+      id: 'filters',
+      title: 'Filter the specification rows',
+      description:
+        'Use search and the row filters to focus on the exact spec family or mismatch state you want to inspect.',
+      complete:
+        searchTerm.trim().length > 0 ||
+        filterType !== 'all' ||
+        filterMatch !== 'all',
+    },
+    {
+      id: 'table',
+      title: 'Review or edit the rows',
+      description:
+        'Use the QAP specifications table to inspect each row and, when editing is allowed, update the match or customer specification.',
+      complete: filteredItems.length > 0,
+    },
+  ];
+  const activeTutorialStep = tutorialMode ? tutorialStepId : null;
 
   return (
     <div className="container mx-auto px-4 py-6">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-w-0">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className={`${tutorialSectionClass(activeTutorialStep === 'overview')} flex items-center justify-between mb-6`}>
         <div className="flex items-center gap-4">
           <Button variant="ghost" onClick={() => navigate('/')}>
             <ArrowLeft className="mr-2 h-4 w-4" />
@@ -164,7 +202,7 @@ const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave }) =>
       </div>
 
       {/* QAP Information */}
-      <Card className="mb-6">
+      <Card className={`mb-6 ${tutorialSectionClass(activeTutorialStep === 'overview')}`}>
         <CardHeader>
           <CardTitle>QAP Details</CardTitle>
         </CardHeader>
@@ -201,7 +239,7 @@ const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave }) =>
       </Card>
 
       {/* Filters */}
-      <Card className="mb-6">
+      <Card className={`mb-6 ${tutorialSectionClass(activeTutorialStep === 'filters')}`}>
         <CardContent className="p-4">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="relative">
@@ -242,7 +280,7 @@ const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave }) =>
       </Card>
 
       {/* QAP Items Table */}
-      <Card>
+      <Card className={tutorialSectionClass(activeTutorialStep === 'table')}>
         <CardHeader>
           <CardTitle>QAP Specifications</CardTitle>
         </CardHeader>
@@ -333,6 +371,21 @@ const QAPViewEditPage: React.FC<QAPViewEditPageProps> = ({ qapData, onSave }) =>
           </div>
         </CardContent>
       </Card>
+        </div>
+
+        <div className="xl:sticky xl:top-24 xl:self-start">
+          <InteractiveTutorialCard
+            storageKey="qap-view-edit-tutorial"
+            title="QAP View Tutorial"
+            description="Read the summary first, narrow down the rows, and then work inside the specification table."
+            steps={tutorialSteps}
+            activeStepId={activeTutorialStep}
+            onSelectStep={setTutorialStepId}
+            enabled={tutorialMode}
+            onEnabledChange={setTutorialMode}
+          />
+        </div>
+      </div>
     </div>
   );
 };

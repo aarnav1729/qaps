@@ -17,7 +17,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import InteractiveTutorialCard, {
+  tutorialSectionClass,
+} from "@/components/tutorial/InteractiveTutorialCard";
+import { useTutorialMode } from "@/hooks/useTutorialMode";
 import { QAPFormData, User } from "@/types/qap";
+import { ADMIN_ASSIGNABLE_ROLES, formatRoleLabel } from "@/lib/roles";
 import {
   Plus,
   Edit,
@@ -48,9 +53,14 @@ const AdminPage: React.FC<AdminPageProps> = ({
   const [newUser, setNewUser] = useState<Partial<User>>({
     username: "",
     password: "",
-    role: "requestor",
+    role: "level-1-reviewer",
     plant: "",
   });
+  const [tutorialMode, setTutorialMode] = useTutorialMode(
+    "admin-dashboard-tutorial",
+    true
+  );
+  const [tutorialStepId, setTutorialStepId] = useState("overview");
 
   const handleAddUser = () => {
     if (newUser.username && newUser.password && newUser.role) {
@@ -62,7 +72,12 @@ const AdminPage: React.FC<AdminPageProps> = ({
         plant: newUser.plant,
       };
       onAddUser(user);
-      setNewUser({ username: "", password: "", role: "requestor", plant: "" });
+      setNewUser({
+        username: "",
+        password: "",
+        role: "level-1-reviewer",
+        plant: "",
+      });
       setIsUserModalOpen(false);
     }
   };
@@ -84,7 +99,12 @@ const AdminPage: React.FC<AdminPageProps> = ({
       };
       onEditUser(updatedUser);
       setEditingUser(null);
-      setNewUser({ username: "", password: "", role: "requestor", plant: "" });
+      setNewUser({
+        username: "",
+        password: "",
+        role: "level-1-reviewer",
+        plant: "",
+      });
       setIsUserModalOpen(false);
     }
   };
@@ -92,7 +112,12 @@ const AdminPage: React.FC<AdminPageProps> = ({
   const closeModal = () => {
     setIsUserModalOpen(false);
     setEditingUser(null);
-    setNewUser({ username: "", password: "", role: "requestor", plant: "" });
+    setNewUser({
+      username: "",
+      password: "",
+      role: "level-1-reviewer",
+      plant: "",
+    });
   };
 
   const qapStats = {
@@ -109,77 +134,106 @@ const AdminPage: React.FC<AdminPageProps> = ({
     total: users.length,
     requestors: users.filter((u) => u.role === "requestor").length,
     reviewers: users.filter((u) =>
-      ["production", "quality", "technical"].includes(u.role)
+      ["level-1-reviewer", "production", "quality", "technical"].includes(
+        u.role
+      )
     ).length,
     heads: users.filter((u) =>
       ["head", "technical-head", "plant-head"].includes(u.role)
     ).length,
     admins: users.filter((u) => u.role === "admin").length,
   };
+  const tutorialSteps = [
+    {
+      id: "overview",
+      title: "Read the admin summary",
+      description:
+        "The dashboard totals tell you how much workflow and user-management activity is in the system.",
+      complete: qapData.length > 0 || users.length > 0,
+    },
+    {
+      id: "users",
+      title: "Manage users and roles",
+      description:
+        "Use the user management table to add, edit, and retire accounts without leaving the page.",
+      complete: users.length > 0,
+    },
+    {
+      id: "qaps",
+      title: "Monitor recent QAP activity",
+      description:
+        "The recent QAP table gives you a quick operational view before you drill deeper into approvals or analytics.",
+      complete: qapData.length > 0,
+    },
+  ];
+  const activeTutorialStep = tutorialMode ? tutorialStepId : null;
 
   return (
     <div className="container mx-auto px-4 py-6">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">
-          Admin Dashboard
-        </h1>
-        <p className="text-gray-600">Manage users and monitor QAP system</p>
-      </div>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="min-w-0">
+          <div className={`${tutorialSectionClass(activeTutorialStep === "overview")} mb-6`}>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">
+              Admin Dashboard
+            </h1>
+            <p className="text-gray-600">Manage users and monitor QAP system</p>
+          </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center space-x-2">
-              <FileText className="h-5 w-5 text-blue-500" />
-              <div>
-                <p className="text-sm font-medium text-gray-600">Total QAPs</p>
-                <p className="text-2xl font-bold">{qapStats.total}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+          {/* Stats Cards */}
+          <div className={`${tutorialSectionClass(activeTutorialStep === "overview")} grid grid-cols-2 md:grid-cols-4 gap-4 mb-8`}>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center space-x-2">
+                  <FileText className="h-5 w-5 text-blue-500" />
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Total QAPs</p>
+                    <p className="text-2xl font-bold">{qapStats.total}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center space-x-2">
-              <CheckCircle className="h-5 w-5 text-green-500" />
-              <div>
-                <p className="text-sm font-medium text-gray-600">Approved</p>
-                <p className="text-2xl font-bold">{qapStats.approved}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center space-x-2">
+                  <CheckCircle className="h-5 w-5 text-green-500" />
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Approved</p>
+                    <p className="text-2xl font-bold">{qapStats.approved}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center space-x-2">
-              <Clock className="h-5 w-5 text-yellow-500" />
-              <div>
-                <p className="text-sm font-medium text-gray-600">In Review</p>
-                <p className="text-2xl font-bold">{qapStats.submitted}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center space-x-2">
+                  <Clock className="h-5 w-5 text-yellow-500" />
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">In Review</p>
+                    <p className="text-2xl font-bold">{qapStats.submitted}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center space-x-2">
-              <Users className="h-5 w-5 text-purple-500" />
-              <div>
-                <p className="text-sm font-medium text-gray-600">Total Users</p>
-                <p className="text-2xl font-bold">{userStats.total}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center space-x-2">
+                  <Users className="h-5 w-5 text-purple-500" />
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Total Users</p>
+                    <p className="text-2xl font-bold">{userStats.total}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
 
-      {/* User Management */}
-      <Card className="mb-6">
-        <CardHeader>
+          {/* User Management */}
+          <div className={`${tutorialSectionClass(activeTutorialStep === "users")} mb-6`}>
+            <Card>
+              <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle>User Management</CardTitle>
             <Dialog open={isUserModalOpen} onOpenChange={setIsUserModalOpen}>
@@ -232,7 +286,7 @@ const AdminPage: React.FC<AdminPageProps> = ({
                       Role
                     </label>
                     <Select
-                      value={newUser.role || "requestor"}
+                      value={newUser.role || "level-1-reviewer"}
                       onValueChange={(value) =>
                         setNewUser((prev) => ({
                           ...prev,
@@ -244,16 +298,11 @@ const AdminPage: React.FC<AdminPageProps> = ({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="requestor">Requestor</SelectItem>
-                        <SelectItem value="production">Production</SelectItem>
-                        <SelectItem value="quality">Quality</SelectItem>
-                        <SelectItem value="technical">Technical</SelectItem>
-                        <SelectItem value="head">Head</SelectItem>
-                        <SelectItem value="technical-head">
-                          Technical Head
-                        </SelectItem>
-                        <SelectItem value="plant-head">Plant Head</SelectItem>
-                        <SelectItem value="admin">Admin</SelectItem>
+                        {ADMIN_ASSIGNABLE_ROLES.map((role) => (
+                          <SelectItem key={role} value={role}>
+                            {formatRoleLabel(role)}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -287,8 +336,8 @@ const AdminPage: React.FC<AdminPageProps> = ({
               </DialogContent>
             </Dialog>
           </div>
-        </CardHeader>
-        <CardContent>
+              </CardHeader>
+              <CardContent>
           <div className="overflow-x-auto">
             <table className="w-full border-collapse">
               <thead>
@@ -305,7 +354,7 @@ const AdminPage: React.FC<AdminPageProps> = ({
                     <td className="p-3 font-medium">{user.username}</td>
                     <td className="p-3">
                       <Badge variant="outline" className="capitalize">
-                        {user.role.replace("-", " ")}
+                        {formatRoleLabel(user.role)}
                       </Badge>
                     </td>
                     <td className="p-3">{user.plant || "-"}</td>
@@ -334,15 +383,17 @@ const AdminPage: React.FC<AdminPageProps> = ({
               </tbody>
             </table>
           </div>
-        </CardContent>
-      </Card>
+              </CardContent>
+            </Card>
+          </div>
 
-      {/* Recent QAPs */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent QAPs</CardTitle>
-        </CardHeader>
-        <CardContent>
+          {/* Recent QAPs */}
+          <div className={tutorialSectionClass(activeTutorialStep === "qaps")}>
+            <Card>
+              <CardHeader>
+                <CardTitle>Recent QAPs</CardTitle>
+              </CardHeader>
+              <CardContent>
           <div className="overflow-x-auto">
             <table className="w-full border-collapse">
               <thead>
@@ -399,8 +450,24 @@ const AdminPage: React.FC<AdminPageProps> = ({
               </tbody>
             </table>
           </div>
-        </CardContent>
-      </Card>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        <div className="xl:sticky xl:top-24 xl:self-start">
+          <InteractiveTutorialCard
+            storageKey="admin-dashboard-tutorial"
+            title="Admin Tutorial"
+            description="Start from the totals, move into user administration, and finish with recent workflow activity."
+            steps={tutorialSteps}
+            activeStepId={activeTutorialStep}
+            onSelectStep={setTutorialStepId}
+            enabled={tutorialMode}
+            onEnabledChange={setTutorialMode}
+          />
+        </div>
+      </div>
     </div>
   );
 };

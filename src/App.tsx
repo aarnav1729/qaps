@@ -17,6 +17,7 @@ import Navigation from "./components/Navigation";
 import LoginPage from "./components/LoginPage";
 import Index from "./pages/Index";
 import QAPViewEditPage from "./pages/QAPViewEditPage";
+import Level1ReviewPage from "./components/Level1ReviewPage";
 import Level2ReviewPage from "./components/Level2ReviewPage";
 import Level3ReviewPage from "./components/Level3ReviewPage";
 import Level4ReviewPage from "./components/Level4ReviewPage";
@@ -29,16 +30,14 @@ import AdminPage from "./components/AdminPage";
 import AdminAnalytics from "./components/AdminAnalytics";
 import SalesRequestsPage from "./pages/SalesRequestPage";
 import CustomersPage from "./pages/Customers";
-
-
+import BrandedLoadingScreen from "./components/BrandedLoadingScreen";
 import { QAPFormData } from "./types/qap";
-import { processWorkflowTransition } from "./utils/workflowUtils";
 
 const API = window.location.origin;
 const queryClient = new QueryClient();
 
 const AppContent: React.FC = () => {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
 
   // ─── Fetch all QAPs ─────────────────────────────────────────────────────────
   const {
@@ -113,6 +112,29 @@ const AppContent: React.FC = () => {
         body: JSON.stringify({ level: 2, comments }),
       });
       if (!res.ok) throw new Error("Failed to submit level-2 review");
+    },
+    onSuccess: () => {
+      refetchQaps();
+    },
+  });
+
+  const level1Review = useMutation<
+    void,
+    Error,
+    {
+      qapId: string;
+      specs: { mqp: QAPFormData["specs"]["mqp"]; visual: QAPFormData["specs"]["visual"] };
+      comments: Record<number, string>;
+    }
+  >({
+    mutationFn: async ({ qapId, specs, comments }) => {
+      const res = await fetch(`${API}/api/qaps/${qapId}/level-1-review`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ specs, comments }),
+      });
+      if (!res.ok) throw new Error("Failed to submit level-1 review");
     },
     onSuccess: () => {
       refetchQaps();
@@ -241,6 +263,14 @@ const AppContent: React.FC = () => {
     level2Response.mutate({ qapId, comments: responses });
   };
 
+  const handleLevel1Submit = (
+    qapId: string,
+    specs: { mqp: QAPFormData["specs"]["mqp"]; visual: QAPFormData["specs"]["visual"] },
+    comments: { [itemIndex: number]: string }
+  ) => {
+    level1Review.mutate({ qapId, specs, comments });
+  };
+
   const handleLevel3Next = (
     qapId: string,
     responses: { [itemIndex: number]: string }
@@ -300,13 +330,30 @@ const AppContent: React.FC = () => {
     setUsers((prev) => prev.filter((x) => x.id !== id));
 
   // ─── Render ────────────────────────────────────────────────────────────────
+  if (authLoading) {
+    return (
+      <BrandedLoadingScreen
+        fullscreen
+        message="Restoring your workspace"
+        subtitle="Checking your session and preparing the right workflow for your role."
+      />
+    );
+  }
   if (!isAuthenticated) return <LoginPage />;
-  if (qapsLoading) return <div>Loading QAPs…</div>;
+  if (qapsLoading) {
+    return (
+      <BrandedLoadingScreen
+        fullscreen
+        message="Loading QAP workspace"
+        subtitle="Fetching live QAPs, approvals, and workflow data."
+      />
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen overflow-x-hidden bg-gray-50">
       <Navigation />
-      <main className="pt-4">
+      <main className="overflow-x-hidden pt-4">
         <Routes>
           <Route
             path="/"
@@ -353,6 +400,17 @@ const AppContent: React.FC = () => {
               <QAPViewEditPage qapData={qapData} onSave={handleSaveQAP} />
             }
           />
+          {(user?.role === "level-1-reviewer" || user?.role === "admin") && (
+            <Route
+              path="/level1-review"
+              element={
+                <Level1ReviewPage
+                  qapData={qapData}
+                  onSubmit={handleLevel1Submit}
+                />
+              }
+            />
+          )}
           {(user?.role === "production" ||
             user?.role === "quality" ||
             user?.role === "technical" ||
@@ -404,7 +462,28 @@ const AppContent: React.FC = () => {
             />
           )}
           {(user?.role === "requestor" || user?.role === "admin") && (
-            <Route path="/spec-builder" element={<SpecificationBuilder />} />
+            <Route
+              path="/master-data/mqp"
+              element={<SpecificationBuilder mode="mqp" />}
+            />
+          )}
+          {(user?.role === "requestor" || user?.role === "admin") && (
+            <Route
+              path="/master-data/visual-el"
+              element={<SpecificationBuilder mode="visual" />}
+            />
+          )}
+          {(user?.role === "requestor" || user?.role === "admin") && (
+            <Route
+              path="/master-data/bom"
+              element={<SpecificationBuilder mode="bom" />}
+            />
+          )}
+          {(user?.role === "requestor" || user?.role === "admin") && (
+            <Route
+              path="/spec-builder"
+              element={<Navigate to="/master-data/mqp" replace />}
+            />
           )}
           <Route
             path="/analytics"
