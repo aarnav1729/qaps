@@ -32,10 +32,6 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/components/ui/use-toast";
-import InteractiveTutorialCard, {
-  tutorialSectionClass,
-} from "@/components/tutorial/InteractiveTutorialCard";
-import { useTutorialMode } from "@/hooks/useTutorialMode";
 import { BOM_COMPONENTS } from "@/data/components";
 
 type BuilderMode = "all" | "mqp" | "visual" | "bom";
@@ -105,12 +101,6 @@ const SpecificationBuilder: React.FC<{ mode?: BuilderMode }> = ({
     mode === "mqp" ? "MQP" : mode === "visual" ? "Visual" : null;
   const fixedTab = mode === "bom" ? "bom" : "specs";
   const showTabs = mode === "all";
-  const [tutorialMode, setTutorialMode] = useTutorialMode(
-    `spec-builder-tutorial-${mode}`,
-    true
-  );
-  const [tutorialStepId, setTutorialStepId] = useState("overview");
-
   const [activeTab, setActiveTab] = useState<"specs" | "bom">(
     fixedTab as "specs" | "bom"
   );
@@ -493,39 +483,12 @@ const SpecificationBuilder: React.FC<{ mode?: BuilderMode }> = ({
     };
     return [...list].sort(cmp);
   }, [specs, criteriaFilter, specClassFilter, specSearch, specSort]);
-  const tutorialSteps = [
-    {
-      id: "overview",
-      title: "Understand the live master",
-      description:
-        mode === "bom"
-          ? "This page controls the live BOM options used across sales requests and QAP reviews."
-          : "This page controls the live specification masters used throughout the workflow.",
-      complete: specs.length > 0 || bom.length > 0,
-    },
-    {
-      id: "tabs",
-      title: "Choose the master area",
-      description:
-        "Switch between specification and BOM builders when you need to maintain different master datasets.",
-      complete: showTabs ? activeTab !== "specs" : true,
-    },
-    {
-      id: "builder",
-      title: "Edit the live list",
-      description:
-        "Use filters, sorting, and the add/edit controls in the active builder card to maintain the master data safely.",
-      complete:
-        activeTab === "specs" ? filteredSpecs.length > 0 : filteredBom.length > 0,
-    },
-  ];
-  const activeTutorialStep = tutorialMode ? tutorialStepId : null;
   /* ------------------------------ UI ------------------------------ */
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div>
         <div className="min-w-0">
-          <div className={tutorialSectionClass(activeTutorialStep === "overview")}>
+          <div>
             <div className="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-indigo-600 via-violet-500 to-fuchsia-500 p-6 sm:p-8 shadow-lg">
               <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full bg-white/10 blur-3xl" />
               <div className="absolute -left-24 -bottom-24 h-72 w-72 rounded-full bg-black/10 blur-3xl" />
@@ -563,7 +526,7 @@ const SpecificationBuilder: React.FC<{ mode?: BuilderMode }> = ({
             </div>
           </div>
 
-          <div className={tutorialSectionClass(activeTutorialStep === "tabs")}>
+          <div>
             <Tabs
               value={activeTab}
               onValueChange={(v) => showTabs && setActiveTab(v as any)}
@@ -578,7 +541,7 @@ const SpecificationBuilder: React.FC<{ mode?: BuilderMode }> = ({
 
         {/* ================== SPEC BUILDER ================== */}
         <TabsContent value="specs" className="mt-4">
-          <div className={tutorialSectionClass(activeTutorialStep === "builder" && activeTab === "specs")}>
+          <div>
           <Card>
             <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <CardTitle className="text-lg">Specifications</CardTitle>+{" "}
@@ -763,7 +726,7 @@ const SpecificationBuilder: React.FC<{ mode?: BuilderMode }> = ({
 
         {/* ================== BOM BUILDER ================== */}
         <TabsContent value="bom" className="mt-4">
-          <div className={tutorialSectionClass(activeTutorialStep === "builder" && activeTab === "bom")}>
+          <div>
           <Card>
             <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <CardTitle className="text-lg">BOM Components</CardTitle>
@@ -892,18 +855,6 @@ const SpecificationBuilder: React.FC<{ mode?: BuilderMode }> = ({
           </div>
         </div>
 
-        <div className="xl:sticky xl:top-24 xl:self-start">
-          <InteractiveTutorialCard
-            storageKey={`spec-builder-tutorial-${mode}`}
-            title="Master Data Tutorial"
-            description="Start by understanding which live master you are editing, then work inside the active builder card."
-            steps={tutorialSteps}
-            activeStepId={activeTutorialStep}
-            onSelectStep={setTutorialStepId}
-            enabled={tutorialMode}
-            onEnabledChange={setTutorialMode}
-          />
-        </div>
       </div>
 
       {/* --------- Spec Modal --------- */}

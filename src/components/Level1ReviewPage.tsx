@@ -30,10 +30,6 @@ import {
   matchesReviewerMatchFilter,
   ReviewerRowFilter,
 } from "@/lib/qapLevel1";
-import InteractiveTutorialCard, {
-  tutorialSectionClass,
-} from "@/components/tutorial/InteractiveTutorialCard";
-import { useTutorialMode } from "@/hooks/useTutorialMode";
 
 interface Level1ReviewPageProps {
   qapData: QAPFormData[];
@@ -53,11 +49,6 @@ const Level1ReviewPage: React.FC<Level1ReviewPageProps> = ({
 }) => {
   const { user } = useAuth();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [tutorialMode, setTutorialMode] = useTutorialMode(
-    "level-1-review-tutorial",
-    true
-  );
-  const [tutorialStepId, setTutorialStepId] = useState("overview");
   const [rowFilter, setRowFilter] = useState<
     Exclude<ReviewerRowFilter, "edited">
   >("all");
@@ -209,38 +200,6 @@ const Level1ReviewPage: React.FC<Level1ReviewPageProps> = ({
     }
     onSubmit(qap.id, draft, comments[qap.id] || {});
   };
-  const tutorialSteps = [
-    {
-      id: "overview",
-      title: "Check the Level 1 queue",
-      description:
-        "Start here to see how many QAPs have landed with the Level 1 reviewer and whether red points are still open.",
-      complete: reviewable.length > 0,
-    },
-    {
-      id: "filters",
-      title: "Filter the current rows",
-      description:
-        "Use the row filter to focus on all rows, only red mismatches, green matches, or yellow agreed items.",
-      complete: rowFilter !== "all",
-    },
-    {
-      id: "review",
-      title: "Resolve red points",
-      description:
-        "Open a QAP, then turn red mismatches green or yellow and capture comments where needed.",
-      complete: Object.keys(drafts).length > 0,
-    },
-    {
-      id: "submit",
-      title: "Send the QAP forward",
-      description:
-        "Once all yellow rows have an agreed value, send the reviewed QAP to Level 2 from the action button at the bottom.",
-      complete: false,
-    },
-  ];
-  const activeTutorialStep = tutorialMode ? tutorialStepId : null;
-
   const renderSpecsTable = (
     qap: QAPFormData,
     section: "mqp" | "visual",
@@ -376,13 +335,13 @@ const Level1ReviewPage: React.FC<Level1ReviewPageProps> = ({
 
   return (
     <div className="container mx-auto px-4 py-6">
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div>
         <div className="min-w-0">
-          <div className={`${tutorialSectionClass(activeTutorialStep === "overview")} mb-4`}>
+          <div className="mb-4">
             <h1 className="text-3xl font-bold">Level 1 Review</h1>
           </div>
 
-          <div className={`${tutorialSectionClass(activeTutorialStep === "filters")} mb-6 flex items-center gap-2`}>
+          <div className="mb-6 flex items-center gap-2">
             <label htmlFor="level1-row-filter" className="font-medium">
               Show Rows:
             </label>
@@ -404,11 +363,7 @@ const Level1ReviewPage: React.FC<Level1ReviewPageProps> = ({
             </span>
           </div>
 
-          <div
-            className={tutorialSectionClass(
-              activeTutorialStep === "review" || activeTutorialStep === "submit"
-            )}
-          >
+          <div>
             {reviewable.length === 0 ? (
               <div className="text-center text-gray-500 py-20">
                 No QAPs awaiting Level 1 review
@@ -548,18 +503,6 @@ const Level1ReviewPage: React.FC<Level1ReviewPageProps> = ({
           </div>
         </div>
 
-        <div className="xl:sticky xl:top-24 xl:self-start">
-          <InteractiveTutorialCard
-            storageKey="level-1-review-tutorial"
-            title="Level 1 Tutorial"
-            description="Review the queue, resolve mismatches, and then pass the QAP to Level 2."
-            steps={tutorialSteps}
-            activeStepId={activeTutorialStep}
-            onSelectStep={setTutorialStepId}
-            enabled={tutorialMode}
-            onEnabledChange={setTutorialMode}
-          />
-        </div>
       </div>
     </div>
   );

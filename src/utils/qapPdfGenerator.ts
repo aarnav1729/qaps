@@ -1,5 +1,11 @@
 import { QAPFormData } from "@/types/qap";
-import { buildQapTimelineEvents, getQapCommentEvents } from "@/lib/qapAudit";
+import {
+  buildQapTimelineEvents,
+  formatDurationMs,
+  getQapCommentEvents,
+  normalizeCommentThread,
+  responseMapToLines,
+} from "@/lib/qapAudit";
 
 type PdfMeta = {
   approvedLevel?: number;
@@ -57,6 +63,11 @@ const formatPremierDateTime = (d?: string | Date | null) => {
     hour: "2-digit",
     minute: "2-digit",
   });
+};
+
+const formatTatDays = (milliseconds: number) => {
+  if (!milliseconds || milliseconds <= 0) return "0.00 days";
+  return `${(milliseconds / 86400000).toFixed(2)} days (${formatDurationMs(milliseconds)})`;
 };
 
 const titleCase = (s: string) =>
@@ -129,6 +140,7 @@ type ApprovalEntry = {
   action: string;
   commentCount?: number;
   feedback?: string | null;
+  comments?: string[];
 };
 
 // Human-friendly label for the "Event" column in PDF
@@ -245,7 +257,10 @@ export function buildApprovalsTableRows(qap: any): ApprovalEntry[] {
 
       const respondedAt = r?.respondedAt || "";
       const username = r?.username || "unknown";
-      const commentsArr = Array.isArray(r?.comments) ? r.comments : [];
+      const thread = normalizeCommentThread(r?.comments, username, respondedAt);
+      const commentsArr = thread.flatMap((entry) =>
+        responseMapToLines(entry.responses as Record<string, unknown>)
+      );
       out.push({
         level: lvl,
         role,
@@ -253,6 +268,7 @@ export function buildApprovalsTableRows(qap: any): ApprovalEntry[] {
         at: respondedAt,
         action: lvl === 1 ? "reviewed" : "approved",
         commentCount: commentsArr.length,
+        comments: commentsArr,
       });
     }
   });
@@ -901,9 +917,9 @@ const renderApprovals = (qap: any) => {
         const action = a.action || "-";
 
         const comment =
-          a.feedback ??
-          (typeof a.commentCount === "number"
-            ? `${a.commentCount} comment${a.commentCount === 1 ? "" : "s"}`
+          a.feedback ||
+          (a.comments?.length
+            ? a.comments.map((line) => escapeHtml(line)).join("<br/>")
             : "-");
 
         const at = a.at || null;
@@ -923,7 +939,7 @@ const renderApprovals = (qap: any) => {
               <td><span class="${pillClass}">${escapeHtml(
           titleCase(String(action))
         )}</span></td>
-              <td>${escapeHtml(String(comment))}</td>
+              <td>${String(comment).includes("<br/>") ? String(comment) : escapeHtml(String(comment))}</td>
               <td>${escapeHtml(formatPremierDateTime(at))}</td>
             </tr>
           `;
@@ -1129,7 +1145,7 @@ const renderEdits = (qap: any) => {
 const renderComments = (qap: any) => {
   const commentEvents = getQapCommentEvents(qap);
   if (commentEvents.length) {
-    const rows = commentEvents
+  const rows = commentEvents
       .map((event, idx) => {
         const context =
           event.source === "final-comments"
@@ -1144,7 +1160,9 @@ const renderComments = (qap: any) => {
             <td>${escapeHtml(String(event.actor || "-"))}</td>
             <td>${escapeHtml(String(context || "-"))}</td>
             <td>${escapeHtml(formatPremierDateTime(event.timestamp))}</td>
-            <td>${escapeHtml(String(event.comment || "-"))}</td>
+            <td>${(event.commentLines?.length ? event.commentLines : [event.comment || "-"])
+              .map((line) => escapeHtml(String(line || "-")))
+              .join("<br/>")}</td>
           </tr>
         `;
       })
@@ -1242,6 +1260,11 @@ const renderTimeline = (qap: any) => {
 
   const rows = timelineEvents
     .map((event, idx) => {
+      const prev = idx > 0 ? timelineEvents[idx - 1] : null;
+      const tatMs =
+        prev?.timeMs && event.timeMs
+          ? Math.max(0, event.timeMs - prev.timeMs)
+          : 0;
       const pillClass =
         event.kind === "approval"
           ? "pill pill-green"
@@ -1259,6 +1282,7 @@ const renderTimeline = (qap: any) => {
         <tr>
           <td>${idx + 1}</td>
           <td>${escapeHtml(formatPremierDateTime(event.timestamp))}</td>
+          <td>${escapeHtml(formatTatDays(tatMs))}</td>
           <td>${escapeHtml(String(event.actor || "-"))}</td>
           <td>${escapeHtml(String(event.stage || "-"))}</td>
           <td><span class="${pillClass}">${escapeHtml(
@@ -1280,6 +1304,7 @@ const renderTimeline = (qap: any) => {
             <tr>
               <th>#</th>
               <th>Timestamp</th>
+              <th>TAT Since Prior Stage</th>
               <th>Actor</th>
               <th>Stage</th>
               <th>Type</th>
@@ -1367,6 +1392,9 @@ export const generateQapApprovalPdfHtml = (
 <head>
   <meta charset="utf-8" />
   <title>QAP Approval Summary</title>
+  <link rel="icon" type="image/png" href="/l.png" />
+  <link rel="shortcut icon" type="image/png" href="/favicon.ico" />
+  <link rel="apple-touch-icon" href="/l.png" />
   <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     @page { size: A4; margin: 12mm; }

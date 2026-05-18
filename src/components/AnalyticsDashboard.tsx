@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useTutorialMode } from "@/hooks/useTutorialMode";
 import { cn } from "@/lib/utils";
 import {
   buildAnalyticsSnapshot,
@@ -20,7 +19,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -44,11 +42,16 @@ import {
   BarChart3,
   CheckCircle2,
   Clock3,
+  FileText,
   Filter,
   Layers3,
   RefreshCcw,
   Sparkles,
+  TrendingUp,
   Users2,
+  X,
+  AlertTriangle,
+  Eye,
 } from "lucide-react";
 import {
   Area,
@@ -67,9 +70,6 @@ import {
 interface AnalyticsDashboardProps {
   qapData: QAPFormData[];
   forceAdminInsights?: boolean;
-  title?: string;
-  description?: string;
-  defaultTab?: "overview" | "workflow" | "tat" | "dataset";
 }
 
 type Drilldown =
@@ -120,140 +120,51 @@ const formatShortDate = (value: string) =>
     month: "short",
   });
 
-const MetricCard: React.FC<{
-  title: string;
+const StatCard: React.FC<{
+  label: string;
   value: React.ReactNode;
-  subtext: string;
+  sub?: string;
   icon: React.ReactNode;
-  tone?: "teal" | "blue" | "amber" | "violet";
+  color: string;
   onClick?: () => void;
   active?: boolean;
-}> = ({ title, value, subtext, icon, tone = "blue", onClick, active }) => {
-  const tones: Record<string, string> = {
-    teal: "from-teal-600/10 via-teal-500/5 to-white border-teal-200",
-    blue: "from-blue-600/10 via-sky-500/5 to-white border-blue-200",
-    amber: "from-amber-500/12 via-orange-400/5 to-white border-amber-200",
-    violet: "from-violet-600/10 via-fuchsia-500/5 to-white border-violet-200",
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "text-left",
-        onClick ? "cursor-pointer" : "cursor-default",
-        "rounded-2xl"
-      )}
-    >
-      <Card
-        className={cn(
-          "h-full rounded-2xl border bg-gradient-to-br transition-all duration-200",
-          tones[tone],
-          active && "ring-2 ring-offset-2 ring-slate-900/10 shadow-lg"
-        )}
-      >
-        <CardContent className="p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium text-slate-600">{title}</p>
-              <p className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">
-                {value}
-              </p>
-              <p className="mt-2 text-sm text-slate-600">{subtext}</p>
-            </div>
-            <div className="rounded-2xl bg-white/80 p-3 shadow-sm">{icon}</div>
-          </div>
-        </CardContent>
-      </Card>
-    </button>
-  );
-};
-
-const SectionCard: React.FC<{
-  title: string;
-  description?: string;
-  action?: React.ReactNode;
-  children: React.ReactNode;
-}> = ({ title, description, action, children }) => (
-  <Card className="rounded-3xl border-slate-200 shadow-sm">
-    <CardHeader className="flex flex-col gap-3 border-b border-slate-100 pb-4 sm:flex-row sm:items-start sm:justify-between">
-      <div>
-        <CardTitle className="text-lg text-slate-950">{title}</CardTitle>
-        {description ? (
-          <p className="mt-1 text-sm text-slate-600">{description}</p>
-        ) : null}
+}> = ({ label, value, sub, icon, color, onClick, active }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={cn(
+      "text-left w-full rounded-2xl border p-4 transition-all",
+      onClick ? "cursor-pointer hover:shadow-md" : "cursor-default",
+      active
+        ? "ring-2 ring-slate-900 border-slate-900 shadow-md bg-white"
+        : "border-slate-200 bg-white hover:border-slate-300"
+    )}
+  >
+    <div className="flex items-start justify-between">
+      <div className={cn("rounded-xl p-2", color)}>{icon}</div>
+      <div className="text-right">
+        <div className="text-2xl font-bold text-slate-900">{value}</div>
       </div>
-      {action}
-    </CardHeader>
-    <CardContent className="p-4 sm:p-6">{children}</CardContent>
-  </Card>
-);
-
-const TutorialPanel: React.FC<{ adminInsights: boolean }> = ({
-  adminInsights,
-}) => (
-  <div className="rounded-3xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50 p-5">
-    <div className="flex flex-wrap items-center gap-2">
-      <Badge className="bg-amber-900 text-white hover:bg-amber-900">
-        Tutorial Mode
-      </Badge>
-      <span className="text-sm font-medium text-amber-900">
-        Follow the flow to filter, drill into a chart, and inspect the raw dataset.
-      </span>
     </div>
-    <div className="mt-5 grid gap-3 lg:grid-cols-4">
-      {[
-        {
-          title: "1. Set the scope",
-          body: "Start with plant, status, and timeframe. Every chart and table below immediately follows those filters.",
-        },
-        {
-          title: "2. Click a visual",
-          body: "Use any status slice, plant bar, stage bar, or TAT bar as a drill-down entry point.",
-        },
-        {
-          title: "3. Validate the dataset",
-          body: "Open the Dataset tab to see the exact QAP rows, comment history, and workflow samples behind the chart.",
-        },
-        {
-          title: adminInsights ? "4. Review MD TAT" : "4. Review workflow health",
-          body: adminInsights
-            ? "The TAT tab shows average, median, and maximum turnaround for each person in the approval loop."
-            : "The Workflow tab shows stage-wise turnaround and Level 1 closure impact.",
-        },
-      ].map((step) => (
-        <div
-          key={step.title}
-          className="rounded-2xl border border-white/80 bg-white/90 p-4 shadow-sm"
-        >
-          <div className="text-sm font-semibold text-slate-950">{step.title}</div>
-          <p className="mt-2 text-sm leading-6 text-slate-600">{step.body}</p>
-        </div>
-      ))}
+    <div className="mt-3">
+      <div className="text-sm font-medium text-slate-600">{label}</div>
+      {sub && <div className="text-xs text-slate-400 mt-0.5">{sub}</div>}
     </div>
-  </div>
+  </button>
 );
 
 const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
   qapData,
   forceAdminInsights = false,
-  title = "Analytics Dashboard",
-  description = "Workflow visibility, quality health, and decision-ready drill-down analytics.",
-  defaultTab = "overview",
 }) => {
   const { user } = useAuth();
   const adminInsights = forceAdminInsights || user?.role === "admin";
-  const [tutorialMode, setTutorialMode] = useTutorialMode(
-    adminInsights ? "analytics-tutorial-admin" : "analytics-tutorial",
-    true
-  );
   const [filters, setFilters] = useState<AnalyticsFilters>({
     plant: "all",
     status: "all",
     timeframe: "all",
   });
-  const [activeTab, setActiveTab] = useState<string>(defaultTab);
+  const [activeTab, setActiveTab] = useState<string>("overview");
   const [drilldown, setDrilldown] = useState<Drilldown>(null);
 
   const plants = useMemo(() => getVisiblePlants(qapData), [qapData]);
@@ -292,7 +203,7 @@ const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
 
     if (!drilldown) {
       return {
-        label: "Visible dataset",
+        label: "All visible data",
         qapRows: allRows,
         tatRows: allTatRows,
         comments: allComments,
@@ -351,900 +262,981 @@ const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
 
   const slowestPerson = snapshot.tatSummary[0] || null;
 
+  const hasActiveFilters =
+    filters.plant !== "all" ||
+    filters.status !== "all" ||
+    filters.timeframe !== "all";
+
+  const resetAll = () => {
+    setFilters({ plant: "all", timeframe: "all", status: "all" });
+    setDrilldown(null);
+  };
+
   return (
-    <div className="mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
-      <div className="rounded-[32px] border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(37,99,235,0.12),_transparent_32%),linear-gradient(135deg,#f8fafc_0%,#ffffff_55%,#f8fafc_100%)] p-5 shadow-sm sm:p-8">
-        <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
-          <div className="max-w-3xl">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline" className="border-slate-300 bg-white">
-                Live Visibility
+    <div className="container mx-auto px-4 py-6 sm:px-6">
+      {/* Page Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">
+            Analytics
+          </h1>
+          <p className="text-slate-500 mt-1">
+            Workflow visibility, quality health, and drill-down analytics
+            {adminInsights && (
+              <Badge className="ml-2 bg-slate-900 text-white hover:bg-slate-900">
+                MD View
               </Badge>
-              {adminInsights ? (
-                <Badge className="bg-slate-950 text-white hover:bg-slate-950">
-                  Managing Director View
-                </Badge>
-              ) : null}
-            </div>
-            <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
-              {title}
-            </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 sm:text-base">
-              {description}
-            </p>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2 xl:min-w-[360px] xl:max-w-[420px]">
-            <div className="rounded-2xl border border-white/80 bg-white/90 p-4 shadow-sm">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Visible Dataset
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-3">
-                <DatasetPill label="QAPs" value={snapshot.datasetVisibility.qaps} />
-                <DatasetPill label="Specs" value={snapshot.datasetVisibility.specs} />
-                <DatasetPill
-                  label="Comments"
-                  value={snapshot.datasetVisibility.comments}
-                />
-                <DatasetPill
-                  label="TAT Samples"
-                  value={snapshot.datasetVisibility.tatSamples}
-                />
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-white/80 bg-white/90 p-4 shadow-sm">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    Tutorial
-                  </div>
-                  <p className="mt-2 text-sm text-slate-600">
-                    Enable guided instructions and drill-down tips.
-                  </p>
-                </div>
-                <Switch
-                  checked={tutorialMode}
-                  onCheckedChange={setTutorialMode}
-                  aria-label="Toggle analytics tutorial mode"
-                />
-              </div>
-            </div>
-          </div>
+            )}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 text-sm text-slate-500">
+          <Eye className="h-4 w-4" />
+          {snapshot.datasetVisibility.qaps} QAPs &middot;{" "}
+          {snapshot.datasetVisibility.specs} specs &middot;{" "}
+          {snapshot.datasetVisibility.tatSamples} TAT samples
         </div>
       </div>
 
-      <div className="mt-6 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <SectionCard
-          title="Filters"
-          description="Every chart, metric, and table below respects the selected scope."
-          action={
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setFilters({ plant: "all", timeframe: "all", status: "all" });
-                setDrilldown(null);
-              }}
-            >
-              <RefreshCcw className="h-4 w-4" />
-              Reset
-            </Button>
-          }
+      {/* Filters Bar */}
+      <div className="flex flex-wrap items-center gap-3 mb-6 rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <Filter className="h-4 w-4 text-slate-400" />
+
+        {adminInsights && (
+          <Select
+            value={filters.plant}
+            onValueChange={(v) => setFilters((f) => ({ ...f, plant: v }))}
+          >
+            <SelectTrigger className="w-[140px] bg-white">
+              <SelectValue placeholder="All plants" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All plants</SelectItem>
+              {plants.map((p) => (
+                <SelectItem key={p} value={p}>
+                  {p.toUpperCase()}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        <Select
+          value={filters.status}
+          onValueChange={(v) => setFilters((f) => ({ ...f, status: v }))}
         >
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {adminInsights ? (
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700">Plant</label>
-                <Select
-                  value={filters.plant}
-                  onValueChange={(value) =>
-                    setFilters((current) => ({ ...current, plant: value }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="All plants" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All plants</SelectItem>
-                    {plants.map((plant) => (
-                      <SelectItem key={plant} value={plant}>
-                        {plant.toUpperCase()}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            ) : null}
+          <SelectTrigger className="w-[150px] bg-white">
+            <SelectValue placeholder="All statuses" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All statuses</SelectItem>
+            {snapshot.statusData.map((s) => (
+              <SelectItem key={s.key} value={s.key}>
+                {s.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-700">Status</label>
-              <Select
-                value={filters.status}
-                onValueChange={(value) =>
-                  setFilters((current) => ({ ...current, status: value }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="All statuses" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
-                  {snapshot.statusData.map((status) => (
-                    <SelectItem key={status.key} value={status.key}>
-                      {status.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+        <Select
+          value={filters.timeframe}
+          onValueChange={(v) => setFilters((f) => ({ ...f, timeframe: v }))}
+        >
+          <SelectTrigger className="w-[150px] bg-white">
+            <SelectValue placeholder="All time" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All time</SelectItem>
+            <SelectItem value="7d">Last 7 days</SelectItem>
+            <SelectItem value="30d">Last 30 days</SelectItem>
+            <SelectItem value="90d">Last 90 days</SelectItem>
+            <SelectItem value="365d">Last 12 months</SelectItem>
+          </SelectContent>
+        </Select>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-700">
-                Timeframe
-              </label>
-              <Select
-                value={filters.timeframe}
-                onValueChange={(value) =>
-                  setFilters((current) => ({ ...current, timeframe: value }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="All time" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All time</SelectItem>
-                  <SelectItem value="7d">Last 7 days</SelectItem>
-                  <SelectItem value="30d">Last 30 days</SelectItem>
-                  <SelectItem value="90d">Last 90 days</SelectItem>
-                  <SelectItem value="365d">Last 12 months</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+        {drilldown && (
+          <Badge
+            variant="secondary"
+            className="gap-1 cursor-pointer"
+            onClick={() => setDrilldown(null)}
+          >
+            {drilldownState.label}
+            <X className="h-3 w-3" />
+          </Badge>
+        )}
 
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
-              <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                <Filter className="h-4 w-4 text-slate-500" />
-                Current drill-down
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="bg-white">
-                  {drilldownState.label}
-                </Badge>
-                {drilldown ? (
-                  <Button variant="ghost" size="sm" onClick={() => setDrilldown(null)}>
-                    Clear
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </SectionCard>
-
-        {tutorialMode ? <TutorialPanel adminInsights={adminInsights} /> : null}
+        {(hasActiveFilters || drilldown) && (
+          <Button variant="ghost" size="sm" onClick={resetAll} className="ml-auto">
+            <RefreshCcw className="h-3.5 w-3.5 mr-1" />
+            Reset
+          </Button>
+        )}
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard
-          title="Visible QAPs"
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
+        <StatCard
+          label="Total QAPs"
           value={snapshot.totals.qaps}
-          subtext={`${snapshot.totals.open} still in motion`}
-          icon={<Layers3 className="h-5 w-5 text-blue-600" />}
-          tone="blue"
+          sub={`${snapshot.totals.open} in progress`}
+          icon={<Layers3 className="h-4 w-4 text-blue-600" />}
+          color="bg-blue-50"
         />
-        <MetricCard
-          title="Approval Rate"
-          value={`${snapshot.totals.approvalRate}%`}
-          subtext={`${snapshot.totals.approved} approved / ${snapshot.totals.rejected} rejected`}
-          icon={<CheckCircle2 className="h-5 w-5 text-teal-600" />}
-          tone="teal"
-          onClick={() => setDrilldown({ type: "status", value: "Approved" })}
+        <StatCard
+          label="Approved"
+          value={snapshot.totals.approved}
+          sub={`${snapshot.totals.approvalRate}% approval rate`}
+          icon={<CheckCircle2 className="h-4 w-4 text-emerald-600" />}
+          color="bg-emerald-50"
+          onClick={() => {
+            setDrilldown({ type: "status", value: "Approved" });
+            setActiveTab("dataset");
+          }}
           active={drilldown?.type === "status" && drilldown.value === "Approved"}
         />
-        <MetricCard
-          title="Average Cycle Time"
-          value={snapshot.totals.averageCycleTimeLabel}
-          subtext="Submission to latest close/update"
-          icon={<Clock3 className="h-5 w-5 text-violet-600" />}
-          tone="violet"
+        <StatCard
+          label="Rejected"
+          value={snapshot.totals.rejected}
+          sub="sent back for revision"
+          icon={<AlertTriangle className="h-4 w-4 text-red-600" />}
+          color="bg-red-50"
+          onClick={() => {
+            setDrilldown({ type: "status", value: "Rejected" });
+            setActiveTab("dataset");
+          }}
+          active={drilldown?.type === "status" && drilldown.value === "Rejected"}
         />
-        <MetricCard
-          title="Reopened Loops"
+        <StatCard
+          label="Avg Cycle Time"
+          value={snapshot.totals.averageCycleTimeLabel}
+          sub="submission to close"
+          icon={<Clock3 className="h-4 w-4 text-violet-600" />}
+          color="bg-violet-50"
+        />
+        <StatCard
+          label="Reopened"
           value={snapshot.totals.reopenedCount}
-          subtext="Requests routed back for edits or re-review"
-          icon={<Activity className="h-5 w-5 text-amber-600" />}
-          tone="amber"
+          sub="routed back for re-review"
+          icon={<Activity className="h-4 w-4 text-amber-600" />}
+          color="bg-amber-50"
+        />
+        <StatCard
+          label="Spec Health"
+          value={`${snapshot.totals.matchedSpecs}/${snapshot.totals.totalSpecs}`}
+          sub={`${snapshot.totals.mismatchedSpecs} mismatched`}
+          icon={<FileText className="h-4 w-4 text-teal-600" />}
+          color="bg-teal-50"
         />
       </div>
 
-      <Tabs
-        value={activeTab}
-        onValueChange={setActiveTab}
-        className="mt-8 space-y-6"
-      >
-        <TabsList className="h-auto flex-wrap justify-start gap-2 rounded-2xl bg-slate-100 p-2">
-          <TabsTrigger value="overview" className="rounded-xl">
+      {/* Tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="mb-6 h-auto flex-wrap justify-start gap-1 rounded-xl bg-slate-100 p-1.5">
+          <TabsTrigger value="overview" className="rounded-lg text-sm">
             Overview
           </TabsTrigger>
-          <TabsTrigger value="workflow" className="rounded-xl">
+          <TabsTrigger value="workflow" className="rounded-lg text-sm">
             Workflow
           </TabsTrigger>
-          {adminInsights ? (
-            <TabsTrigger value="tat" className="rounded-xl">
+          {adminInsights && (
+            <TabsTrigger value="tat" className="rounded-lg text-sm">
               Individual TAT
             </TabsTrigger>
-          ) : null}
-          <TabsTrigger value="dataset" className="rounded-xl">
+          )}
+          <TabsTrigger value="dataset" className="rounded-lg text-sm">
             Dataset
           </TabsTrigger>
         </TabsList>
 
+        {/* ═══════════════ OVERVIEW TAB ═══════════════ */}
         <TabsContent value="overview" className="space-y-6">
-          <div className="grid gap-6 xl:grid-cols-2">
-            <SectionCard
-              title="Status Distribution"
-              description="Click a slice to focus every downstream table on that status."
-            >
-              <ChartContainer config={chartConfig} className="h-[320px] w-full">
-                <PieChart>
-                  <Pie
-                    data={snapshot.statusData}
-                    dataKey="count"
-                    nameKey="label"
-                    innerRadius={72}
-                    outerRadius={108}
-                    paddingAngle={2}
-                    onClick={(entry: { label?: string }) => {
-                      if (entry?.label) {
-                        setDrilldown({ type: "status", value: entry.label });
-                        setActiveTab("dataset");
-                      }
-                    }}
-                  >
-                    {snapshot.statusData.map((entry, index) => (
-                      <Cell
-                        key={entry.key}
-                        fill={STATUS_COLORS[index % STATUS_COLORS.length]}
-                      />
-                    ))}
-                  </Pie>
-                  <ChartTooltip
-                    content={<ChartTooltipContent hideIndicator />}
-                  />
-                </PieChart>
-              </ChartContainer>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {snapshot.statusData.map((item, index) => (
-                  <button
-                    key={item.key}
-                    type="button"
-                    onClick={() => {
-                      setDrilldown({ type: "status", value: item.label });
-                      setActiveTab("dataset");
-                    }}
-                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-700"
-                  >
-                    <span
-                      className="h-2.5 w-2.5 rounded-full"
-                      style={{ backgroundColor: STATUS_COLORS[index % STATUS_COLORS.length] }}
-                    />
-                    {item.label}
-                    <span className="font-semibold text-slate-950">{item.count}</span>
-                  </button>
-                ))}
-              </div>
-            </SectionCard>
-
-            <SectionCard
-              title="Plant Throughput"
-              description="Stacked view of approved, rejected, and still-open QAPs by plant."
-            >
-              <ChartContainer config={chartConfig} className="h-[320px] w-full">
-                <BarChart data={snapshot.plantData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="plant" />
-                  <YAxis allowDecimals={false} />
-                  <ChartTooltip content={<ChartTooltipContent />} />
-                  <Legend />
-                  <Bar
-                    dataKey="approved"
-                    fill="#0f766e"
-                    radius={[6, 6, 0, 0]}
-                    onClick={(entry: { plant?: string }) => {
-                      if (entry?.plant) {
-                        setDrilldown({ type: "plant", value: entry.plant });
-                        setActiveTab("dataset");
-                      }
-                    }}
-                  />
-                  <Bar dataKey="rejected" fill="#dc2626" />
-                  <Bar dataKey="open" fill="#2563eb" />
-                </BarChart>
-              </ChartContainer>
-            </SectionCard>
-          </div>
-
-          <div className="grid gap-6 xl:grid-cols-2">
-            <SectionCard
-              title="14-Day Movement"
-              description="Submitted, approved, and reopened activity over the last two weeks."
-            >
-              <ChartContainer config={chartConfig} className="h-[320px] w-full">
-                <ComposedChart data={snapshot.trendData}>
-                  <defs>
-                    <linearGradient id="submittedGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#2563eb" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#2563eb" stopOpacity={0.05} />
-                    </linearGradient>
-                    <linearGradient id="approvedGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#0f766e" stopOpacity={0.38} />
-                      <stop offset="95%" stopColor="#0f766e" stopOpacity={0.05} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="date" tickFormatter={formatShortDate} />
-                  <YAxis allowDecimals={false} />
-                  <ChartTooltip
-                    content={
-                      <ChartTooltipContent
-                        labelFormatter={(value) =>
-                          formatDateTime(`${value as string}T00:00:00`)
-                        }
-                      />
-                    }
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="submitted"
-                    stroke="#2563eb"
-                    fill="url(#submittedGradient)"
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="approved"
-                    stroke="#0f766e"
-                    fill="url(#approvedGradient)"
-                  />
-                  <Bar dataKey="reopened" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-                </ComposedChart>
-              </ChartContainer>
-            </SectionCard>
-
-            <SectionCard
-              title="Specification Health"
-              description="Matched, agreed, and mismatched specifications split by MQP and Visual EL."
-            >
-              <ChartContainer config={chartConfig} className="h-[320px] w-full">
-                <BarChart data={snapshot.specHealthData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="family" />
-                  <YAxis allowDecimals={false} />
-                  <ChartTooltip content={<ChartTooltipContent />} />
-                  <Legend />
-                  <Bar dataKey="matched" stackId="spec" fill="#0f766e" />
-                  <Bar dataKey="agreed" stackId="spec" fill="#f59e0b" />
-                  <Bar dataKey="mismatched" stackId="spec" fill="#dc2626" />
-                </BarChart>
-              </ChartContainer>
-            </SectionCard>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="workflow" className="space-y-6">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <MetricCard
-              title="Comment Entries"
-              value={snapshot.datasetVisibility.comments}
-              subtext="Timestamped responses captured across the workflow"
-              icon={<Sparkles className="h-5 w-5 text-amber-600" />}
-              tone="amber"
-              onClick={() => setActiveTab("dataset")}
-            />
-            <MetricCard
-              title="Spec Agreements"
-              value={snapshot.totals.agreedSpecs}
-              subtext={`${snapshot.totals.mismatchedSpecs} still red`}
-              icon={<ArrowRight className="h-5 w-5 text-blue-600" />}
-              tone="blue"
-            />
-            <MetricCard
-              title="Turned Green"
-              value={snapshot.level1ResolutionData[0]?.count || 0}
-              subtext="Level 1 reviewer resolved directly to match"
-              icon={<CheckCircle2 className="h-5 w-5 text-teal-600" />}
-              tone="teal"
-            />
-            <MetricCard
-              title="Turned Yellow"
-              value={snapshot.level1ResolutionData[1]?.count || 0}
-              subtext="Level 1 reviewer converted to agreed measure"
-              icon={<Users2 className="h-5 w-5 text-violet-600" />}
-              tone="violet"
-            />
-          </div>
-
-          <div className="grid gap-6 xl:grid-cols-2">
-            <SectionCard
-              title="Level 1 Closure Impact"
-              description="How many original red points were closed before entering the wider review loop."
-            >
-              <ChartContainer config={chartConfig} className="h-[320px] w-full">
-                <BarChart data={snapshot.level1ResolutionData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="label" />
-                  <YAxis allowDecimals={false} />
-                  <ChartTooltip content={<ChartTooltipContent />} />
-                  <Bar dataKey="count" radius={[10, 10, 0, 0]}>
-                    {snapshot.level1ResolutionData.map((entry) => (
-                      <Cell
-                        key={entry.key}
-                        fill={
-                          entry.key === "matched"
-                            ? "#0f766e"
-                            : entry.key === "agreed"
-                            ? "#f59e0b"
-                            : "#dc2626"
-                        }
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ChartContainer>
-            </SectionCard>
-
-            <SectionCard
-              title="Stage Turnaround"
-              description="Average TAT by workflow stage. Click a bar to inspect the underlying samples."
-            >
-              <ChartContainer config={chartConfig} className="h-[320px] w-full">
-                <BarChart data={snapshot.stageTatData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="stageLabel" interval={0} angle={-20} height={72} />
-                  <YAxis
-                    allowDecimals={false}
-                    tickFormatter={(value) => `${value}h`}
-                  />
-                  <ChartTooltip
-                    content={<ChartTooltipContent nameKey="stageLabel" />}
-                  />
-                  <Bar
-                    dataKey="averageTatHours"
-                    fill="#7c3aed"
-                    radius={[10, 10, 0, 0]}
-                    onClick={(entry: { stageLabel?: string }) => {
-                      if (entry?.stageLabel) {
-                        setDrilldown({ type: "stage", value: entry.stageLabel });
-                        setActiveTab("dataset");
-                      }
-                    }}
-                  />
-                </BarChart>
-              </ChartContainer>
-            </SectionCard>
-          </div>
-
-          <SectionCard
-            title="Reviewer Touchpoints"
-            description="How much of the visible dataset touched each role in the workflow."
-          >
-            <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-              <ChartContainer config={chartConfig} className="h-[280px] w-full">
-                <BarChart data={reviewerRoleData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="role" interval={0} angle={-12} height={64} />
-                  <YAxis allowDecimals={false} />
-                  <ChartTooltip content={<ChartTooltipContent />} />
-                  <Bar dataKey="count" fill="#334155" radius={[8, 8, 0, 0]} />
-                </BarChart>
-              </ChartContainer>
-
-              <div className="grid gap-3">
-                {reviewerRoleData.map((item) => (
-                  <div
-                    key={item.role}
-                    className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-                  >
-                    <div className="text-sm font-medium text-slate-600">{item.role}</div>
-                    <div className="mt-1 text-2xl font-semibold text-slate-950">
-                      {item.count}
-                    </div>
-                    <div className="mt-2 text-sm text-slate-500">
-                      workflow touches in the current visible dataset
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </SectionCard>
-        </TabsContent>
-
-        {adminInsights ? (
-          <TabsContent value="tat" className="space-y-6">
-            <div className="grid gap-4 lg:grid-cols-3">
-              <MetricCard
-                title="Slowest Average"
-                value={slowestPerson?.averageTatLabel || "0m"}
-                subtext={slowestPerson ? `${slowestPerson.person}` : "No data"}
-                icon={<Clock3 className="h-5 w-5 text-amber-600" />}
-                tone="amber"
-                onClick={() =>
-                  slowestPerson
-                    ? setDrilldown({ type: "person", value: slowestPerson.person })
-                    : undefined
-                }
-              />
-              <MetricCard
-                title="Fastest Average"
-                value={fastestPerson?.averageTatLabel || "0m"}
-                subtext={fastestPerson ? `${fastestPerson.person}` : "No data"}
-                icon={<CheckCircle2 className="h-5 w-5 text-teal-600" />}
-                tone="teal"
-                onClick={() =>
-                  fastestPerson
-                    ? setDrilldown({ type: "person", value: fastestPerson.person })
-                    : undefined
-                }
-              />
-              <MetricCard
-                title="People Tracked"
-                value={snapshot.tatSummary.length}
-                subtext={`${snapshot.datasetVisibility.tatSamples} total samples`}
-                icon={<Users2 className="h-5 w-5 text-violet-600" />}
-                tone="violet"
-              />
-            </div>
-
-            <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-              <SectionCard
-                title="Average TAT By Person"
-                description="Click a bar to drill down into the selected person’s exact QAP samples."
-              >
-                <ChartContainer config={chartConfig} className="h-[380px] w-full">
-                  <BarChart data={tatChartData}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="person" interval={0} angle={-16} height={90} />
-                    <YAxis
-                      allowDecimals={false}
-                      tickFormatter={(value) => `${value}h`}
-                    />
-                    <ChartTooltip
-                      content={
-                        <ChartTooltipContent
-                          formatter={(value, name, item, index, payload) => [
-                            `${payload.averageTatLabel} avg`,
-                            payload.person,
-                          ]}
-                        />
-                      }
-                    />
-                    <Bar
-                      dataKey="averageTatHours"
-                      fill="#111827"
-                      radius={[10, 10, 0, 0]}
-                      onClick={(entry: { person?: string }) => {
-                        if (entry?.person) {
-                          setDrilldown({ type: "person", value: entry.person });
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Status Distribution */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Status Distribution</CardTitle>
+                <p className="text-sm text-slate-500">Click a slice to drill down</p>
+              </CardHeader>
+              <CardContent>
+                <ChartContainer config={chartConfig} className="h-[280px] w-full">
+                  <PieChart>
+                    <Pie
+                      data={snapshot.statusData}
+                      dataKey="count"
+                      nameKey="label"
+                      innerRadius={64}
+                      outerRadius={100}
+                      paddingAngle={2}
+                      onClick={(entry: { label?: string }) => {
+                        if (entry?.label) {
+                          setDrilldown({ type: "status", value: entry.label });
                           setActiveTab("dataset");
                         }
                       }}
                     >
-                      {tatChartData.map((item, index) => (
+                      {snapshot.statusData.map((_entry, index) => (
                         <Cell
-                          key={item.person}
+                          key={_entry.key}
                           fill={STATUS_COLORS[index % STATUS_COLORS.length]}
+                        />
+                      ))}
+                    </Pie>
+                    <ChartTooltip content={<ChartTooltipContent hideIndicator />} />
+                  </PieChart>
+                </ChartContainer>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {snapshot.statusData.map((item, index) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => {
+                        setDrilldown({ type: "status", value: item.label });
+                        setActiveTab("dataset");
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50"
+                    >
+                      <span
+                        className="h-2 w-2 rounded-full"
+                        style={{
+                          backgroundColor: STATUS_COLORS[index % STATUS_COLORS.length],
+                        }}
+                      />
+                      {item.label}
+                      <span className="font-semibold">{item.count}</span>
+                    </button>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Plant Throughput */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Plant Throughput</CardTitle>
+                <p className="text-sm text-slate-500">
+                  Approved / rejected / open by plant — click a bar to drill down
+                </p>
+              </CardHeader>
+              <CardContent>
+                <ChartContainer config={chartConfig} className="h-[280px] w-full">
+                  <BarChart data={snapshot.plantData}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="plant" />
+                    <YAxis allowDecimals={false} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Legend />
+                    <Bar
+                      dataKey="approved"
+                      fill="#0f766e"
+                      radius={[4, 4, 0, 0]}
+                      onClick={(entry: { plant?: string }) => {
+                        if (entry?.plant) {
+                          setDrilldown({ type: "plant", value: entry.plant });
+                          setActiveTab("dataset");
+                        }
+                      }}
+                    />
+                    <Bar dataKey="rejected" fill="#dc2626" />
+                    <Bar dataKey="open" fill="#2563eb" />
+                  </BarChart>
+                </ChartContainer>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* 14-Day Movement */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">14-Day Activity</CardTitle>
+                <p className="text-sm text-slate-500">
+                  Submissions, approvals, and reopened QAPs
+                </p>
+              </CardHeader>
+              <CardContent>
+                <ChartContainer config={chartConfig} className="h-[280px] w-full">
+                  <ComposedChart data={snapshot.trendData}>
+                    <defs>
+                      <linearGradient id="sg" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#2563eb" stopOpacity={0.4} />
+                        <stop offset="95%" stopColor="#2563eb" stopOpacity={0.05} />
+                      </linearGradient>
+                      <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#0f766e" stopOpacity={0.38} />
+                        <stop offset="95%" stopColor="#0f766e" stopOpacity={0.05} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="date" tickFormatter={formatShortDate} />
+                    <YAxis allowDecimals={false} />
+                    <ChartTooltip
+                      content={
+                        <ChartTooltipContent
+                          labelFormatter={(v) =>
+                            formatDateTime(`${v as string}T00:00:00`)
+                          }
+                        />
+                      }
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="submitted"
+                      stroke="#2563eb"
+                      fill="url(#sg)"
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="approved"
+                      stroke="#0f766e"
+                      fill="url(#ag)"
+                    />
+                    <Bar dataKey="reopened" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                  </ComposedChart>
+                </ChartContainer>
+              </CardContent>
+            </Card>
+
+            {/* Spec Health */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Specification Health</CardTitle>
+                <p className="text-sm text-slate-500">
+                  MQP vs Visual EL — matched, agreed, mismatched
+                </p>
+              </CardHeader>
+              <CardContent>
+                <ChartContainer config={chartConfig} className="h-[280px] w-full">
+                  <BarChart data={snapshot.specHealthData}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="family" />
+                    <YAxis allowDecimals={false} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Legend />
+                    <Bar dataKey="matched" stackId="spec" fill="#0f766e" />
+                    <Bar dataKey="agreed" stackId="spec" fill="#f59e0b" />
+                    <Bar dataKey="mismatched" stackId="spec" fill="#dc2626" />
+                  </BarChart>
+                </ChartContainer>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* ═══════════════ WORKFLOW TAB ═══════════════ */}
+        <TabsContent value="workflow" className="space-y-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatCard
+              label="Comment Entries"
+              value={snapshot.datasetVisibility.comments}
+              sub="timestamped responses"
+              icon={<Sparkles className="h-4 w-4 text-amber-600" />}
+              color="bg-amber-50"
+              onClick={() => setActiveTab("dataset")}
+            />
+            <StatCard
+              label="Spec Agreements"
+              value={snapshot.totals.agreedSpecs}
+              sub={`${snapshot.totals.mismatchedSpecs} still red`}
+              icon={<ArrowRight className="h-4 w-4 text-blue-600" />}
+              color="bg-blue-50"
+            />
+            <StatCard
+              label="Turned Green (L1)"
+              value={snapshot.level1ResolutionData[0]?.count || 0}
+              sub="resolved to match at Level 1"
+              icon={<CheckCircle2 className="h-4 w-4 text-emerald-600" />}
+              color="bg-emerald-50"
+            />
+            <StatCard
+              label="Turned Yellow (L1)"
+              value={snapshot.level1ResolutionData[1]?.count || 0}
+              sub="converted to agreed"
+              icon={<Users2 className="h-4 w-4 text-violet-600" />}
+              color="bg-violet-50"
+            />
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Level 1 Closure Impact</CardTitle>
+                <p className="text-sm text-slate-500">
+                  Red points closed before wider review loop
+                </p>
+              </CardHeader>
+              <CardContent>
+                <ChartContainer config={chartConfig} className="h-[280px] w-full">
+                  <BarChart data={snapshot.level1ResolutionData}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="label" />
+                    <YAxis allowDecimals={false} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Bar dataKey="count" radius={[8, 8, 0, 0]}>
+                      {snapshot.level1ResolutionData.map((entry) => (
+                        <Cell
+                          key={entry.key}
+                          fill={
+                            entry.key === "matched"
+                              ? "#0f766e"
+                              : entry.key === "agreed"
+                              ? "#f59e0b"
+                              : "#dc2626"
+                          }
                         />
                       ))}
                     </Bar>
                   </BarChart>
                 </ChartContainer>
-              </SectionCard>
+              </CardContent>
+            </Card>
 
-              <SectionCard
-                title="Leadership Snapshot"
-                description="At-a-glance MD summary of who is carrying the longest loop time."
-              >
-                <div className="space-y-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Stage Turnaround</CardTitle>
+                <p className="text-sm text-slate-500">
+                  Avg TAT by workflow stage — click a bar to inspect samples
+                </p>
+              </CardHeader>
+              <CardContent>
+                <ChartContainer config={chartConfig} className="h-[280px] w-full">
+                  <BarChart data={snapshot.stageTatData}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis
+                      dataKey="stageLabel"
+                      interval={0}
+                      angle={-20}
+                      height={72}
+                    />
+                    <YAxis
+                      allowDecimals={false}
+                      tickFormatter={(v) => `${v}h`}
+                    />
+                    <ChartTooltip
+                      content={<ChartTooltipContent nameKey="stageLabel" />}
+                    />
+                    <Bar
+                      dataKey="averageTatHours"
+                      fill="#7c3aed"
+                      radius={[8, 8, 0, 0]}
+                      onClick={(entry: { stageLabel?: string }) => {
+                        if (entry?.stageLabel) {
+                          setDrilldown({
+                            type: "stage",
+                            value: entry.stageLabel,
+                          });
+                          setActiveTab("dataset");
+                        }
+                      }}
+                    />
+                  </BarChart>
+                </ChartContainer>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Reviewer Touchpoints */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Reviewer Touchpoints</CardTitle>
+              <p className="text-sm text-slate-500">
+                How much of the visible dataset touched each role
+              </p>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+                <ChartContainer config={chartConfig} className="h-[260px] w-full">
+                  <BarChart data={reviewerRoleData}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="role" interval={0} angle={-12} height={64} />
+                    <YAxis allowDecimals={false} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Bar dataKey="count" fill="#334155" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ChartContainer>
+                <div className="grid gap-2 content-start">
+                  {reviewerRoleData.map((item) => (
+                    <div
+                      key={item.role}
+                      className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5"
+                    >
+                      <span className="text-sm text-slate-700">{item.role}</span>
+                      <span className="text-lg font-bold text-slate-900">
+                        {item.count}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ═══════════════ INDIVIDUAL TAT TAB ═══════════════ */}
+        {adminInsights && (
+          <TabsContent value="tat" className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <StatCard
+                label="Slowest Average"
+                value={slowestPerson?.averageTatLabel || "—"}
+                sub={slowestPerson?.person || "No data"}
+                icon={<Clock3 className="h-4 w-4 text-amber-600" />}
+                color="bg-amber-50"
+                onClick={() =>
+                  slowestPerson &&
+                  setDrilldown({ type: "person", value: slowestPerson.person })
+                }
+              />
+              <StatCard
+                label="Fastest Average"
+                value={fastestPerson?.averageTatLabel || "—"}
+                sub={fastestPerson?.person || "No data"}
+                icon={<TrendingUp className="h-4 w-4 text-emerald-600" />}
+                color="bg-emerald-50"
+                onClick={() =>
+                  fastestPerson &&
+                  setDrilldown({ type: "person", value: fastestPerson.person })
+                }
+              />
+              <StatCard
+                label="People Tracked"
+                value={snapshot.tatSummary.length}
+                sub={`${snapshot.datasetVisibility.tatSamples} total samples`}
+                icon={<Users2 className="h-4 w-4 text-violet-600" />}
+                color="bg-violet-50"
+              />
+            </div>
+
+            <div className="grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">
+                    Average TAT By Person
+                  </CardTitle>
+                  <p className="text-sm text-slate-500">
+                    Click a bar to drill into their QAP samples
+                  </p>
+                </CardHeader>
+                <CardContent>
+                  <ChartContainer
+                    config={chartConfig}
+                    className="h-[360px] w-full"
+                  >
+                    <BarChart data={tatChartData}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis
+                        dataKey="person"
+                        interval={0}
+                        angle={-16}
+                        height={80}
+                      />
+                      <YAxis
+                        allowDecimals={false}
+                        tickFormatter={(v) => `${v}h`}
+                      />
+                      <ChartTooltip
+                        content={
+                          <ChartTooltipContent
+                            formatter={(value, name, item, index, payload) => [
+                              `${payload.averageTatLabel} avg`,
+                              payload.person,
+                            ]}
+                          />
+                        }
+                      />
+                      <Bar
+                        dataKey="averageTatHours"
+                        fill="#111827"
+                        radius={[8, 8, 0, 0]}
+                        onClick={(entry: { person?: string }) => {
+                          if (entry?.person) {
+                            setDrilldown({
+                              type: "person",
+                              value: entry.person,
+                            });
+                            setActiveTab("dataset");
+                          }
+                        }}
+                      >
+                        {tatChartData.map((item, index) => (
+                          <Cell
+                            key={item.person}
+                            fill={STATUS_COLORS[index % STATUS_COLORS.length]}
+                          />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ChartContainer>
+                </CardContent>
+              </Card>
+
+              {/* Leaderboard */}
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">
+                    Leadership Snapshot
+                  </CardTitle>
+                  <p className="text-sm text-slate-500">
+                    Top 5 by average loop time
+                  </p>
+                </CardHeader>
+                <CardContent className="space-y-2">
                   {snapshot.tatSummary.slice(0, 5).map((item, index) => (
                     <button
                       type="button"
                       key={item.person}
                       onClick={() => {
-                        setDrilldown({ type: "person", value: item.person });
+                        setDrilldown({
+                          type: "person",
+                          value: item.person,
+                        });
                         setActiveTab("dataset");
                       }}
-                      className="flex w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-left"
+                      className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-200 px-4 py-3 text-left hover:bg-slate-50 transition-colors"
                     >
-                      <div>
-                        <div className="text-xs uppercase tracking-[0.16em] text-slate-500">
-                          Rank {index + 1}
+                      <div className="min-w-0">
+                        <div className="text-xs text-slate-400">
+                          #{index + 1}
                         </div>
-                        <div className="mt-1 text-sm font-semibold text-slate-950">
+                        <div className="text-sm font-semibold text-slate-900 truncate">
                           {item.person}
                         </div>
-                        <div className="mt-1 text-sm text-slate-600">
+                        <div className="text-xs text-slate-500">
                           {item.roles.join(", ")}
                         </div>
                       </div>
-                      <div className="text-right">
-                        <div className="text-xl font-semibold text-slate-950">
+                      <div className="text-right shrink-0">
+                        <div className="text-base font-bold text-slate-900">
                           {item.averageTatLabel}
                         </div>
-                        <div className="text-xs text-slate-500">
-                          median {item.medianTatLabel}
+                        <div className="text-xs text-slate-400">
+                          med {item.medianTatLabel}
                         </div>
                       </div>
                     </button>
                   ))}
-                </div>
-              </SectionCard>
+                  {!snapshot.tatSummary.length && (
+                    <p className="py-8 text-center text-sm text-slate-400">
+                      No TAT data for current filters
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
             </div>
 
-            <SectionCard
-              title="Individual TAT Table"
-              description="Average, median, and max turnaround for every visible person in the loop."
-            >
-              <ScrollArea className="h-[420px] rounded-2xl border border-slate-200">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Person</TableHead>
-                      <TableHead>Role(s)</TableHead>
-                      <TableHead>Avg</TableHead>
-                      <TableHead>Median</TableHead>
-                      <TableHead>Max</TableHead>
-                      <TableHead>Samples</TableHead>
-                      <TableHead>QAPs</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {snapshot.tatSummary.length ? (
-                      snapshot.tatSummary.map((row) => (
-                        <TableRow key={row.person}>
-                          <TableCell className="font-medium">{row.person}</TableCell>
-                          <TableCell>{row.roles.join(", ")}</TableCell>
-                          <TableCell>{row.averageTatLabel}</TableCell>
-                          <TableCell>{row.medianTatLabel}</TableCell>
-                          <TableCell>{row.maxTatLabel}</TableCell>
-                          <TableCell>{row.count}</TableCell>
-                          <TableCell>{row.qapCount}</TableCell>
-                        </TableRow>
-                      ))
-                    ) : (
+            {/* Full TAT Table */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">
+                  Individual TAT Table
+                </CardTitle>
+                <p className="text-sm text-slate-500">
+                  Average, median, and max turnaround per person
+                </p>
+              </CardHeader>
+              <CardContent>
+                <ScrollArea className="h-[400px] rounded-lg border">
+                  <Table>
+                    <TableHeader>
                       <TableRow>
-                        <TableCell colSpan={7} className="py-12 text-center text-slate-500">
-                          No turnaround samples are visible for the selected filters.
-                        </TableCell>
+                        <TableHead>Person</TableHead>
+                        <TableHead>Role(s)</TableHead>
+                        <TableHead>Avg</TableHead>
+                        <TableHead>Median</TableHead>
+                        <TableHead>Max</TableHead>
+                        <TableHead>Samples</TableHead>
+                        <TableHead>QAPs</TableHead>
                       </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
-            </SectionCard>
+                    </TableHeader>
+                    <TableBody>
+                      {snapshot.tatSummary.length ? (
+                        snapshot.tatSummary.map((row) => (
+                          <TableRow
+                            key={row.person}
+                            className="cursor-pointer hover:bg-slate-50"
+                            onClick={() => {
+                              setDrilldown({
+                                type: "person",
+                                value: row.person,
+                              });
+                              setActiveTab("dataset");
+                            }}
+                          >
+                            <TableCell className="font-medium">
+                              {row.person}
+                            </TableCell>
+                            <TableCell>{row.roles.join(", ")}</TableCell>
+                            <TableCell>{row.averageTatLabel}</TableCell>
+                            <TableCell>{row.medianTatLabel}</TableCell>
+                            <TableCell>{row.maxTatLabel}</TableCell>
+                            <TableCell>{row.count}</TableCell>
+                            <TableCell>{row.qapCount}</TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell
+                            colSpan={7}
+                            className="py-12 text-center text-slate-400"
+                          >
+                            No turnaround samples for current filters.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+              </CardContent>
+            </Card>
           </TabsContent>
-        ) : null}
+        )}
 
+        {/* ═══════════════ DATASET TAB ═══════════════ */}
         <TabsContent value="dataset" className="space-y-6">
-          <SectionCard
-            title="Dataset Visibility"
-            description="This is the exact subset feeding the current drill-down and all active filters."
-            action={
-              <Badge variant="outline" className="bg-white">
-                {drilldownState.label}
-              </Badge>
-            }
-          >
-            <div className="grid gap-4 md:grid-cols-3">
-              <DatasetSummaryCard
-                title="QAP rows"
-                value={drilldownState.qapRows.length}
-                icon={<Layers3 className="h-5 w-5 text-blue-600" />}
-              />
-              <DatasetSummaryCard
-                title="Comment rows"
-                value={drilldownState.comments.length}
-                icon={<Sparkles className="h-5 w-5 text-amber-600" />}
-              />
-              <DatasetSummaryCard
-                title="TAT rows"
-                value={drilldownState.tatRows.length}
-                icon={<BarChart3 className="h-5 w-5 text-violet-600" />}
-              />
+          {/* Summary strip */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-xl border border-slate-200 bg-white p-4 flex items-center gap-3">
+              <div className="rounded-lg bg-blue-50 p-2">
+                <Layers3 className="h-4 w-4 text-blue-600" />
+              </div>
+              <div>
+                <div className="text-xs text-slate-500">QAP rows</div>
+                <div className="text-xl font-bold text-slate-900">
+                  {drilldownState.qapRows.length}
+                </div>
+              </div>
             </div>
-          </SectionCard>
+            <div className="rounded-xl border border-slate-200 bg-white p-4 flex items-center gap-3">
+              <div className="rounded-lg bg-amber-50 p-2">
+                <Sparkles className="h-4 w-4 text-amber-600" />
+              </div>
+              <div>
+                <div className="text-xs text-slate-500">Comments</div>
+                <div className="text-xl font-bold text-slate-900">
+                  {drilldownState.comments.length}
+                </div>
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-4 flex items-center gap-3">
+              <div className="rounded-lg bg-violet-50 p-2">
+                <BarChart3 className="h-4 w-4 text-violet-600" />
+              </div>
+              <div>
+                <div className="text-xs text-slate-500">TAT samples</div>
+                <div className="text-xl font-bold text-slate-900">
+                  {drilldownState.tatRows.length}
+                </div>
+              </div>
+            </div>
+          </div>
 
-          <SectionCard
-            title="Visible QAP Dataset"
-            description="Raw dataset view for the currently selected scope."
-          >
-            <ScrollArea className="h-[380px] rounded-2xl border border-slate-200">
-              <QapDatasetTable rows={drilldownState.qapRows} />
-            </ScrollArea>
-          </SectionCard>
-
-          <div className="grid gap-6 xl:grid-cols-2">
-            <SectionCard
-              title="Timestamped Comment Feed"
-              description="Every stored review/final/approval comment in the current scope."
-            >
-              <ScrollArea className="h-[340px] rounded-2xl border border-slate-200">
+          {/* QAP Dataset */}
+          <Card>
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base">QAP Dataset</CardTitle>
+                  <p className="text-sm text-slate-500">
+                    Raw rows for current scope
+                  </p>
+                </div>
+                {drilldown && (
+                  <Badge variant="outline">{drilldownState.label}</Badge>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-[380px] rounded-lg border">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Timestamp</TableHead>
-                      <TableHead>Actor</TableHead>
-                      <TableHead>Stage</TableHead>
-                      <TableHead>Comment</TableHead>
+                      <TableHead>Ref</TableHead>
+                      <TableHead>Customer / Project</TableHead>
+                      <TableHead>Plant</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Specs</TableHead>
+                      <TableHead>Comments</TableHead>
+                      <TableHead>Cycle Time</TableHead>
+                      <TableHead>Reopened</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {drilldownState.comments.length ? (
-                      drilldownState.comments
-                        .sort((a, b) => b.timeMs - a.timeMs)
+                    {drilldownState.qapRows.length ? (
+                      drilldownState.qapRows
+                        .sort(
+                          (a, b) =>
+                            getTimestampMs(b.submittedAt || null) -
+                            getTimestampMs(a.submittedAt || null)
+                        )
                         .map((row) => (
                           <TableRow key={row.id}>
-                            <TableCell>{formatDateTime(row.timestamp)}</TableCell>
-                            <TableCell className="font-medium">{row.actor}</TableCell>
-                            <TableCell>{row.stage}</TableCell>
-                            <TableCell className="max-w-[420px] whitespace-pre-wrap break-words">
-                              {row.comment}
+                            <TableCell className="font-medium">
+                              {row.ref}
                             </TableCell>
+                            <TableCell>
+                              <div className="font-medium text-slate-900">
+                                {row.customerName}
+                              </div>
+                              <div className="text-xs text-slate-500">
+                                {row.projectName}
+                              </div>
+                            </TableCell>
+                            <TableCell>{row.plant}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline">{row.status}</Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="text-sm">{row.totalSpecs} total</div>
+                              <div className="text-xs text-slate-500">
+                                {row.matchedSpecs}G / {row.agreedSpecs}Y /{" "}
+                                {row.mismatchedSpecs}R
+                              </div>
+                            </TableCell>
+                            <TableCell>{row.commentCount}</TableCell>
+                            <TableCell>{row.cycleTimeLabel}</TableCell>
+                            <TableCell>{row.reopenedCount}</TableCell>
                           </TableRow>
                         ))
                     ) : (
                       <TableRow>
-                        <TableCell colSpan={4} className="py-10 text-center text-slate-500">
-                          No comments fall under the current drill-down.
+                        <TableCell
+                          colSpan={8}
+                          className="py-12 text-center text-slate-400"
+                        >
+                          No QAPs match current selection.
                         </TableCell>
                       </TableRow>
                     )}
                   </TableBody>
                 </Table>
               </ScrollArea>
-            </SectionCard>
+            </CardContent>
+          </Card>
 
-            <SectionCard
-              title={adminInsights ? "TAT Sample Dataset" : "Workflow Samples"}
-              description="Each row is one recorded response/approval sample used in turnaround calculations."
-            >
-              <ScrollArea className="h-[340px] rounded-2xl border border-slate-200">
-                <TatDatasetTable rows={drilldownState.tatRows} />
-              </ScrollArea>
-            </SectionCard>
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Comment Feed */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Comment Feed</CardTitle>
+                <p className="text-sm text-slate-500">
+                  Timestamped review/approval comments
+                </p>
+              </CardHeader>
+              <CardContent>
+                <ScrollArea className="h-[340px] rounded-lg border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Timestamp</TableHead>
+                        <TableHead>Actor</TableHead>
+                        <TableHead>Stage</TableHead>
+                        <TableHead>Comment</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {drilldownState.comments.length ? (
+                        drilldownState.comments
+                          .sort((a, b) => b.timeMs - a.timeMs)
+                          .map((row) => (
+                            <TableRow key={row.id}>
+                              <TableCell className="whitespace-nowrap">
+                                {formatDateTime(row.timestamp)}
+                              </TableCell>
+                              <TableCell className="font-medium">
+                                {row.actor}
+                              </TableCell>
+                              <TableCell>{row.stage}</TableCell>
+                              <TableCell className="max-w-[400px] whitespace-pre-wrap break-words">
+                                {row.comment}
+                              </TableCell>
+                            </TableRow>
+                          ))
+                      ) : (
+                        <TableRow>
+                          <TableCell
+                            colSpan={4}
+                            className="py-10 text-center text-slate-400"
+                          >
+                            No comments in current scope.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+              </CardContent>
+            </Card>
+
+            {/* TAT Samples */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">
+                  {adminInsights ? "TAT Sample Dataset" : "Workflow Samples"}
+                </CardTitle>
+                <p className="text-sm text-slate-500">
+                  Individual response/approval samples
+                </p>
+              </CardHeader>
+              <CardContent>
+                <ScrollArea className="h-[340px] rounded-lg border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Person</TableHead>
+                        <TableHead>Role</TableHead>
+                        <TableHead>Stage</TableHead>
+                        <TableHead>TAT</TableHead>
+                        <TableHead>Responded</TableHead>
+                        <TableHead>QAP</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {drilldownState.tatRows.length ? (
+                        drilldownState.tatRows
+                          .sort(
+                            (a, b) =>
+                              getTimestampMs(b.respondedAt || null) -
+                              getTimestampMs(a.respondedAt || null)
+                          )
+                          .map((row) => (
+                            <TableRow key={row.id}>
+                              <TableCell className="font-medium">
+                                {row.person}
+                              </TableCell>
+                              <TableCell>{row.role}</TableCell>
+                              <TableCell>{row.stageLabel}</TableCell>
+                              <TableCell>
+                                {row.tatLabel || formatDurationMs(row.tatMs)}
+                              </TableCell>
+                              <TableCell className="whitespace-nowrap">
+                                {formatDateTime(row.respondedAt)}
+                              </TableCell>
+                              <TableCell>
+                                <div className="font-medium">{row.ref}</div>
+                                <div className="text-xs text-slate-500">
+                                  {row.customerName}
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))
+                      ) : (
+                        <TableRow>
+                          <TableCell
+                            colSpan={6}
+                            className="py-10 text-center text-slate-400"
+                          >
+                            No workflow samples in current scope.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+              </CardContent>
+            </Card>
           </div>
         </TabsContent>
       </Tabs>
     </div>
   );
 };
-
-const DatasetPill: React.FC<{ label: string; value: React.ReactNode }> = ({
-  label,
-  value,
-}) => (
-  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-    <div className="text-xs uppercase tracking-[0.16em] text-slate-500">{label}</div>
-    <div className="mt-1 text-xl font-semibold text-slate-950">{value}</div>
-  </div>
-);
-
-const DatasetSummaryCard: React.FC<{
-  title: string;
-  value: React.ReactNode;
-  icon: React.ReactNode;
-}> = ({ title, value, icon }) => (
-  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-    <div className="flex items-center gap-3">
-      <div className="rounded-2xl bg-white p-3 shadow-sm">{icon}</div>
-      <div>
-        <div className="text-sm text-slate-600">{title}</div>
-        <div className="text-2xl font-semibold text-slate-950">{value}</div>
-      </div>
-    </div>
-  </div>
-);
-
-const QapDatasetTable: React.FC<{ rows: AnalyticsDatasetRow[] }> = ({ rows }) => (
-  <Table>
-    <TableHeader>
-      <TableRow>
-        <TableHead>Ref</TableHead>
-        <TableHead>Customer / Project</TableHead>
-        <TableHead>Plant</TableHead>
-        <TableHead>Status</TableHead>
-        <TableHead>Specs</TableHead>
-        <TableHead>Comments</TableHead>
-        <TableHead>Cycle Time</TableHead>
-        <TableHead>Reopened</TableHead>
-      </TableRow>
-    </TableHeader>
-    <TableBody>
-      {rows.length ? (
-        rows
-          .sort(
-            (a, b) =>
-              getTimestampMs(b.submittedAt || null) - getTimestampMs(a.submittedAt || null)
-          )
-          .map((row) => (
-            <TableRow key={row.id}>
-              <TableCell className="font-medium">{row.ref}</TableCell>
-              <TableCell>
-                <div className="font-medium text-slate-950">{row.customerName}</div>
-                <div className="text-sm text-slate-500">{row.projectName}</div>
-              </TableCell>
-              <TableCell>{row.plant}</TableCell>
-              <TableCell>
-                <Badge variant="outline" className="bg-white">
-                  {row.status}
-                </Badge>
-              </TableCell>
-              <TableCell>
-                <div className="text-sm text-slate-700">
-                  {row.totalSpecs} total
-                </div>
-                <div className="text-xs text-slate-500">
-                  {row.matchedSpecs} green / {row.agreedSpecs} yellow /{" "}
-                  {row.mismatchedSpecs} red
-                </div>
-              </TableCell>
-              <TableCell>{row.commentCount}</TableCell>
-              <TableCell>{row.cycleTimeLabel}</TableCell>
-              <TableCell>{row.reopenedCount}</TableCell>
-            </TableRow>
-          ))
-      ) : (
-        <TableRow>
-          <TableCell colSpan={8} className="py-12 text-center text-slate-500">
-            No QAPs are visible for the current selection.
-          </TableCell>
-        </TableRow>
-      )}
-    </TableBody>
-  </Table>
-);
-
-const TatDatasetTable: React.FC<{ rows: PersonTatRecord[] }> = ({ rows }) => (
-  <Table>
-    <TableHeader>
-      <TableRow>
-        <TableHead>Person</TableHead>
-        <TableHead>Role</TableHead>
-        <TableHead>Stage</TableHead>
-        <TableHead>Round</TableHead>
-        <TableHead>TAT</TableHead>
-        <TableHead>Responded At</TableHead>
-        <TableHead>QAP</TableHead>
-      </TableRow>
-    </TableHeader>
-    <TableBody>
-      {rows.length ? (
-        rows
-          .sort(
-            (a, b) =>
-              getTimestampMs(b.respondedAt || null) - getTimestampMs(a.respondedAt || null)
-          )
-          .map((row) => (
-            <TableRow key={row.id}>
-              <TableCell className="font-medium">{row.person}</TableCell>
-              <TableCell>{row.role}</TableCell>
-              <TableCell>{row.stageLabel}</TableCell>
-              <TableCell>{row.round}</TableCell>
-              <TableCell>{row.tatLabel || formatDurationMs(row.tatMs)}</TableCell>
-              <TableCell>{formatDateTime(row.respondedAt)}</TableCell>
-              <TableCell>
-                <div className="font-medium text-slate-950">{row.ref}</div>
-                <div className="text-xs text-slate-500">{row.customerName}</div>
-              </TableCell>
-            </TableRow>
-          ))
-      ) : (
-        <TableRow>
-          <TableCell colSpan={7} className="py-12 text-center text-slate-500">
-            No workflow samples match the current drill-down.
-          </TableCell>
-        </TableRow>
-      )}
-    </TableBody>
-  </Table>
-);
 
 export default AnalyticsDashboard;

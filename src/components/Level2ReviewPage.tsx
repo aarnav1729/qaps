@@ -28,10 +28,6 @@ import {
   matchesReviewerMatchFilter,
   ReviewerRowFilter,
 } from "@/lib/qapLevel1";
-import InteractiveTutorialCard, {
-  tutorialSectionClass,
-} from "@/components/tutorial/InteractiveTutorialCard";
-import { useTutorialMode } from "@/hooks/useTutorialMode";
 import { qapRequiresLevel2Role } from "@/utils/workflowUtils";
 
 interface Level2ReviewPageProps {
@@ -143,12 +139,6 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
     Record<string, Record<number, string>>
   >({});
   const [rowFilter, setRowFilter] = useState<ReviewerRowFilter>("all");
-  const [tutorialMode, setTutorialMode] = useTutorialMode(
-    "level-2-review-tutorial",
-    true
-  );
-  const [tutorialStepId, setTutorialStepId] = useState("overview");
-
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   /* ───────────────────── derive reviewable ───────────────────── */
@@ -732,46 +722,14 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
 
   const HL_BOM_ROW =
     "bg-amber-50 ring-1 ring-amber-300 shadow-sm transition-colors";
-  const tutorialSteps = [
-    {
-      id: "overview",
-      title: "Check the Level 2 queue",
-      description:
-        "Start with the queue count and see how many QAPs are waiting for your plant and role.",
-      complete: reviewable.length > 0,
-    },
-    {
-      id: "filters",
-      title: "Filter the rows you need",
-      description:
-        "Use the row filter to focus on all rows, only reds, agreed yellows, or edited points since the last submission.",
-      complete: rowFilter !== "all",
-    },
-    {
-      id: "worklist",
-      title: "Review the expanded QAP",
-      description:
-        "Open a QAP to inspect MQP, Visual EL, BOM, and any edit highlights before writing your response.",
-      complete: Object.keys(expanded).some((key) => expanded[key]),
-    },
-    {
-      id: "submit",
-      title: "Submit your review",
-      description:
-        "Add comments where needed and use the action button at the bottom of the expanded QAP to move the workflow forward.",
-      complete: Object.keys(responses).length > 0,
-    },
-  ];
-  const activeTutorialStep = tutorialMode ? tutorialStepId : null;
-
   // <<< L2_BOM_EDIT_HL_HELPERS
 
   /* ───────────────────────── render ───────────────────────── */
   return (
     <div className="container mx-auto px-4 py-6">
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div>
         <div className="min-w-0">
-          <div className={`${tutorialSectionClass(activeTutorialStep === "overview")} mb-4`}>
+          <div className="mb-4">
             <h1 className="text-3xl font-bold">
               Level 2 Review –{" "}
               {user?.role
@@ -781,7 +739,7 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
           </div>
 
           {/* row filter */}
-          <div className={`${tutorialSectionClass(activeTutorialStep === "filters")} flex items-center gap-2 mb-6`}>
+          <div className="flex items-center gap-2 mb-6">
             <label htmlFor="rowFilter" className="font-medium">
               Show Rows:
             </label>
@@ -802,11 +760,7 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
             </span>
           </div>
 
-          <div
-            className={tutorialSectionClass(
-              activeTutorialStep === "worklist" || activeTutorialStep === "submit"
-            )}
-          >
+          <div>
             {reviewable.length === 0 ? (
               <div className="text-center text-gray-500 py-20">No QAPs to review</div>
             ) : (
@@ -1529,18 +1483,6 @@ const Level2ReviewPage: React.FC<Level2ReviewPageProps> = ({
           </div>
         </div>
 
-        <div className="xl:sticky xl:top-24 xl:self-start">
-          <InteractiveTutorialCard
-            storageKey="level-2-review-tutorial"
-            title="Level 2 Tutorial"
-            description="Filter your queue, open the QAP, review the evidence, and then submit your response."
-            steps={tutorialSteps}
-            activeStepId={activeTutorialStep}
-            onSelectStep={setTutorialStepId}
-            enabled={tutorialMode}
-            onEnabledChange={setTutorialMode}
-          />
-        </div>
       </div>
     </div>
   );

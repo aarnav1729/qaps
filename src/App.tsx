@@ -30,6 +30,8 @@ import AdminPage from "./components/AdminPage";
 import AdminAnalytics from "./components/AdminAnalytics";
 import SalesRequestsPage from "./pages/SalesRequestPage";
 import CustomersPage from "./pages/Customers";
+import SalesAnalyticsPage from "./pages/SalesAnalyticsPage";
+import NotificationsPage from "./pages/NotificationsPage";
 import BrandedLoadingScreen from "./components/BrandedLoadingScreen";
 import { QAPFormData } from "./types/qap";
 
@@ -487,14 +489,27 @@ const AppContent: React.FC = () => {
           )}
           <Route
             path="/analytics"
-            element={<AnalyticsPage qapData={qapData} />}
+            element={
+              user?.role === "sales" ? (
+                <Navigate to="/sales-analytics" replace />
+              ) : (
+                <AnalyticsPage qapData={qapData} />
+              )
+            }
           />
+          {(user?.role === "sales" || user?.role === "admin") && (
+            <Route path="/sales-analytics" element={<SalesAnalyticsPage />} />
+          )}
           {user?.role === "admin" && (
             <Route
               path="/admin-analytics"
               element={<AdminAnalytics qapData={qapData} />}
             />
           )}
+          <Route
+            path="/notifications"
+            element={<NotificationsPage qapData={qapData} />}
+          />
           {(user?.role === "plant-head" || user?.role === "admin") && (
             <Route
               path="/approvals"

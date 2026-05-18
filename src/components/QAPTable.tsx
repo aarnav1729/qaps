@@ -16,10 +16,11 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { QAPFormData } from "@/types/qap";
-import { Eye, Edit, Trash2, Share, ArrowRight } from "lucide-react";
+import { Eye, Edit, Trash2, Share, ArrowRight, Download } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { getLevel1Summary, isAgreed } from "@/lib/qapLevel1";
 import { qapRequiresLevel2Role } from "@/utils/workflowUtils";
+import { downloadQapAsPDF } from "@/utils/qapPdfGenerator";
 
 const API = window.location.origin;
 
@@ -440,11 +441,16 @@ const QAPTable: React.FC<QAPTableProps> = ({
                 );
 
                 const productTypeLabel = resolveProductType(qap);
+                const isApproved = String(qap.status || "").toLowerCase() === "approved";
 
                 return (
                   <tr
                     key={qap.id}
-                    className="border-b hover:bg-gray-50 transition-colors duration-200"
+                    className={`border-b transition-colors duration-200 ${
+                      isApproved
+                        ? "bg-green-50 hover:bg-green-100"
+                        : "hover:bg-gray-50"
+                    }`}
                   >
                     <td className="p-3 text-sm border-r border-gray-200 font-medium">
                       <div className="flex items-center gap-2">
@@ -523,7 +529,7 @@ const QAPTable: React.FC<QAPTableProps> = ({
 
                     <td className="p-3 text-center">
                       <div className="flex items-center justify-center gap-1">
-                        {getActionButton(qap)}
+                        {!isApproved && getActionButton(qap)}
 
                         <Button
                           variant="ghost"
@@ -535,7 +541,19 @@ const QAPTable: React.FC<QAPTableProps> = ({
                           <Eye className="h-4 w-4" />
                         </Button>
 
-                        {canEdit(qap) && (
+                        {isApproved && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => downloadQapAsPDF(qap)}
+                            className="h-8 w-8 p-0 hover:bg-green-200 hover:text-green-700"
+                            title="Download Final QAP Report"
+                          >
+                            <Download className="h-4 w-4" />
+                          </Button>
+                        )}
+
+                        {!isApproved && canEdit(qap) && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -547,7 +565,7 @@ const QAPTable: React.FC<QAPTableProps> = ({
                           </Button>
                         )}
 
-                        {showActions && canDelete(qap) && (
+                        {!isApproved && showActions && canDelete(qap) && (
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
                               <Button
@@ -581,7 +599,8 @@ const QAPTable: React.FC<QAPTableProps> = ({
                           </AlertDialog>
                         )}
 
-                        {showActions &&
+                        {!isApproved &&
+                          showActions &&
                           qap.status !== "draft" &&
                           qap.submittedBy === user?.username && (
                             <Button

@@ -25,10 +25,6 @@ import {
   matchesReviewerMatchFilter,
   ReviewerRowFilter,
 } from "@/lib/qapLevel1";
-import InteractiveTutorialCard, {
-  tutorialSectionClass,
-} from "@/components/tutorial/InteractiveTutorialCard";
-import { useTutorialMode } from "@/hooks/useTutorialMode";
 
 /* ───────────────────────────────────────────────────────────── */
 /* Local lightweight types + helpers for rendering Sales/BOM     */
@@ -741,12 +737,6 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
   /* ───────────────────────── state ───────────────────────── */
   const [searchTerm, setSearchTerm] = useState("");
   const [rowFilter, setRowFilter] = useState<ReviewerRowFilter>("all");
-  const [tutorialMode, setTutorialMode] = useTutorialMode(
-    "level-4-review-tutorial",
-    true
-  );
-  const [tutorialStepId, setTutorialStepId] = useState("overview");
-
   const [responses, setResponses] = useState<{
     [qapId: string]: Record<number, string>;
   }>({});
@@ -794,37 +784,6 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
     }));
 
   const submit = (qapId: string) => onNext(qapId, responses[qapId] || {});
-  const tutorialSteps = [
-    {
-      id: "overview",
-      title: "Check the Level 4 queue",
-      description:
-        "Start with the Level 4 queue summary to see what is waiting for the current reviewer.",
-      complete: reviewable.length > 0,
-    },
-    {
-      id: "filters",
-      title: "Search and filter the review",
-      description:
-        "Use the QAP search and row filter to focus on the records and mismatch states you want to work on.",
-      complete: searchTerm.trim().length > 0 || rowFilter !== "all",
-    },
-    {
-      id: "worklist",
-      title: "Inspect the full review history",
-      description:
-        "Expand a QAP to inspect MQP, Visual EL, BOM, prior comments, and second-round history before responding.",
-      complete: Object.keys(expanded).some((key) => expanded[key]),
-    },
-    {
-      id: "submit",
-      title: "Submit the Level 4 response",
-      description:
-        "Write your comments in the active QAP and submit from the action area at the bottom once the review is complete.",
-      complete: false,
-    },
-  ];
-  const activeTutorialStep = tutorialMode ? tutorialStepId : null;
 
   const timeRemaining = (submittedAt?: string) => {
     if (!submittedAt) return "Unknown";
@@ -839,9 +798,9 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
   /* ─────────────────────── render ────────────────────────── */
   return (
     <div className="container mx-auto px-4 py-6">
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div>
         <div className="min-w-0">
-          <div className={`${tutorialSectionClass(activeTutorialStep === "overview")} mb-4`}>
+          <div className="mb-4">
             <h1 className="text-3xl font-bold">
               Level 4 Review –{" "}
               {user?.role
@@ -851,7 +810,7 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
           </div>
 
           {/* Top controls */}
-          <div className={`${tutorialSectionClass(activeTutorialStep === "filters")} flex flex-col md:flex-row md:items-center md:justify-between mb-6 space-y-4 md:space-y-0`}>
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 space-y-4 md:space-y-0">
             <div className="flex items-center space-x-2">
               <Input
                 placeholder="Search QAPs..."
@@ -880,11 +839,7 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
             </span>
           </div>
 
-          <div
-            className={tutorialSectionClass(
-              activeTutorialStep === "worklist" || activeTutorialStep === "submit"
-            )}
-          >
+          <div>
             {reviewable.length === 0 ? (
               <div className="py-20 text-center text-gray-500">No QAPs to review</div>
             ) : (
@@ -1516,18 +1471,6 @@ const Level4ReviewPage: React.FC<Level4ReviewPageProps> = ({
           </div>
         </div>
 
-        <div className="xl:sticky xl:top-24 xl:self-start">
-          <InteractiveTutorialCard
-            storageKey="level-4-review-tutorial"
-            title="Level 4 Tutorial"
-            description="Search the queue, inspect the full history, and submit the Level 4 response from the open QAP."
-            steps={tutorialSteps}
-            activeStepId={activeTutorialStep}
-            onSelectStep={setTutorialStepId}
-            enabled={tutorialMode}
-            onEnabledChange={setTutorialMode}
-          />
-        </div>
       </div>
     </div>
   );

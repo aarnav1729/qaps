@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,11 +18,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import InteractiveTutorialCard, {
-  tutorialSectionClass,
-} from "@/components/tutorial/InteractiveTutorialCard";
-import { useTutorialMode } from "@/hooks/useTutorialMode";
 import { QAPFormData, User } from "@/types/qap";
+import { derivePersonTatRecords } from "@/lib/qapAnalytics";
+import { formatDurationMs } from "@/lib/qapAudit";
 import { ADMIN_ASSIGNABLE_ROLES, formatRoleLabel } from "@/lib/roles";
 import {
   Plus,
@@ -31,7 +30,10 @@ import {
   FileText,
   CheckCircle,
   Clock,
+  Download,
 } from "lucide-react";
+
+const API = window.location.origin;
 
 interface AdminPageProps {
   qapData: QAPFormData[];
@@ -56,12 +58,24 @@ const AdminPage: React.FC<AdminPageProps> = ({
     role: "level-1-reviewer",
     plant: "",
   });
-  const [tutorialMode, setTutorialMode] = useTutorialMode(
-    "admin-dashboard-tutorial",
-    true
-  );
-  const [tutorialStepId, setTutorialStepId] = useState("overview");
 
+  const { data: apiUsers = [] } = useQuery<User[]>({
+    queryKey: ["admin-users"],
+    queryFn: async () => {
+      const r = await fetch(`${API}/api/users`, { credentials: "include" });
+      if (!r.ok) return [];
+      const data = await r.json();
+      return Array.isArray(data) ? data : [];
+    },
+    staleTime: 1000 * 60,
+  });
+
+  const visibleUsers = apiUsers.length ? apiUsers : Array.isArray(users) ? users : [];
+  const safeQaps = Array.isArray(qapData) ? qapData : [];
+  const tatRecords = useMemo(
+    () => safeQaps.flatMap((qap) => derivePersonTatRecords(qap)),
+    [safeQaps]
+  );
   const handleAddUser = () => {
     if (newUser.username && newUser.password && newUser.role) {
       const user: User = {
@@ -121,66 +135,125 @@ const AdminPage: React.FC<AdminPageProps> = ({
   };
 
   const qapStats = {
-    total: qapData.length,
-    draft: qapData.filter((q) => q.status === "draft").length,
-    submitted: qapData.filter(
+    total: safeQaps.length,
+    draft: safeQaps.filter((q) => q.status === "draft").length,
+    submitted: safeQaps.filter(
       (q) => !["draft", "approved", "rejected"].includes(q.status)
     ).length,
-    approved: qapData.filter((q) => q.status === "approved").length,
-    rejected: qapData.filter((q) => q.status === "rejected").length,
+    approved: safeQaps.filter((q) => q.status === "approved").length,
+    rejected: safeQaps.filter((q) => q.status === "rejected").length,
   };
 
   const userStats = {
-    total: users.length,
-    requestors: users.filter((u) => u.role === "requestor").length,
-    reviewers: users.filter((u) =>
+    total: visibleUsers.length,
+    requestors: visibleUsers.filter((u) => u.role === "requestor").length,
+    reviewers: visibleUsers.filter((u) =>
       ["level-1-reviewer", "production", "quality", "technical"].includes(
         u.role
       )
     ).length,
-    heads: users.filter((u) =>
+    heads: visibleUsers.filter((u) =>
       ["head", "technical-head", "plant-head"].includes(u.role)
     ).length,
-    admins: users.filter((u) => u.role === "admin").length,
+    admins: visibleUsers.filter((u) => u.role === "admin").length,
   };
-  const tutorialSteps = [
-    {
-      id: "overview",
-      title: "Read the admin summary",
-      description:
-        "The dashboard totals tell you how much workflow and user-management activity is in the system.",
-      complete: qapData.length > 0 || users.length > 0,
-    },
-    {
-      id: "users",
-      title: "Manage users and roles",
-      description:
-        "Use the user management table to add, edit, and retire accounts without leaving the page.",
-      complete: users.length > 0,
-    },
-    {
-      id: "qaps",
-      title: "Monitor recent QAP activity",
-      description:
-        "The recent QAP table gives you a quick operational view before you drill deeper into approvals or analytics.",
-      complete: qapData.length > 0,
-    },
-  ];
-  const activeTutorialStep = tutorialMode ? tutorialStepId : null;
 
+  const downloadCsv = (filename: string, rows: Record<string, unknown>[]) => {
+    const columns = Object.keys(rows[0] || { message: "No data" });
+    const escape = (value: unknown) => {
+      const text = value === null || value === undefined ? "" : String(value);
+      return `"${text.replace(/"/g, '""')}"`;
+    };
+    const csv = [
+      columns.join(","),
+      ...(rows.length ? rows : [{ message: "No data" }]).map((row) =>
+        columns.map((column) => escape(row[column])).join(",")
+      ),
+    ].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadTatAverages = () => {
+    const grouped = new Map<string, typeof tatRecords>();
+    tatRecords.forEach((record) => {
+      const key = `${record.stageLabel}||${record.person}||${record.role}`;
+      grouped.set(key, [...(grouped.get(key) || []), record]);
+    });
+
+    const rows = Array.from(grouped.entries()).map(([key, records]) => {
+      const [stage, user, role] = key.split("||");
+      const values = records.map((record) => record.tatMs).filter((v) => v >= 0);
+      const averageMs = values.length
+        ? values.reduce((sum, value) => sum + value, 0) / values.length
+        : 0;
+      return {
+        stage,
+        user,
+        role,
+        qap_count: new Set(records.map((record) => record.qapId)).size,
+        response_count: records.length,
+        average_tat_days: (averageMs / 86400000).toFixed(2),
+        average_tat: formatDurationMs(averageMs),
+      };
+    });
+
+    downloadCsv("qap-tat-averages-by-stage-user.csv", rows);
+  };
+
+  const downloadTatDetails = () => {
+    const rows = tatRecords.map((record) => ({
+      qap_ref: record.ref,
+      customer: record.customerName,
+      project: record.projectName,
+      plant: record.plant,
+      stage: record.stageLabel,
+      user: record.person,
+      role: record.role,
+      started_at: record.startedAt ? new Date(record.startedAt).toLocaleString() : "",
+      responded_at: record.respondedAt
+        ? new Date(record.respondedAt).toLocaleString()
+        : "",
+      tat_days: (record.tatMs / 86400000).toFixed(2),
+      tat: record.tatLabel,
+      comments_count: record.commentCount,
+      current_qap_status: record.status,
+    }));
+
+    downloadCsv("qap-tat-detail-by-qap-stage-user.csv", rows);
+  };
   return (
     <div className="container mx-auto px-4 py-6">
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div>
         <div className="min-w-0">
-          <div className={`${tutorialSectionClass(activeTutorialStep === "overview")} mb-6`}>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">
-              Admin Dashboard
-            </h1>
-            <p className="text-gray-600">Manage users and monitor QAP system</p>
+          <div className="mb-6">
+            <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900 mb-2">
+                  Admin Dashboard
+                </h1>
+                <p className="text-gray-600">Manage users and monitor QAP system</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={downloadTatAverages}>
+                  <Download className="mr-2 h-4 w-4" />
+                  TAT Averages
+                </Button>
+                <Button variant="outline" onClick={downloadTatDetails}>
+                  <Download className="mr-2 h-4 w-4" />
+                  TAT Details
+                </Button>
+              </div>
+            </div>
           </div>
 
           {/* Stats Cards */}
-          <div className={`${tutorialSectionClass(activeTutorialStep === "overview")} grid grid-cols-2 md:grid-cols-4 gap-4 mb-8`}>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
             <Card>
               <CardContent className="p-4">
                 <div className="flex items-center space-x-2">
@@ -231,7 +304,7 @@ const AdminPage: React.FC<AdminPageProps> = ({
           </div>
 
           {/* User Management */}
-          <div className={`${tutorialSectionClass(activeTutorialStep === "users")} mb-6`}>
+          <div className="mb-6">
             <Card>
               <CardHeader>
           <div className="flex items-center justify-between">
@@ -349,7 +422,7 @@ const AdminPage: React.FC<AdminPageProps> = ({
                 </tr>
               </thead>
               <tbody>
-                {users.map((user) => (
+                {visibleUsers.map((user) => (
                   <tr key={user.id} className="border-b hover:bg-gray-50">
                     <td className="p-3 font-medium">{user.username}</td>
                     <td className="p-3">
@@ -388,7 +461,7 @@ const AdminPage: React.FC<AdminPageProps> = ({
           </div>
 
           {/* Recent QAPs */}
-          <div className={tutorialSectionClass(activeTutorialStep === "qaps")}>
+          <div>
             <Card>
               <CardHeader>
                 <CardTitle>Recent QAPs</CardTitle>
@@ -408,34 +481,38 @@ const AdminPage: React.FC<AdminPageProps> = ({
                 </tr>
               </thead>
               <tbody>
-                {qapData.slice(0, 10).map((qap) => (
+                {safeQaps.slice(0, 10).map((qap) => {
+                  const status = String(qap.status || "draft");
+                  const specs = Array.isArray((qap as any).qaps) ? (qap as any).qaps : [];
+                  const plant = String((qap as any).plant || "-");
+                  return (
                   <tr key={qap.id} className="border-b hover:bg-gray-50">
                     <td className="p-3 font-medium">{qap.customerName}</td>
                     <td className="p-3">{qap.projectName}</td>
                     <td className="p-3">
-                      <Badge variant="outline">{qap.plant.toUpperCase()}</Badge>
+                      <Badge variant="outline">{plant.toUpperCase()}</Badge>
                     </td>
                     <td className="p-3">
                       <Badge
                         className={`capitalize ${
-                          qap.status === "approved"
+                          status === "approved"
                             ? "bg-green-100 text-green-800"
-                            : qap.status === "rejected"
+                            : status === "rejected"
                             ? "bg-red-100 text-red-800"
                             : "bg-yellow-100 text-yellow-800"
                         }`}
                       >
-                        {qap.status.replace("-", " ")}
+                        {status.replace("-", " ")}
                       </Badge>
                     </td>
                     <td className="p-3">
                       <div className="text-xs">
                         <span className="text-green-600">
-                          ✓ {qap.qaps.filter((q) => q.match === "yes").length}
+                          ✓ {specs.filter((q: any) => q.match === "yes").length}
                         </span>
                         {" / "}
                         <span className="text-red-600">
-                          ✗ {qap.qaps.filter((q) => q.match === "no").length}
+                          ✗ {specs.filter((q: any) => q.match === "no").length}
                         </span>
                       </div>
                     </td>
@@ -446,7 +523,8 @@ const AdminPage: React.FC<AdminPageProps> = ({
                         : "-"}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -455,18 +533,6 @@ const AdminPage: React.FC<AdminPageProps> = ({
           </div>
         </div>
 
-        <div className="xl:sticky xl:top-24 xl:self-start">
-          <InteractiveTutorialCard
-            storageKey="admin-dashboard-tutorial"
-            title="Admin Tutorial"
-            description="Start from the totals, move into user administration, and finish with recent workflow activity."
-            steps={tutorialSteps}
-            activeStepId={activeTutorialStep}
-            onSelectStep={setTutorialStepId}
-            enabled={tutorialMode}
-            onEnabledChange={setTutorialMode}
-          />
-        </div>
       </div>
     </div>
   );

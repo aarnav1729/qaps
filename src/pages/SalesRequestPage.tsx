@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
@@ -10,9 +10,14 @@ import {
   RFID_LOCATION_LOCKIN,
 } from "@/data/bomMaster";
 import { Badge } from "@/components/ui/badge";
-import InteractiveTutorialCard from "@/components/tutorial/InteractiveTutorialCard";
-import { useTutorialMode } from "@/hooks/useTutorialMode";
 import { cn } from "@/lib/utils";
+import {
+  getTimestampMs,
+  getWorkflowStageStarts,
+  humanizeRole,
+  type WorkflowStageKey,
+} from "@/lib/qapAudit";
+import { qapRequiresLevel2Role } from "@/utils/workflowUtils";
 import {
   getBomComponentNames,
   getBomOptionsFor,
@@ -199,6 +204,14 @@ type QapLite = {
   submittedAt?: string | null;
   updatedAt?: string | null;
   createdAt?: string | null;
+  lastModifiedAt?: string | null;
+  approvedAt?: string | null;
+  submittedBy?: string | null;
+  approver?: string | null;
+  finalCommentsBy?: string | null;
+  finalCommentsAt?: string | null;
+  levelResponses?: any;
+  timeline?: any[];
   salesRequest?: { id?: string | null; projectCode?: string | null } | null;
 };
 
@@ -265,52 +278,6 @@ type HistoryItem = {
   changes?: HistoryChange[] | null;
 };
 
-type GuidedFieldKey =
-  | "customerName"
-  | "plant"
-  | "productCategory"
-  | "moduleCellType"
-  | "cellTech"
-  | "cutCells"
-  | "wattPeak"
-  | "moduleModelNumber"
-  | "vendorNameLockIn"
-  | "rfidLocation"
-  | "moduleDimensions"
-  | "vendorAddress"
-  | "documentRef"
-  | "cellType"
-  | "wattageBinning"
-  | "deliveryTimeline"
-  | "projectLocation"
-  | "rfqOrderQtyMW"
-  | "premierBiddedOrderQtyMW"
-  | "qapType"
-  | "qapAttachment"
-  | "bomFrom"
-  | "bomAttachment"
-  | "inlineInspection"
-  | "pdi"
-  | "certificationRequired"
-  | "cellProcuredBy"
-  | "agreedCTM"
-  | "factoryAuditDate"
-  | "cableLengthRequired"
-  | "xPitchMm"
-  | "trackerDetails"
-  | "priority"
-  | "remarks"
-  | "otherAttachments"
-  | "bomReview";
-
-type GuideStep = {
-  key: GuidedFieldKey;
-  label: string;
-  hint: string;
-  required: boolean;
-  visible: boolean;
-  complete: boolean;
-};
 
 // Link Module Manufacturing Plant => Solar Module Vendor Address
 const PLANT_VENDOR_ADDRESS: Record<Plant, string> = {
@@ -400,6 +367,14 @@ const SalesRequestsPage: React.FC = () => {
             submittedAt: toStr(q?.submittedAt) || null,
             updatedAt: toStr(q?.updatedAt) || null,
             createdAt: toStr(q?.createdAt) || null,
+            lastModifiedAt: toStr(q?.lastModifiedAt) || null,
+            approvedAt: toStr(q?.approvedAt) || null,
+            submittedBy: toStr(q?.submittedBy) || null,
+            approver: toStr(q?.approver) || null,
+            finalCommentsBy: toStr(q?.finalCommentsBy) || null,
+            finalCommentsAt: toStr(q?.finalCommentsAt) || null,
+            levelResponses: q?.levelResponses || {},
+            timeline: Array.isArray(q?.timeline) ? q.timeline : [],
           }));
         } catch {
           // ignore and try next endpoint
@@ -492,6 +467,77 @@ const SalesRequestsPage: React.FC = () => {
     );
   };
 
+  const stageKeyForQap = (qap?: QapLite | null): WorkflowStageKey | null => {
+    const status = String(qap?.status || "").toLowerCase();
+    if (status === "level-1") return "level-1";
+    if (status === "level-2") return "level-2";
+    if (["level-3", "level-3b"].includes(status)) return "level-3";
+    if (["level-4", "level-4b"].includes(status)) return "level-4";
+    if (status === "final-comments") return "final-comments";
+    if (["level-5", "approved", "rejected"].includes(status)) return "level-5";
+    return null;
+  };
+
+  const formatAgeDays = (from?: string | null, to: Date = new Date()) => {
+    const startMs = getTimestampMs(from || null);
+    if (!startMs) return "-";
+    const days = Math.max(0, Math.floor((to.getTime() - startMs) / 86400000));
+    return days === 0 ? "Today" : `${days}d`;
+  };
+
+  const currentLevelStartedAt = (qap?: QapLite | null) => {
+    if (!qap) return null;
+    const stageKey = stageKeyForQap(qap);
+    if (!stageKey) return qap.createdAt || null;
+    const starts = getWorkflowStageStarts(qap as any);
+    const latest = starts
+      .filter((entry) => entry.stageKey === stageKey)
+      .sort((a, b) => b.timeMs - a.timeMs)[0];
+    return latest?.timestamp ? String(latest.timestamp) : qap.lastModifiedAt || qap.updatedAt || qap.createdAt || null;
+  };
+
+  const levelOwnerDetails = (qap?: QapLite | null) => {
+    if (!qap) return "No linked QAP";
+    const status = String(qap.status || "").toLowerCase();
+    if (status === "approved") return `Approved by ${qap.approver || "Plant Head"}`;
+    if (status === "rejected") return `Rejected by ${qap.approver || "Plant Head"}`;
+    if (status === "final-comments") return `Pending with ${qap.submittedBy || "Requestor"}`;
+
+    const level = Number(qap.currentLevel || 0);
+    const responses = qap.levelResponses?.[String(level)] || {};
+    const responders = Object.values(responses)
+      .map((details: any) => details?.username)
+      .filter(Boolean);
+
+    if (responders.length) {
+      return `Responded: ${Array.from(new Set(responders)).join(", ")}`;
+    }
+
+    if (level === 1) return "Pending with Level 1 Reviewer";
+    if (level === 2) {
+      const roles = (["production", "quality", "technical"] as const)
+        .filter((role) => qapRequiresLevel2Role(qap as any, role))
+        .map((role) => humanizeRole(role));
+      return `Pending with ${roles.length ? roles.join(", ") : "Level 2"}`;
+    }
+    if (level === 3) return "Pending with Head";
+    if (level === 4) return "Pending with Technical Head";
+    if (level === 5) return "Pending with Plant Head";
+    return "Workflow not started";
+  };
+
+  const renderQapStatusDetails = (qap?: QapLite | null) => {
+    if (!qap) return <span className="text-gray-400">No linked QAP</span>;
+    return (
+      <div className="space-y-1">
+        {renderQapStatusBadge(qap.status)}
+        <div className="max-w-[14rem] text-xs text-gray-600">
+          {levelOwnerDetails(qap)}
+        </div>
+      </div>
+    );
+  };
+
   // Optional client-side filter via ?customer=NAME
   const customerFilter = useMemo(() => {
     const qs = new URLSearchParams(location.search);
@@ -579,6 +625,7 @@ const SalesRequestsPage: React.FC = () => {
                     <Th>Actions</Th>
                     <Th>Customer Name</Th>
                     <Th>QAP Status</Th>
+                    <Th>At Level</Th>
                     <Th>Project Code</Th>
                     <Th>Plant</Th>
                     <Th>DCR Compliance?</Th>
@@ -603,10 +650,14 @@ const SalesRequestsPage: React.FC = () => {
                     <Th>Attachments</Th>
                     <Th>Created By</Th>
                     <Th>Created At</Th>
+                    <Th>Total Aging</Th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {rows.map((row) => (
+                  {rows.map((row) => {
+                    const linkedQap = getLinkedQap(row);
+                    const levelStart = currentLevelStartedAt(linkedQap);
+                    return (
                     <tr key={row.id} className="align-top">
                       <Td>
                         <div className="flex items-center gap-2">
@@ -627,7 +678,13 @@ const SalesRequestsPage: React.FC = () => {
                         </div>
                       </Td>
                       <Td>{row.customerName}</Td>
-                      <Td>{renderQapStatusBadge(getLinkedQap(row)?.status)}</Td>
+                      <Td>{renderQapStatusDetails(linkedQap)}</Td>
+                      <Td>
+                        <div className="font-medium">{formatAgeDays(levelStart)}</div>
+                        <div className="text-xs text-gray-500">
+                          since {levelStart ? new Date(levelStart).toLocaleDateString() : "-"}
+                        </div>
+                      </Td>
                       <Td className="font-mono text-xs">
                         {row.projectCode || "-"}
                       </Td>{" "}
@@ -724,8 +781,13 @@ const SalesRequestsPage: React.FC = () => {
                       </Td>
                       <Td>{row.createdBy}</Td>
                       <Td>{new Date(row.createdAt).toLocaleString()}</Td>
+                      <Td>
+                        <div className="font-medium">{formatAgeDays(row.createdAt)}</div>
+                        <div className="text-xs text-gray-500">since creation</div>
+                      </Td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -865,15 +927,6 @@ const SalesRequestModal: React.FC<{
   prefillCustomerName = "",
   bomMasterComponents,
 }) => {
-  const [tutorialMode, setTutorialMode] = useTutorialMode(
-    "sales-request-tutorial",
-    true
-  );
-  const [skippedGuideSteps, setSkippedGuideSteps] = useState<
-    Partial<Record<GuidedFieldKey, boolean>>
-  >({});
-  const [selectedGuideStep, setSelectedGuideStep] =
-    useState<GuidedFieldKey | null>(null);
   const componentNames = useMemo(
     () => getBomComponentNames(bomMasterComponents),
     [bomMasterComponents]
@@ -992,6 +1045,85 @@ const SalesRequestModal: React.FC<{
   // Preview toggle
   const [showPreview, setShowPreview] = useState(false);
   const [bomOpen, setBomOpen] = useState(false);
+
+  // ── Guided form filling ──────────────────────────────────────────────────
+  type GuidedStep = {
+    id: string;
+    label: string;
+    hint: string;
+    group: string;
+  };
+
+  const GUIDED_STEPS: GuidedStep[] = [
+    { id: "productCategory", label: "Product Category", hint: "Choose a product category — this auto-fills Cell Type, Cell Tech, No. of Cells, Model, Dimensions, and Watt Peak.", group: "Product Specification" },
+    { id: "moduleManufacturingPlant", label: "Manufacturing Plant", hint: "Select the plant where modules will be manufactured (P2, P4, P5, or P6).", group: "Basic Info" },
+    { id: "cellType", label: "DCR Compliance", hint: "Select DCR or NDCR based on the project's domestic content requirement.", group: "Order Details" },
+    { id: "wattageBinning", label: "Wattage Binning", hint: "Enter wattage ranges and percentages. Rows must sum to exactly 100%.", group: "Order Details" },
+    { id: "rfqOrderQtyMW", label: "RFQ Order Qty (MW)", hint: "Enter the total order quantity in megawatts from the customer's RFQ.", group: "Order Details" },
+    { id: "premierBiddedOrderQtyMW", label: "Premier Bidded Qty (MW)", hint: "Optional — Premier's actual bidded order quantity if different from RFQ.", group: "Order Details" },
+    { id: "deliveryTimeline", label: "Delivery Timeline", hint: "Set the delivery start and end dates for this order.", group: "Order Details" },
+    { id: "projectLocation", label: "Project Location", hint: "Enter the project site location (city, state, or coordinates).", group: "Order Details" },
+    { id: "qapType", label: "QAP From", hint: "Who provides the QAP — Customer or Premier Energies? If Customer, upload the QAP file.", group: "Documents & Inspection" },
+    { id: "bomFrom", label: "BOM From", hint: "Who provides the BOM — Premier Energies or Customer? If Customer, upload the BOM file.", group: "Documents & Inspection" },
+    { id: "inlineInspection", label: "Inline Inspection", hint: "Whether inline inspection is required during production.", group: "Documents & Inspection" },
+    { id: "pdi", label: "Pre-Dispatch Inspection", hint: "Whether PDI is required before shipment.", group: "Documents & Inspection" },
+    { id: "certificationRequired", label: "Certification Required", hint: "Select which certifications the modules need (BIS, IEC, etc.).", group: "Documents & Inspection" },
+    { id: "cellProcuredBy", label: "Cell Procured By", hint: "Who is supplying the solar cells — Customer, Premier, or financed by Customer.", group: "Technical Details" },
+    { id: "agreedCTM", label: "Agreed CTM", hint: "The agreed Cell-to-Module ratio (e.g. 0.9925). Enter as a decimal.", group: "Technical Details" },
+    { id: "factoryAuditDate", label: "Factory Audit Date", hint: "Tentative date for the customer's factory audit, if applicable.", group: "Technical Details" },
+    { id: "cableLengthRequired", label: "JB Cable Length (mm)", hint: "Required junction box cable length in millimetres.", group: "Technical Details" },
+    { id: "xPitchMm", label: "X Pitch (mm)", hint: "Optional — cell-to-cell X pitch in millimetres.", group: "Technical Details" },
+    { id: "trackerDetails", label: "Tracker Details", hint: "Optional — tracker rail width (790 or 1400mm).", group: "Technical Details" },
+    { id: "priority", label: "Priority", hint: "Set order priority. High-priority orders are flagged for faster processing.", group: "Finalize" },
+    { id: "remarks", label: "Remarks", hint: "Optional free-text notes or special instructions for this request.", group: "Finalize" },
+    { id: "otherAttachments", label: "Attachments", hint: "Upload any additional files (specs, drawings, audit reports).", group: "Finalize" },
+    { id: "bom", label: "BOM Section", hint: "Expand to review and edit the Bill of Materials for this order.", group: "Finalize" },
+  ];
+
+  const [guidedStep, setGuidedStep] = useState(0);
+  const formRef = useRef<HTMLDivElement>(null);
+
+  const isHighlighted = useCallback(
+    (fieldId: string) => mode === "create" && GUIDED_STEPS[guidedStep]?.id === fieldId,
+    [guidedStep, mode]
+  );
+  const hintFor = useCallback(
+    (fieldId: string) =>
+      mode === "create" && GUIDED_STEPS[guidedStep]?.id === fieldId
+        ? GUIDED_STEPS[guidedStep].hint
+        : undefined,
+    [guidedStep, mode]
+  );
+
+  const goStep = useCallback((dir: 1 | -1) => {
+    setGuidedStep((s) => {
+      const next = s + dir;
+      if (next < 0) return 0;
+      if (next >= GUIDED_STEPS.length) return GUIDED_STEPS.length - 1;
+      return next;
+    });
+  }, []);
+
+  const advanceGuidedStep = useCallback(() => {
+    if (mode !== "create") return;
+    setGuidedStep((s) => Math.min(s + 1, GUIDED_STEPS.length - 1));
+  }, [mode]);
+
+  useEffect(() => {
+    if (mode !== "create") return;
+    const stepId = GUIDED_STEPS[guidedStep]?.id;
+    if (!stepId) return;
+    const el = formRef.current?.querySelector(`[data-guide="${stepId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      window.setTimeout(() => {
+        const focusable = el.querySelector<HTMLElement>(
+          "input:not([readonly]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])"
+        );
+        focusable?.focus();
+      }, 220);
+    }
+  }, [guidedStep, mode]);
 
   // Pre-populate all components by default on create
   useEffect(() => {
@@ -1507,437 +1639,6 @@ const SalesRequestModal: React.FC<{
       ? [...base, moduleModelNumber]
       : base;
   }, [catCfg, moduleModelNumber]);
-  const wattageBinsState = useMemo(
-    () => evaluateWattageBins(wattBins),
-    [wattBins]
-  );
-  const allGuideSteps = useMemo<GuideStep[]>(
-    () => [
-      {
-        key: "customerName",
-        label: "Customer Name",
-        hint: "Start here so project code and downstream references stay tied to the right customer.",
-        required: true,
-        visible: true,
-        complete: !!state.customerName.trim(),
-      },
-      {
-        key: "plant",
-        label: "Module Manufacturing Plant",
-        hint: "Pick the plant early because it drives vendor address and plant-specific context.",
-        required: true,
-        visible: true,
-        complete: !!state.moduleManufacturingPlant,
-      },
-      {
-        key: "productCategory",
-        label: "Product Category",
-        hint: "Choose the product category before the derived technical fields so the modal can auto-fill them correctly.",
-        required: true,
-        visible: true,
-        complete: !!state.productCategory,
-      },
-      {
-        key: "moduleCellType",
-        label: "Cell Type",
-        hint: "Review the module cell type that was auto-filled from the selected product category.",
-        required: false,
-        visible: true,
-        complete: !!state.moduleCellType,
-      },
-      {
-        key: "cellTech",
-        label: "Cell Tech",
-        hint: "Confirm the technology value after the product category auto-fills it.",
-        required: false,
-        visible: true,
-        complete: !!state.cellTech,
-      },
-      {
-        key: "cutCells",
-        label: "No. of Cells",
-        hint: "Verify the cut-cell count that came from the chosen product category.",
-        required: false,
-        visible: true,
-        complete: !!state.cutCells,
-      },
-      {
-        key: "wattPeak",
-        label: "Min Watt Peak",
-        hint: "Check the derived minimum watt peak before continuing to the commercial details.",
-        required: true,
-        visible: true,
-        complete: !!wattPeakLabel,
-      },
-      {
-        key: "moduleModelNumber",
-        label: "Module Model Number",
-        hint: "Confirm or adjust the model number after the category defaults are applied.",
-        required: true,
-        visible: true,
-        complete: !!moduleModelNumber.trim(),
-      },
-      {
-        key: "vendorNameLockIn",
-        label: "Solar Module Vendor Name (lock-in)",
-        hint: "This lock-in field is system-driven. Review it before proceeding.",
-        required: false,
-        visible: true,
-        complete: !!VENDOR_NAME_LOCKIN,
-      },
-      {
-        key: "rfidLocation",
-        label: "Location of RFID in module (lock-in)",
-        hint: "This lock-in field is fixed by the master setup. Review it before moving on.",
-        required: false,
-        visible: true,
-        complete: !!RFID_LOCATION_LOCKIN,
-      },
-      {
-        key: "moduleDimensions",
-        label: "Module Dimensions",
-        hint: "Keep the dimensions aligned with the selected category and model.",
-        required: true,
-        visible: true,
-        complete: !!moduleDimensionsOption.trim(),
-      },
-      {
-        key: "vendorAddress",
-        label: "Solar Module Vendor Address",
-        hint: "Confirm the vendor address that the plant selection has populated.",
-        required: false,
-        visible: true,
-        complete: !!vendorAddress.trim(),
-      },
-      {
-        key: "documentRef",
-        label: "Document Ref (auto)",
-        hint: "Review the auto-generated document reference before submission.",
-        required: false,
-        visible: true,
-        complete: !!docRef.trim(),
-      },
-      {
-        key: "cellType",
-        label: "DCR Compliance?",
-        hint: "Set the DCR/NDCR compliance explicitly for this request.",
-        required: true,
-        visible: true,
-        complete: !!state.cellType,
-      },
-      {
-        key: "wattageBinning",
-        label: "Tentative Wattage Binning / Distribution",
-        hint: "Add the expected wattage mix and make sure the total equals exactly 100%.",
-        required: true,
-        visible: true,
-        complete: wattageBinsState.valid,
-      },
-      {
-        key: "rfqOrderQtyMW",
-        label: "RFQ Order Quantity (MW)",
-        hint: "Enter the requested quantity before moving into inspection and procurement details.",
-        required: true,
-        visible: true,
-        complete: Number(state.rfqOrderQtyMW) > 0,
-      },
-      {
-        key: "premierBiddedOrderQtyMW",
-        label: "Premier Bidded Actual Order Quantity in MW",
-        hint: "Fill this if you already know the internal bidded quantity; otherwise you can skip it for now.",
-        required: false,
-        visible: true,
-        complete: !!String(state.premierBiddedOrderQtyMW || "").trim(),
-      },
-      {
-        key: "deliveryTimeline",
-        label: "Delivery Timeline",
-        hint: "Set both dates before the project and planning details are finalized.",
-        required: true,
-        visible: true,
-        complete: !!state.deliveryStartDate && !!state.deliveryEndDate,
-      },
-      {
-        key: "projectLocation",
-        label: "Project Location",
-        hint: "This anchors the project summary and remains visible in the linked QAP context.",
-        required: true,
-        visible: true,
-        complete: !!state.projectLocation.trim(),
-      },
-      {
-        key: "qapType",
-        label: "QAP From",
-        hint: "Choose whether the QAP comes from the customer or Premier before attachments are decided.",
-        required: true,
-        visible: true,
-        complete: !!state.qapType,
-      },
-      {
-        key: "qapAttachment",
-        label: "QAP From Attachment",
-        hint: "Upload the customer-supplied QAP when the source is Customer.",
-        required: true,
-        visible: state.qapType === "Customer",
-        complete:
-          state.qapType !== "Customer" ||
-          !!qapTypeFile ||
-          (mode === "edit" && !!initial?.qapTypeAttachmentUrl),
-      },
-      {
-        key: "bomFrom",
-        label: "BOM From",
-        hint: "Choose the BOM source so the correct attachment path is applied.",
-        required: true,
-        visible: true,
-        complete: !!state.bomFrom,
-      },
-      {
-        key: "bomAttachment",
-        label: "BOM From Attachment",
-        hint: "Upload the customer BOM when the source is Customer.",
-        required: true,
-        visible: state.bomFrom === "Customer",
-        complete:
-          state.bomFrom !== "Customer" ||
-          !!primaryBomFile ||
-          (mode === "edit" && !!initial?.primaryBomAttachmentUrl),
-      },
-      {
-        key: "inlineInspection",
-        label: "Inline Inspection",
-        hint: "Confirm whether inline inspection is required for this request.",
-        required: true,
-        visible: true,
-        complete: !!state.inlineInspection,
-      },
-      {
-        key: "pdi",
-        label: "Pre-Dispatch Inspection (PDI)",
-        hint: "Set whether a pre-dispatch inspection is expected.",
-        required: true,
-        visible: true,
-        complete: !!state.pdi,
-      },
-      {
-        key: "certificationRequired",
-        label: "Certification Required?",
-        hint: "Record the expected certification combination when relevant. This can be skipped if not needed.",
-        required: false,
-        visible: true,
-        complete: !!state.certificationRequired,
-      },
-      {
-        key: "cellProcuredBy",
-        label: "Cell Procured By",
-        hint: "Identify who is responsible for cell procurement before approval.",
-        required: true,
-        visible: true,
-        complete: !!state.cellProcuredBy,
-      },
-      {
-        key: "agreedCTM",
-        label: "Agreed CTM",
-        hint: "Enter the agreed CTM if commercial discussions have already locked it.",
-        required: false,
-        visible: true,
-        complete: !!String(state.agreedCTM || "").trim(),
-      },
-      {
-        key: "factoryAuditDate",
-        label: "Factory Audit Tentative Date",
-        hint: "Use this when a tentative audit date is already available; otherwise it can be skipped.",
-        required: false,
-        visible: true,
-        complete: !!state.factoryAuditTentativeDate,
-      },
-      {
-        key: "cableLengthRequired",
-        label: "JB Cable Length (mm)",
-        hint: "Set the cable length requirement before finalizing the request.",
-        required: true,
-        visible: true,
-        complete: !!String(state.cableLengthRequired || "").trim(),
-      },
-      {
-        key: "xPitchMm",
-        label: "X Pitch (mm)",
-        hint: "Capture this only when the project already has X-pitch constraints.",
-        required: false,
-        visible: true,
-        complete: !!String(state.xPitchMm || "").trim(),
-      },
-      {
-        key: "trackerDetails",
-        label: "Tracker Details (790/1400mm)",
-        hint: "Fill tracker details when that information is available; otherwise skip and return later.",
-        required: false,
-        visible: true,
-        complete: !!String(state.trackerDetails || "").trim(),
-      },
-      {
-        key: "priority",
-        label: "Priority",
-        hint: "Mark the request priority before submission.",
-        required: true,
-        visible: true,
-        complete: !!state.priority,
-      },
-      {
-        key: "remarks",
-        label: "Remarks",
-        hint: "Add any supporting notes that reviewers should see. This can be skipped when not needed.",
-        required: false,
-        visible: true,
-        complete: !!state.remarks.trim(),
-      },
-      {
-        key: "otherAttachments",
-        label: "Any Other Attachments",
-        hint: "Add any supporting files with titles if they help the reviewers. This is optional.",
-        required: false,
-        visible: true,
-        complete: otherFiles.some(
-          (file) => !!file.title.trim() || !!file.file
-        ),
-      },
-      {
-        key: "bomReview",
-        label: "BOM (Bill of Materials) Review",
-        hint: "Expand the BOM section to review or adjust component selections before you finish.",
-        required: false,
-        visible: true,
-        complete: bomOpen,
-      },
-    ],
-    [
-      bomOpen,
-      docRef,
-      initial?.primaryBomAttachmentUrl,
-      initial?.qapTypeAttachmentUrl,
-      mode,
-      moduleDimensionsOption,
-      moduleModelNumber,
-      otherFiles,
-      primaryBomFile,
-      qapTypeFile,
-      state.agreedCTM,
-      state.bomFrom,
-      state.cableLengthRequired,
-      state.cellProcuredBy,
-      state.cellTech,
-      state.cellType,
-      state.certificationRequired,
-      state.customerName,
-      state.cutCells,
-      state.deliveryEndDate,
-      state.deliveryStartDate,
-      state.factoryAuditTentativeDate,
-      state.inlineInspection,
-      state.moduleCellType,
-      state.moduleManufacturingPlant,
-      state.pdi,
-      state.premierBiddedOrderQtyMW,
-      state.priority,
-      state.productCategory,
-      state.projectLocation,
-      state.qapType,
-      state.remarks,
-      state.rfqOrderQtyMW,
-      state.trackerDetails,
-      state.xPitchMm,
-      vendorAddress,
-      wattPeakLabel,
-      wattageBinsState.valid,
-    ]
-  );
-
-  const guidedSteps = useMemo(
-    () => allGuideSteps.filter((step) => step.visible),
-    [allGuideSteps]
-  );
-
-  const guideStepMap = useMemo(
-    () =>
-      Object.fromEntries(
-        allGuideSteps.map((step) => [step.key, step])
-      ) as Record<GuidedFieldKey, GuideStep>,
-    [allGuideSteps]
-  );
-
-  useEffect(() => {
-    setSkippedGuideSteps((prev) => {
-      const next = Object.fromEntries(
-        Object.entries(prev).filter(([key, skipped]) => {
-          const step = guideStepMap[key as GuidedFieldKey];
-          return !!skipped && !!step && step.visible && !step.required && !step.complete;
-        })
-      ) as Partial<Record<GuidedFieldKey, boolean>>;
-
-      return JSON.stringify(prev) === JSON.stringify(next) ? prev : next;
-    });
-  }, [guideStepMap]);
-
-  const currentGuideStep = useMemo(
-    () =>
-      tutorialMode
-        ? guidedSteps.find(
-            (step) =>
-              !step.complete &&
-              !(skippedGuideSteps[step.key] && !step.required)
-          ) || null
-        : null,
-    [guidedSteps, skippedGuideSteps, tutorialMode]
-  );
-
-  useEffect(() => {
-    if (!selectedGuideStep) return;
-    const step = guideStepMap[selectedGuideStep];
-    if (!step?.visible) {
-      setSelectedGuideStep(null);
-    }
-  }, [guideStepMap, selectedGuideStep]);
-
-  const activeGuideStep = useMemo(() => {
-    if (!tutorialMode) return null;
-    if (selectedGuideStep) {
-      const step = guideStepMap[selectedGuideStep];
-      if (step?.visible) return step;
-    }
-    return currentGuideStep;
-  }, [currentGuideStep, guideStepMap, selectedGuideStep, tutorialMode]);
-
-  const guideCardSteps = useMemo(
-    () =>
-      guidedSteps.map((step) => ({
-        id: step.key,
-        title: step.label,
-        description: step.hint,
-        required: step.required,
-        complete: step.complete,
-        skipped: !!skippedGuideSteps[step.key] && !step.complete,
-      })),
-    [guidedSteps, skippedGuideSteps]
-  );
-
-  const setGuideStepSkipped = (field: GuidedFieldKey, skipped: boolean) => {
-    setSkippedGuideSteps((prev) => {
-      const next = { ...prev };
-      if (skipped) next[field] = true;
-      else delete next[field];
-      return next;
-    });
-    if (skipped && selectedGuideStep === field) {
-      setSelectedGuideStep(null);
-    }
-  };
-
-  const isGuided = (field: GuidedFieldKey) =>
-    tutorialMode && activeGuideStep?.key === field;
-
-  const guideHintFor = (field: GuidedFieldKey) =>
-    isGuided(field) ? guideStepMap[field]?.hint : undefined;
-
   return (
     <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
       <div className="bg-white rounded-lg shadow-xl max-h-[95vh] w-full max-w-[98vw] 2xl:max-w-[1700px] overflow-auto">
@@ -1947,13 +1648,33 @@ const SalesRequestModal: React.FC<{
               <h2 className="text-lg font-semibold">
                 {mode === "edit" ? "Edit Sales Request" : "Create Sales Request"}
               </h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Start directly in the form. The integrated tutorial follows beside
-                the fields and highlights the current focus step.
-              </p>
+              {mode === "create" && (
+                <p className="mt-1 text-sm text-slate-600">
+                  Step {guidedStep + 1} of {GUIDED_STEPS.length}
+                  <span className="mx-1.5 text-slate-400">/</span>
+                  <span className="font-medium text-amber-700">{GUIDED_STEPS[guidedStep]?.group}</span>
+                  <span className="mx-1.5 text-slate-400">—</span>
+                  {GUIDED_STEPS[guidedStep]?.label}
+                </p>
+              )}
+              {mode === "edit" && (
+                <p className="mt-1 text-sm text-slate-600">Edit mode — all fields are accessible.</p>
+              )}
             </div>
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
               <div className="flex flex-wrap items-center gap-2">
+                {mode === "create" && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={guidedStep === 0}
+                      onClick={() => goStep(-1)}
+                    >
+                      ← Prev
+                    </Button>
+                  </>
+                )}
                 <Button
                   variant={showPreview ? "secondary" : "outline"}
                   onClick={() => setShowPreview((v) => !v)}
@@ -1966,22 +1687,33 @@ const SalesRequestModal: React.FC<{
               </div>
             </div>
           </div>
+          {mode === "create" && (
+            <div className="mt-3 h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-amber-500 transition-all duration-300"
+                style={{ width: `${((guidedStep + 1) / GUIDED_STEPS.length) * 100}%` }}
+              />
+            </div>
+          )}
         </div>
 
         {!showPreview ? (
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div ref={formRef}>
             <div className="min-w-0">
               {/* Core form */}
               <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div data-guide="customerName">
               <Text
                 label="Customer Name"
                 required
                 value={state.customerName}
                 onChange={(v) => setState((s) => ({ ...s, customerName: v }))}
                 readOnly={mode === "edit" || !!prefillCustomerName}
-                highlighted={isGuided("customerName")}
-                hint={guideHintFor("customerName")}
+                highlighted={isHighlighted("customerName")}
+                hint={hintFor("customerName")}
               />
+              </div>
+              <div data-guide="moduleManufacturingPlant">
               <Select
                 label="Module Manufacturing Plant"
                 required
@@ -1990,9 +1722,12 @@ const SalesRequestModal: React.FC<{
                   setState((s) => ({ ...s, moduleManufacturingPlant: v }))
                 }
                 options={["P2", "P4", "P5", "P6"]}
-                highlighted={isGuided("plant")}
-                hint={guideHintFor("plant")}
+                highlighted={isHighlighted("moduleManufacturingPlant")}
+                hint={hintFor("moduleManufacturingPlant")}
+                onAdvance={advanceGuidedStep}
               />
+              </div>
+              <div data-guide="productCategory">
               <Select
                 label="Product Category"
                 value={state.productCategory}
@@ -2000,7 +1735,6 @@ const SalesRequestModal: React.FC<{
                   const cat = v as ProductCategory;
                   const m = PRODUCT_CATEGORY_MATRIX[cat];
 
-                  // 6 derived fields in one go
                   setState((s) => ({
                     ...s,
                     productCategory: cat,
@@ -2011,31 +1745,30 @@ const SalesRequestModal: React.FC<{
 
                   setModuleModelNumber(m.model);
 
-                  // technology proposed = cell type
                   const label = labelForMin(m.minWattPeak);
                   setWattPeakLabel(label);
 
-                  // min watt (single value) now comes from matrix
-
-                  // dimensions (single-option today, array ready for future)
                   setModuleDimensionsOption(m.dimOptions[0] || "");
                 }}
                 options={PRODUCT_CATEGORY_OPTIONS}
-                highlighted={isGuided("productCategory")}
-                hint={guideHintFor("productCategory")}
+                highlighted={isHighlighted("productCategory")}
+                hint={hintFor("productCategory")}
+                onAdvance={advanceGuidedStep}
               />
-              {/* NEW sub-dropdowns under "Module Order Type" */}
+              </div>
+              <div data-guide="moduleCellType">
               <Select
                 label="Cell Type"
                 value={state.moduleCellType}
                 onChange={(v: any) =>
                   setState((s) => ({ ...s, moduleCellType: v as CellType }))
                 }
-                // ⬇️ remove M10R here
                 options={["M10", "G12", "G12R"]}
-                highlighted={isGuided("moduleCellType")}
-                hint={guideHintFor("moduleCellType")}
+                highlighted={isHighlighted("moduleCellType")}
+                hint={hintFor("moduleCellType")}
               />
+              </div>
+              <div data-guide="cellTech">
               <Select
                 label="Cell Tech"
                 value={state.cellTech}
@@ -2043,9 +1776,11 @@ const SalesRequestModal: React.FC<{
                   setState((s) => ({ ...s, cellTech: v as CellTech }))
                 }
                 options={["PERC", "TOPCon"]}
-                highlighted={isGuided("cellTech")}
-                hint={guideHintFor("cellTech")}
+                highlighted={isHighlighted("cellTech")}
+                hint={hintFor("cellTech")}
               />
+              </div>
+              <div data-guide="cutCells">
               <Select
                 label="No. of Cells"
                 value={state.cutCells}
@@ -2053,16 +1788,19 @@ const SalesRequestModal: React.FC<{
                   setState((s) => ({ ...s, cutCells: v as CutCells }))
                 }
                 options={["60", "66", "72", "78"]}
-                highlighted={isGuided("cutCells")}
-                hint={guideHintFor("cutCells")}
+                highlighted={isHighlighted("cutCells")}
+                hint={hintFor("cutCells")}
               />
-              {/* NEW: Min Watt Peak (moved up from BOM) */}
+              </div>
+              <div data-guide="wattPeakLabel">
               <ReadOnly
                 label="Min Watt Peak"
                 value={wattPeakLabel || "-"}
-                highlighted={isGuided("wattPeak")}
-                hint={guideHintFor("wattPeak")}
+                highlighted={isHighlighted("wattPeakLabel")}
+                hint={hintFor("wattPeakLabel")}
               />
+              </div>
+              <div data-guide="moduleModelNumber">
               <Select
                 label="Module Model Number"
                 required
@@ -2071,70 +1809,88 @@ const SalesRequestModal: React.FC<{
                   setModuleModelNumber(v);
                 }}
                 options={modelOptions}
-                highlighted={isGuided("moduleModelNumber")}
-                hint={guideHintFor("moduleModelNumber")}
+                highlighted={isHighlighted("moduleModelNumber")}
+                hint={hintFor("moduleModelNumber")}
               />
+              </div>
+              <div data-guide="vendorName">
               <ReadOnly
                 label="Solar Module Vendor Name (lock-in)"
                 value={VENDOR_NAME_LOCKIN}
-                highlighted={isGuided("vendorNameLockIn")}
-                hint={guideHintFor("vendorNameLockIn")}
+                highlighted={isHighlighted("vendorName")}
+                hint={hintFor("vendorName")}
               />
+              </div>
+              <div data-guide="rfidLocation">
               <ReadOnly
                 label="Location of RFID in module (lock-in)"
                 value={RFID_LOCATION_LOCKIN}
-                highlighted={isGuided("rfidLocation")}
-                hint={guideHintFor("rfidLocation")}
+                highlighted={isHighlighted("rfidLocation")}
+                hint={hintFor("rfidLocation")}
               />
-              {/* 3) Module Dimensions (matrix-driven; M10 auto-picked) */}
+              </div>
+              <div data-guide="moduleDimensions">
               <Select
                 label="Module Dimensions"
                 required
                 value={moduleDimensionsOption}
                 onChange={(v: string) => setModuleDimensionsOption(v)}
                 options={catDimOpts}
-                highlighted={isGuided("moduleDimensions")}
-                hint={guideHintFor("moduleDimensions")}
+                highlighted={isHighlighted("moduleDimensions")}
+                hint={hintFor("moduleDimensions")}
               />
-              {/* 4) Module Model Number (auto-selected by Watt Peak) */}
-              {/* Keep the rest as-is */}
+              </div>
+              <div data-guide="vendorAddress">
               <Text
                 label="Solar Module Vendor Address"
                 value={vendorAddress}
                 onChange={setVendorAddress}
-                highlighted={isGuided("vendorAddress")}
-                hint={guideHintFor("vendorAddress")}
+                highlighted={isHighlighted("vendorAddress")}
+                hint={hintFor("vendorAddress")}
               />
+              </div>
+              <div data-guide="documentRef">
               <ReadOnly
                 label="Document Ref (auto)"
                 value={docRef}
-                highlighted={isGuided("documentRef")}
-                hint={guideHintFor("documentRef")}
-              />{" "}
+                highlighted={isHighlighted("documentRef")}
+                hint={hintFor("documentRef")}
+              />
+              </div>
+              <div data-guide="cellType">
               <Select
                 label="DCR Compliance?"
                 required
                 value={state.cellType}
                 onChange={(v: any) => setState((s) => ({ ...s, cellType: v }))}
                 options={["DCR", "NDCR"]}
-                highlighted={isGuided("cellType")}
-                hint={guideHintFor("cellType")}
+                highlighted={isHighlighted("cellType")}
+                hint={hintFor("cellType")}
+                onAdvance={advanceGuidedStep}
               />
+              </div>
+              <div data-guide="wattageBinning">
               <WattageDistTable
                 rows={wattBins}
                 onChange={setWattBins}
-                highlighted={isGuided("wattageBinning")}
-                hint={guideHintFor("wattageBinning")}
+                highlighted={isHighlighted("wattageBinning")}
+                hint={hintFor("wattageBinning")}
+                onAdvance={advanceGuidedStep}
               />
+              </div>
+              <div data-guide="rfqOrderQtyMW">
               <IntField
                 label="RFQ Order Quantity (MW)"
                 required
                 value={state.rfqOrderQtyMW}
                 onChange={(v) => setState((s) => ({ ...s, rfqOrderQtyMW: v }))}
                 placeholder="e.g., 20"
-                highlighted={isGuided("rfqOrderQtyMW")}
-                hint={guideHintFor("rfqOrderQtyMW")}
+                highlighted={isHighlighted("rfqOrderQtyMW")}
+                hint={hintFor("rfqOrderQtyMW")}
+                onAdvance={advanceGuidedStep}
               />
+              </div>
+              <div data-guide="premierBiddedOrderQtyMW">
               <IntField
                 label="Premier Bidded Actual Order Quantity in MW"
                 value={state.premierBiddedOrderQtyMW}
@@ -2142,9 +1898,12 @@ const SalesRequestModal: React.FC<{
                   setState((s) => ({ ...s, premierBiddedOrderQtyMW: v }))
                 }
                 placeholder="optional"
-                highlighted={isGuided("premierBiddedOrderQtyMW")}
-                hint={guideHintFor("premierBiddedOrderQtyMW")}
+                highlighted={isHighlighted("premierBiddedOrderQtyMW")}
+                hint={hintFor("premierBiddedOrderQtyMW")}
+                onAdvance={advanceGuidedStep}
               />
+              </div>
+              <div data-guide="deliveryTimeline">
               <DateRange
                 label="Delivery Timeline"
                 start={state.deliveryStartDate}
@@ -2156,9 +1915,12 @@ const SalesRequestModal: React.FC<{
                     deliveryEndDate: end,
                   }))
                 }
-                highlighted={isGuided("deliveryTimeline")}
-                hint={guideHintFor("deliveryTimeline")}
+                highlighted={isHighlighted("deliveryTimeline")}
+                hint={hintFor("deliveryTimeline")}
+                onAdvance={advanceGuidedStep}
               />
+              </div>
+              <div data-guide="projectLocation">
               <Text
                 label="Project Location"
                 required
@@ -2166,44 +1928,48 @@ const SalesRequestModal: React.FC<{
                 onChange={(v) =>
                   setState((s) => ({ ...s, projectLocation: v }))
                 }
-                highlighted={isGuided("projectLocation")}
-                hint={guideHintFor("projectLocation")}
+                highlighted={isHighlighted("projectLocation")}
+                hint={hintFor("projectLocation")}
+                onAdvance={advanceGuidedStep}
               />
-              {/* Right column */}
+              </div>
+              <div data-guide="qapType">
               <Select
                 label="QAP From"
                 required
                 value={state.qapType}
                 onChange={(v: any) => setState((s) => ({ ...s, qapType: v }))}
                 options={["Customer", "Premier Energies"]}
-                highlighted={isGuided("qapType")}
-                hint={guideHintFor("qapType")}
+                highlighted={isHighlighted("qapType")}
+                hint={hintFor("qapType")}
+                onAdvance={advanceGuidedStep}
               />
               {state.qapType === "Customer" && (
                 <File
                   label="QAP From Attachment"
                   onChange={setQapTypeFile}
-                  highlighted={isGuided("qapAttachment")}
-                  hint={guideHintFor("qapAttachment")}
                 />
               )}
+              </div>
+              <div data-guide="bomFrom">
               <Select
                 label="BOM From"
                 required
                 value={state.bomFrom}
                 onChange={(v: any) => setState((s) => ({ ...s, bomFrom: v }))}
                 options={["Premier Energies", "Customer"]}
-                highlighted={isGuided("bomFrom")}
-                hint={guideHintFor("bomFrom")}
+                highlighted={isHighlighted("bomFrom")}
+                hint={hintFor("bomFrom")}
+                onAdvance={advanceGuidedStep}
               />
               {state.bomFrom === "Customer" && (
                 <File
                   label="BOM From Attachment"
                   onChange={setPrimaryBomFile}
-                  highlighted={isGuided("bomAttachment")}
-                  hint={guideHintFor("bomAttachment")}
                 />
               )}
+              </div>
+              <div data-guide="inlineInspection">
               <Select
                 label="Inline Inspection"
                 required
@@ -2212,18 +1978,24 @@ const SalesRequestModal: React.FC<{
                   setState((s) => ({ ...s, inlineInspection: v }))
                 }
                 options={["yes", "no"]}
-                highlighted={isGuided("inlineInspection")}
-                hint={guideHintFor("inlineInspection")}
+                highlighted={isHighlighted("inlineInspection")}
+                hint={hintFor("inlineInspection")}
+                onAdvance={advanceGuidedStep}
               />
+              </div>
+              <div data-guide="pdi">
               <Select
                 label="Pre-Dispatch Inspection (PDI)"
                 required
                 value={state.pdi}
                 onChange={(v: any) => setState((s) => ({ ...s, pdi: v }))}
                 options={["yes", "no"]}
-                highlighted={isGuided("pdi")}
-                hint={guideHintFor("pdi")}
+                highlighted={isHighlighted("pdi")}
+                hint={hintFor("pdi")}
+                onAdvance={advanceGuidedStep}
               />
+              </div>
+              <div data-guide="certificationRequired">
               <Select
                 label="Certification Required?"
                 value={state.certificationRequired}
@@ -2245,9 +2017,12 @@ const SalesRequestModal: React.FC<{
                   "BIS + IEC + 3xIEC",
                   "Not Required",
                 ]}
-                highlighted={isGuided("certificationRequired")}
-                hint={guideHintFor("certificationRequired")}
+                highlighted={isHighlighted("certificationRequired")}
+                hint={hintFor("certificationRequired")}
+                onAdvance={advanceGuidedStep}
               />
+              </div>
+              <div data-guide="cellProcuredBy">
               <Select
                 label="Cell Procured By"
                 required
@@ -2260,26 +2035,35 @@ const SalesRequestModal: React.FC<{
                   "Premier Energies",
                   "Financed By Customer",
                 ]}
-                highlighted={isGuided("cellProcuredBy")}
-                hint={guideHintFor("cellProcuredBy")}
+                highlighted={isHighlighted("cellProcuredBy")}
+                hint={hintFor("cellProcuredBy")}
+                onAdvance={advanceGuidedStep}
               />
+              </div>
+              <div data-guide="agreedCTM">
               <FloatField
                 label="Agreed CTM"
                 value={state.agreedCTM}
                 onChange={(v) => setState((s) => ({ ...s, agreedCTM: v }))}
                 placeholder="e.g., 0.9925"
-                highlighted={isGuided("agreedCTM")}
-                hint={guideHintFor("agreedCTM")}
+                highlighted={isHighlighted("agreedCTM")}
+                hint={hintFor("agreedCTM")}
+                onAdvance={advanceGuidedStep}
               />
+              </div>
+              <div data-guide="factoryAuditDate">
               <DateSingle
                 label="Factory Audit Tentative Date"
                 value={state.factoryAuditTentativeDate}
                 onChange={(v) =>
                   setState((s) => ({ ...s, factoryAuditTentativeDate: v }))
                 }
-                highlighted={isGuided("factoryAuditDate")}
-                hint={guideHintFor("factoryAuditDate")}
+                highlighted={isHighlighted("factoryAuditDate")}
+                hint={hintFor("factoryAuditDate")}
+                onAdvance={advanceGuidedStep}
               />
+              </div>
+              <div data-guide="cableLengthRequired">
               <IntField
                 label="JB Cable Length (mm)"
                 required
@@ -2288,47 +2072,61 @@ const SalesRequestModal: React.FC<{
                   setState((s) => ({ ...s, cableLengthRequired: v }))
                 }
                 placeholder="in mm"
-                highlighted={isGuided("cableLengthRequired")}
-                hint={guideHintFor("cableLengthRequired")}
+                highlighted={isHighlighted("cableLengthRequired")}
+                hint={hintFor("cableLengthRequired")}
+                onAdvance={advanceGuidedStep}
               />
+              </div>
+              <div data-guide="xPitchMm">
               <IntField
                 label="X Pitch (mm)"
                 value={state.xPitchMm}
                 onChange={(v) => setState((s) => ({ ...s, xPitchMm: v }))}
                 placeholder="optional"
-                highlighted={isGuided("xPitchMm")}
-                hint={guideHintFor("xPitchMm")}
+                highlighted={isHighlighted("xPitchMm")}
+                hint={hintFor("xPitchMm")}
+                onAdvance={advanceGuidedStep}
               />
+              </div>
+              <div data-guide="trackerDetails">
               <IntField
                 label="Tracker Details (790/1400mm)"
                 value={state.trackerDetails}
                 onChange={(v) => setState((s) => ({ ...s, trackerDetails: v }))}
                 placeholder="optional"
-                highlighted={isGuided("trackerDetails")}
-                hint={guideHintFor("trackerDetails")}
+                highlighted={isHighlighted("trackerDetails")}
+                hint={hintFor("trackerDetails")}
+                onAdvance={advanceGuidedStep}
               />
+              </div>
+              <div data-guide="priority">
               <Select
                 label="Priority"
                 required
                 value={state.priority}
                 onChange={(v: any) => setState((s) => ({ ...s, priority: v }))}
                 options={["high", "low"]}
-                highlighted={isGuided("priority")}
-                hint={guideHintFor("priority")}
+                highlighted={isHighlighted("priority")}
+                hint={hintFor("priority")}
+                onAdvance={advanceGuidedStep}
               />
+              </div>
+              <div data-guide="remarks">
               <Textarea
                 label="Remarks (optional)"
                 value={state.remarks}
                 onChange={(v) => setState((s) => ({ ...s, remarks: v }))}
-                highlighted={isGuided("remarks")}
-                hint={guideHintFor("remarks")}
+                highlighted={isHighlighted("remarks")}
+                hint={hintFor("remarks")}
+                onAdvance={advanceGuidedStep}
               />
+              </div>
               {/* Multi file attachments with titles */}
               <div
-                className={`md:col-span-2 ${fieldShellClasses(
-                  isGuided("otherAttachments")
-                )}`}
+                data-guide="otherAttachments"
+                className={`md:col-span-2 ${isHighlighted("otherAttachments") ? "rounded-xl border-2 border-amber-400 bg-amber-50/70 p-3 shadow-[0_0_0_3px_rgba(251,191,36,0.18)]" : ""}`}
               >
+                {hintFor("otherAttachments") && <p className="mb-2 text-xs text-amber-900">{hintFor("otherAttachments")}</p>}
                 <div className="flex items-center justify-between mb-2">
                   <label className="font-medium">
                     Any Other Attachments (optional)
@@ -2386,19 +2184,13 @@ const SalesRequestModal: React.FC<{
                     ))}
                   </div>
                 )}
-                <FieldHint hint={guideHintFor("otherAttachments")} />
               </div>
               </div>
 
               {/* BOM section */}
-              <div className="px-4 pb-4">
-                <Card
-                  className={
-                    isGuided("bomReview")
-                      ? "border-amber-400 shadow-[0_0_0_3px_rgba(251,191,36,0.18)]"
-                      : undefined
-                  }
-                >
+              <div data-guide="bom" className={`px-4 pb-4 ${isHighlighted("bom") ? "rounded-xl border-2 border-amber-400 bg-amber-50/70 p-3 shadow-[0_0_0_3px_rgba(251,191,36,0.18)]" : ""}`}>
+                {hintFor("bom") && <p className="mb-2 text-xs text-amber-900">{hintFor("bom")}</p>}
+                <Card>
                   <CardHeader className="flex items-center justify-between">
                     <CardTitle>BOM (Bill of Materials)</CardTitle>
                     <Button
@@ -2412,11 +2204,8 @@ const SalesRequestModal: React.FC<{
                       {bomOpen ? "Collapse" : "Expand"}
                     </Button>
                   </CardHeader>
-                  {!bomOpen && <FieldHint hint={guideHintFor("bomReview")} />}
-
                   {bomOpen && (
                     <CardContent id="bom-editor" className="space-y-6">
-                      <FieldHint hint={guideHintFor("bomReview")} />
                       {/* Lock-ins & Header fields */}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {/* Module Model Number (dropdown by plant) */}
@@ -2599,61 +2388,6 @@ const SalesRequestModal: React.FC<{
                 </Button>
               </div>
             </div>
-            {guidedSteps.length > 0 ? (
-              <div className="px-4 pb-4 xl:pl-0">
-                <InteractiveTutorialCard
-                  storageKey="sales-request-tutorial"
-                  title="Sales Request Walkthrough"
-                  description="Work in the form first. Use this guide to move field-by-field, or jump to any step when you need help."
-                  steps={guideCardSteps}
-                  activeStepId={activeGuideStep?.key ?? null}
-                  onSelectStep={(stepId) =>
-                    setSelectedGuideStep(stepId as GuidedFieldKey)
-                  }
-                  enabled={tutorialMode}
-                  onEnabledChange={setTutorialMode}
-                  className="xl:sticky xl:top-24"
-                  footer={
-                    activeGuideStep ? (
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
-                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                          Current Focus
-                        </div>
-                        <div className="mt-2 text-sm text-slate-700">
-                          {activeGuideStep.hint}
-                        </div>
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                          <Badge variant="outline" className="bg-white">
-                            {activeGuideStep.required ? "Mandatory" : "Optional"}
-                          </Badge>
-                          {!activeGuideStep.required && !activeGuideStep.complete ? (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() =>
-                                setGuideStepSkipped(
-                                  activeGuideStep.key,
-                                  !skippedGuideSteps[activeGuideStep.key]
-                                )
-                              }
-                            >
-                              {skippedGuideSteps[activeGuideStep.key]
-                                ? "Revisit Step"
-                                : "Skip for now"}
-                            </Button>
-                          ) : null}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-                        All visible mandatory steps are complete. You can still open any tutorial step to review optional fields before submitting.
-                      </div>
-                    )
-                  }
-                />
-              </div>
-            ) : null}
           </div>
         ) : (
           // Preview
@@ -3513,7 +3247,8 @@ const WattageDistTable: React.FC<{
   onChange: (rows: { range: string; pct: string }[]) => void;
   highlighted?: boolean;
   hint?: string;
-}> = ({ rows, onChange, highlighted, hint }) => {
+  onAdvance?: () => void;
+}> = ({ rows, onChange, highlighted, hint, onAdvance }) => {
   const addRow = () => onChange([...rows, { range: "", pct: "" }]);
   const removeRow = (idx: number) =>
     onChange(rows.length > 1 ? rows.filter((_, i) => i !== idx) : rows);
@@ -3555,6 +3290,9 @@ const WattageDistTable: React.FC<{
                     className="w-full border rounded px-3 py-2"
                     value={r.range}
                     onChange={(e) => setCell(i, { range: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && valid) onAdvance?.();
+                    }}
                     placeholder="e.g., 540–545"
                   />
                 </td>
@@ -3568,6 +3306,9 @@ const WattageDistTable: React.FC<{
                       if (v === "" || /^([0-9]+(\.[0-9]*)?)$/.test(v)) {
                         setCell(i, { pct: v });
                       }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && valid) onAdvance?.();
                     }}
                     placeholder="e.g., 33.3"
                   />
@@ -3624,7 +3365,8 @@ const Text: React.FC<{
   readOnly?: boolean;
   highlighted?: boolean;
   hint?: string;
-}> = ({ label, value, onChange, required, readOnly, highlighted, hint }) => (
+  onAdvance?: () => void;
+}> = ({ label, value, onChange, required, readOnly, highlighted, hint, onAdvance }) => (
   <div className={fieldShellClasses(highlighted)}>
     <label className="block text-sm text-gray-700 mb-1">
       {label}
@@ -3636,6 +3378,9 @@ const Text: React.FC<{
       }`}
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onAdvance?.();
+      }}
       readOnly={!!readOnly}
     />
     <FieldHint hint={hint} />
@@ -3670,13 +3415,20 @@ const Textarea: React.FC<{
   onChange: (v: string) => void;
   highlighted?: boolean;
   hint?: string;
-}> = ({ label, value, onChange, highlighted, hint }) => (
+  onAdvance?: () => void;
+}> = ({ label, value, onChange, highlighted, hint, onAdvance }) => (
   <div className={`md:col-span-2 ${fieldShellClasses(highlighted)}`}>
     <label className="block text-sm text-gray-700 mb-1">{label}</label>
     <textarea
       className="w-full border rounded px-3 py-2 min-h-[96px]"
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          onAdvance?.();
+        }
+      }}
     />
     <FieldHint hint={hint} />
   </div>
@@ -3690,7 +3442,8 @@ const Select: React.FC<{
   required?: boolean;
   highlighted?: boolean;
   hint?: string;
-}> = ({ label, value, onChange, options, required, highlighted, hint }) => {
+  onAdvance?: () => void;
+}> = ({ label, value, onChange, options, required, highlighted, hint, onAdvance }) => {
   const opts =
     value && !options.includes(value) ? [...options, value] : options;
   return (
@@ -3702,7 +3455,14 @@ const Select: React.FC<{
       <select
         className="w-full border rounded px-3 py-2"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          const next = e.target.value;
+          onChange(next);
+          if (next) window.setTimeout(() => onAdvance?.(), 0);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && value) onAdvance?.();
+        }}
       >
         <option value="" disabled={!!required} hidden>
           select {label}
@@ -3727,7 +3487,8 @@ const IntField: React.FC<{
   placeholder?: string;
   highlighted?: boolean;
   hint?: string;
-}> = ({ label, value, onChange, required, placeholder, highlighted, hint }) => (
+  onAdvance?: () => void;
+}> = ({ label, value, onChange, required, placeholder, highlighted, hint, onAdvance }) => (
   <div className={fieldShellClasses(highlighted)}>
     <label className="block text-sm text-gray-700 mb-1">
       {label}
@@ -3742,6 +3503,9 @@ const IntField: React.FC<{
       onChange={(e) => {
         const v = e.target.value;
         if (v === "" || /^[0-9]+$/.test(v)) onChange(v);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onAdvance?.();
       }}
       placeholder={placeholder}
     />
@@ -3758,7 +3522,8 @@ const FloatField: React.FC<{
   placeholder?: string;
   highlighted?: boolean;
   hint?: string;
-}> = ({ label, value, onChange, required, placeholder, highlighted, hint }) => (
+  onAdvance?: () => void;
+}> = ({ label, value, onChange, required, placeholder, highlighted, hint, onAdvance }) => (
   <div className={fieldShellClasses(highlighted)}>
     <label className="block text-sm text-gray-700 mb-1">
       {label}
@@ -3773,6 +3538,9 @@ const FloatField: React.FC<{
         const v = e.target.value;
         if (v === "" || /^([0-9]+(\.[0-9]*)?)$/.test(v)) onChange(v);
       }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onAdvance?.();
+      }}
       placeholder={placeholder}
     />
     <FieldHint hint={hint} />
@@ -3785,7 +3553,8 @@ const DateSingle: React.FC<{
   onChange: (v: string) => void;
   highlighted?: boolean;
   hint?: string;
-}> = ({ label, value, onChange, highlighted, hint }) => (
+  onAdvance?: () => void;
+}> = ({ label, value, onChange, highlighted, hint, onAdvance }) => (
   <div className={fieldShellClasses(highlighted)}>
     <label className="block text-sm text-gray-700 mb-1">{label}</label>
     <input
@@ -3793,6 +3562,9 @@ const DateSingle: React.FC<{
       className="w-full border rounded px-3 py-2"
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onAdvance?.();
+      }}
     />
     <FieldHint hint={hint} />
   </div>
@@ -3805,7 +3577,8 @@ const DateRange: React.FC<{
   onChange: (s: string, e: string) => void;
   highlighted?: boolean;
   hint?: string;
-}> = ({ label, start, end, onChange, highlighted, hint }) => (
+  onAdvance?: () => void;
+}> = ({ label, start, end, onChange, highlighted, hint, onAdvance }) => (
   <div className={fieldShellClasses(highlighted)}>
     <label className="block text-sm text-gray-700 mb-1">{label} *</label>
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -3814,6 +3587,9 @@ const DateRange: React.FC<{
         className="w-full border rounded px-3 py-2"
         value={start}
         onChange={(e) => onChange(e.target.value, end)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && start && end) onAdvance?.();
+        }}
       />
       <span>→</span>
       <input
@@ -3821,6 +3597,9 @@ const DateRange: React.FC<{
         className="w-full border rounded px-3 py-2"
         value={end}
         onChange={(e) => onChange(start, e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && start && end) onAdvance?.();
+        }}
       />
     </div>
     <FieldHint hint={hint} />

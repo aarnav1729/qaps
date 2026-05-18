@@ -116,6 +116,9 @@ const EnhancedViewQAPModal: React.FC<EnhancedViewQAPModalProps> = ({
       <html>
         <head>
           <title>QAP Report - ${qap.customerName}</title>
+          <link rel="icon" type="image/png" href="/l.png" />
+          <link rel="shortcut icon" type="image/png" href="/favicon.ico" />
+          <link rel="apple-touch-icon" href="/l.png" />
           <style>
             body { font-family: Arial, sans-serif; margin: 20px; }
             .header { margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px; }

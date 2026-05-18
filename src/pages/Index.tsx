@@ -4,12 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Plus, FileText, CheckCircle, Clock, AlertCircle } from "lucide-react";
 import EnhancedQAPModal from "../components/EnhancedQAPModal";
 import QAPTable from "../components/QAPTable";
-import InteractiveTutorialCard, {
-  tutorialSectionClass,
-} from "@/components/tutorial/InteractiveTutorialCard";
 import { QAPFormData } from "@/types/qap";
 import { useAuth } from "@/contexts/AuthContext";
-import { useTutorialMode } from "@/hooks/useTutorialMode";
 import { getUserAccessibleQAPs } from "@/utils/workflowUtils";
 
 interface IndexProps {
@@ -23,12 +19,6 @@ const Index: React.FC<IndexProps> = ({ qapData, onSave, onDelete }) => {
   const [isQAPModalOpen, setIsQAPModalOpen] = useState(false);
   const [selectedQAP, setSelectedQAP] = useState<QAPFormData | null>(null);
   const [nextSno, setNextSno] = useState(1);
-  const [tutorialMode, setTutorialMode] = useTutorialMode(
-    "dashboard-tutorial",
-    true
-  );
-  const [tutorialStepId, setTutorialStepId] = useState("overview");
-
   /* ──────────────────────────────────────── */
   /* helpers                                  */
   /* ──────────────────────────────────────── */
@@ -117,42 +107,15 @@ const Index: React.FC<IndexProps> = ({ qapData, onSave, onDelete }) => {
     }
   };
 
-  const tutorialSteps = [
-    {
-      id: "overview",
-      title: "Start from the dashboard",
-      description:
-        "Use this summary to understand what is waiting for you before opening any QAP.",
-      complete: stats.total > 0,
-    },
-    {
-      id: "worklist",
-      title: isRequestor ? "Manage your QAP list" : "Review your queue",
-      description: isRequestor
-        ? "Your table is the main workspace for opening, editing, and tracking QAPs."
-        : "Open a QAP from the review table to continue your assigned workflow step.",
-      complete: accessibleQAPs.length > 0,
-    },
-    {
-      id: "create",
-      title: isRequestor ? "Create a new QAP" : "Open the next QAP",
-      description: isRequestor
-        ? "Use the create button to start a fresh QAP, then follow the in-form tutorial."
-        : "Expand the table actions to open the next QAP that needs your decision.",
-      complete: isRequestor ? userQAPs.length > 0 : accessibleQAPs.length > 0,
-    },
-  ];
-  const activeTutorialStep = tutorialMode ? tutorialStepId : null;
-
   /* ──────────────────────────────────────── */
   /* render                                   */
   /* ──────────────────────────────────────── */
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div>
         <div className="min-w-0">
           {/* ─── title & subtitle ─── */}
-          <div className={`${tutorialSectionClass(activeTutorialStep === "overview")} mb-6`}>
+          <div className="mb-6">
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">
               {getDashboardTitle()}
             </h1>
@@ -164,7 +127,7 @@ const Index: React.FC<IndexProps> = ({ qapData, onSave, onDelete }) => {
           </div>
 
           {/* ─── stats cards ─── */}
-          <div className={`${tutorialSectionClass(activeTutorialStep === "overview")} grid grid-cols-2 md:grid-cols-6 gap-4 mb-8`}>
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-8">
             <Card>
               <CardContent className="p-4">
                 <div className="flex items-center space-x-2">
@@ -242,7 +205,7 @@ const Index: React.FC<IndexProps> = ({ qapData, onSave, onDelete }) => {
 
           {/* ─── create new ─── */}
           {isRequestor && (
-            <div className={`${tutorialSectionClass(activeTutorialStep === "create")} mb-6`}>
+            <div className="mb-6">
               <Button
                 onClick={handleCreateNew}
                 className="bg-blue-600 hover:bg-blue-700"
@@ -254,7 +217,7 @@ const Index: React.FC<IndexProps> = ({ qapData, onSave, onDelete }) => {
           )}
 
           {/* ─── QAP table ─── */}
-          <div className={tutorialSectionClass(activeTutorialStep === "worklist")}>
+          <div>
             <Card>
               <CardHeader>
                 <CardTitle>{isRequestor ? "Your QAPs" : "QAPs for Review"}</CardTitle>
@@ -273,18 +236,6 @@ const Index: React.FC<IndexProps> = ({ qapData, onSave, onDelete }) => {
           </div>
         </div>
 
-        <div className="xl:sticky xl:top-24 xl:self-start">
-          <InteractiveTutorialCard
-            storageKey="dashboard-tutorial"
-            title="Dashboard Tutorial"
-            description="Use the dashboard first, then move into the live QAP queue."
-            steps={tutorialSteps}
-            activeStepId={activeTutorialStep}
-            onSelectStep={setTutorialStepId}
-            enabled={tutorialMode}
-            onEnabledChange={setTutorialMode}
-          />
-        </div>
       </div>
 
       {/* ─── modal (edit / view) ─── */}

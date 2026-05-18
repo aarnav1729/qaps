@@ -28,10 +28,6 @@ import {
   matchesReviewerMatchFilter,
   ReviewerRowFilter,
 } from "@/lib/qapLevel1";
-import InteractiveTutorialCard, {
-  tutorialSectionClass,
-} from "@/components/tutorial/InteractiveTutorialCard";
-import { useTutorialMode } from "@/hooks/useTutorialMode";
 
 /* ───────────────────────────────────────────────────────────── */
 /* Local lightweight types just for rendering the BOM tab        */
@@ -212,11 +208,6 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
   /* ───────── state ───────── */
   const [searchTerm, setSearchTerm] = useState("");
   const [rowFilter, setRowFilter] = useState<ReviewerRowFilter>("all");
-  const [tutorialMode, setTutorialMode] = useTutorialMode(
-    "final-comments-tutorial",
-    true
-  );
-  const [tutorialStepId, setTutorialStepId] = useState("overview");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [comments, setComments] = useState<
     Record<string, Record<number, string>>
@@ -458,38 +449,6 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
         ] as QAPSpecification[],
       }));
   }, [qapData, user, searchTerm]);
-  const tutorialSteps = [
-    {
-      id: "overview",
-      title: "Check the final comments queue",
-      description:
-        "Start here to confirm which QAPs have returned to the requestor for the final comment stage.",
-      complete: reviewable.length > 0,
-    },
-    {
-      id: "filters",
-      title: "Filter the remaining review",
-      description:
-        "Use search and row filters to focus on the exact QAP or mismatch state you want to finish.",
-      complete: searchTerm.trim().length > 0 || rowFilter !== "all",
-    },
-    {
-      id: "worklist",
-      title: "Review the full history",
-      description:
-        "Open a QAP to inspect every earlier reviewer note, Level 1 resolution, and BOM update before writing final comments.",
-      complete: Object.keys(expanded).some((key) => expanded[key]),
-    },
-    {
-      id: "submit",
-      title: "Submit for approval",
-      description:
-        "Enter final comments for the necessary rows, attach supporting files if needed, then push the QAP to approval.",
-      complete: Object.keys(comments).length > 0,
-    },
-  ];
-  const activeTutorialStep = tutorialMode ? tutorialStepId : null;
-
   /* ───────── handlers ───────── */
   const handleCommentChange = (qapId: string, sno: number, value: string) => {
     setComments((p) => ({
@@ -550,14 +509,14 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
   /* ───────── render ───────── */
   return (
     <div className="container mx-auto px-4 py-6">
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div>
         <div className="min-w-0">
-          <div className={`${tutorialSectionClass(activeTutorialStep === "overview")} mb-4`}>
+          <div className="mb-4">
             <h1 className="text-3xl font-bold">Final Comments</h1>
           </div>
 
           {/* top bar */}
-          <div className={`${tutorialSectionClass(activeTutorialStep === "filters")} flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4`}>
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
             <div className="flex items-center gap-2">
               <Search className="w-4 h-4 text-gray-400" />
               <Input
@@ -584,11 +543,7 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
             </span>
           </div>
 
-          <div
-            className={tutorialSectionClass(
-              activeTutorialStep === "worklist" || activeTutorialStep === "submit"
-            )}
-          >
+          <div>
             {reviewable.length === 0 ? (
               <div className="text-center text-gray-500 py-20">
                 No QAPs awaiting final comments
@@ -1434,18 +1389,6 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
           </div>
         </div>
 
-        <div className="xl:sticky xl:top-24 xl:self-start">
-          <InteractiveTutorialCard
-            storageKey="final-comments-tutorial"
-            title="Final Comments Tutorial"
-            description="Filter the queue, review the full discussion, and then submit the QAP for approval."
-            steps={tutorialSteps}
-            activeStepId={activeTutorialStep}
-            onSelectStep={setTutorialStepId}
-            enabled={tutorialMode}
-            onEnabledChange={setTutorialMode}
-          />
-        </div>
       </div>
     </div>
   );

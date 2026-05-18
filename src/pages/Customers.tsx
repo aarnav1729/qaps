@@ -27,10 +27,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
-import InteractiveTutorialCard, {
-  tutorialSectionClass,
-} from "@/components/tutorial/InteractiveTutorialCard";
-import { useTutorialMode } from "@/hooks/useTutorialMode";
 import {
   Building2,
   CalendarClock,
@@ -72,12 +68,6 @@ const CustomersPage: React.FC = () => {
   >(null);
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name-asc");
-  const [tutorialMode, setTutorialMode] = useTutorialMode(
-    "customers-tutorial",
-    true
-  );
-  const [tutorialStepId, setTutorialStepId] = useState("overview");
-
   const {
     data: customers = [],
     isLoading,
@@ -186,37 +176,12 @@ const CustomersPage: React.FC = () => {
     () => customers.reduce((sum, c) => sum + (c.salesRequestCount ?? 0), 0),
     [customers]
   );
-  const tutorialSteps = [
-    {
-      id: "overview",
-      title: "Read the customer summary",
-      description:
-        "Start with the hero card to understand customer volume, recent activity, and where to create a new record.",
-      complete: customers.length > 0,
-    },
-    {
-      id: "filters",
-      title: "Filter the customer list",
-      description:
-        "Use search and sorting to narrow down the customer you want before opening sales requests.",
-      complete: query.trim().length > 0 || sortKey !== "name-asc",
-    },
-    {
-      id: "customers",
-      title: "Open a customer workspace",
-      description:
-        "Each customer card lets you jump into sales requests or maintain the customer record itself.",
-      complete: sorted.length > 0,
-    },
-  ];
-  const activeTutorialStep = tutorialMode ? tutorialStepId : null;
-
   return (
     <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div>
         <div className="min-w-0">
           {/* Page header with gradient and stats */}
-          <div className={tutorialSectionClass(activeTutorialStep === "overview")}>
+          <div>
             <div className="relative overflow-hidden rounded-2xl border bg-gradient-to-br from-emerald-600 via-emerald-500 to-teal-500 p-6 sm:p-8 shadow-lg">
               <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full bg-white/10 blur-3xl" />
               <div className="absolute -left-24 -bottom-24 h-72 w-72 rounded-full bg-black/10 blur-3xl" />
@@ -291,7 +256,7 @@ const CustomersPage: React.FC = () => {
           </div>
 
           {/* Controls */}
-          <div className={`${tutorialSectionClass(activeTutorialStep === "filters")} mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between`}>
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2 w-full sm:w-96">
               <div className="relative w-full">
                 <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -336,7 +301,7 @@ const CustomersPage: React.FC = () => {
           </div>
 
           {/* Content */}
-          <div className={tutorialSectionClass(activeTutorialStep === "customers")}>
+          <div>
             <Card className="mt-4">
               <CardHeader className="flex items-center justify-between">
                 <CardTitle className="text-base sm:text-lg">All Customers</CardTitle>
@@ -545,18 +510,6 @@ const CustomersPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="xl:sticky xl:top-24 xl:self-start">
-          <InteractiveTutorialCard
-            storageKey="customers-tutorial"
-            title="Customers Tutorial"
-            description="The customer page starts with the live list, then helps you narrow down and open the right workspace."
-            steps={tutorialSteps}
-            activeStepId={activeTutorialStep}
-            onSelectStep={setTutorialStepId}
-            enabled={tutorialMode}
-            onEnabledChange={setTutorialMode}
-          />
-        </div>
       </div>
 
       {openModal && (

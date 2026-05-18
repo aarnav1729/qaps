@@ -15,6 +15,7 @@ import {
   UserCheck,
   CheckCircle,
   Building2,
+  Bell,
   Menu,
   X,
 } from "lucide-react";
@@ -113,7 +114,6 @@ const Navigation: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { clickFx, openFx, closeFx } = useHapticsAndSound();
-
   const [mobileOpen, setMobileOpen] = useState(false);
   const firstLinkRef = useRef<HTMLAnchorElement | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -141,7 +141,6 @@ const Navigation: React.FC = () => {
           "technical-head",
           "plant-head",
           "admin",
-          "sales",
         ],
       },
       {
@@ -211,8 +210,13 @@ const Navigation: React.FC = () => {
           "technical-head",
           "plant-head",
           "admin",
-          "sales",
         ],
+      },
+      {
+        path: "/sales-analytics",
+        label: "Analytics",
+        icon: BarChart3,
+        roles: ["sales"],
       },
       {
         path: "/approvals",
@@ -225,6 +229,23 @@ const Navigation: React.FC = () => {
         label: "Admin",
         icon: Settings,
         roles: ["admin"],
+      },
+      {
+        path: "/notifications",
+        label: "Notifications",
+        icon: Bell,
+        roles: [
+          "requestor",
+          "level-1-reviewer",
+          "production",
+          "quality",
+          "technical",
+          "head",
+          "technical-head",
+          "plant-head",
+          "admin",
+          "sales",
+        ],
       },
       // Customers hub for Sales/Admin
       {
@@ -318,7 +339,7 @@ const Navigation: React.FC = () => {
 
   return (
     <nav className="bg-white shadow-sm border-b relative z-50">
-      <div className="mx-auto max-w-[1680px] px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1920px] px-4 sm:px-6 lg:px-8">
         <div className="flex flex-wrap items-center justify-between gap-3 py-3">
           <div className="min-w-0 flex items-center gap-3">
             <div className="rounded-2xl bg-slate-900 px-3 py-2 text-sm font-semibold tracking-[0.16em] text-white">
@@ -389,7 +410,7 @@ const Navigation: React.FC = () => {
         </div>
 
         <div className="hidden border-t border-gray-100 py-3 lg:block">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const active = isActive(item.path);
@@ -410,6 +431,7 @@ const Navigation: React.FC = () => {
                 </Link>
               );
             })}
+
           </div>
         </div>
       </div>

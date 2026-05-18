@@ -30,10 +30,6 @@ import {
   matchesReviewerMatchFilter,
   ReviewerRowFilter,
 } from "@/lib/qapLevel1";
-import InteractiveTutorialCard, {
-  tutorialSectionClass,
-} from "@/components/tutorial/InteractiveTutorialCard";
-import { useTutorialMode } from "@/hooks/useTutorialMode";
 
 /* ───────────────────────────────────────────────────────────── */
 /* Local lightweight types just for rendering the BOM tab        */
@@ -410,11 +406,6 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
   /* ───────── state ───────── */
   const [searchTerm, setSearchTerm] = useState("");
   const [rowFilter, setRowFilter] = useState<ReviewerRowFilter>("all");
-  const [tutorialMode, setTutorialMode] = useTutorialMode(
-    "level-5-approval-tutorial",
-    true
-  );
-  const [tutorialStepId, setTutorialStepId] = useState("overview");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [decision, setDecision] = useState<{
     [qapId: string]: "approve" | "reject" | null;
@@ -459,38 +450,6 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
         ] as QAPSpecification[],
       }));
   }, [qapData, plantRaw, userPlants, searchTerm]);
-  const tutorialSteps = [
-    {
-      id: "overview",
-      title: "Check the approval queue",
-      description:
-        "Start with the Level 5 approval header to see how many QAPs are ready for the final decision.",
-      complete: reviewable.length > 0,
-    },
-    {
-      id: "filters",
-      title: "Filter the approval review",
-      description:
-        "Use search and row filters to narrow the approval packet down to the QAP and mismatch state you want to inspect.",
-      complete: searchTerm.trim().length > 0 || rowFilter !== "all",
-    },
-    {
-      id: "worklist",
-      title: "Inspect the full approval packet",
-      description:
-        "Open a QAP to review all reviewer inputs, final comments, BOM updates, and supporting context before deciding.",
-      complete: Object.keys(expanded).some((key) => expanded[key]),
-    },
-    {
-      id: "decision",
-      title: "Approve or reject",
-      description:
-        "Use the decision controls inside the expanded QAP to record feedback and complete the approval.",
-      complete: Object.keys(decision).length > 0,
-    },
-  ];
-  const activeTutorialStep = tutorialMode ? tutorialStepId : null;
-
   const submitDecision = (qap: QAPFormData) => {
     const action = decision[qap.id];
     const note = feedback[qap.id]?.trim();
@@ -529,14 +488,14 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
   /* ───────── render ───────── */
   return (
     <div className="container mx-auto px-4 py-6">
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div>
         <div className="min-w-0">
-          <div className={`${tutorialSectionClass(activeTutorialStep === "overview")} mb-4`}>
+          <div className="mb-4">
             <h1 className="text-3xl font-bold">Plant Head Approval – Level 5</h1>
           </div>
 
           {/* top bar */}
-          <div className={`${tutorialSectionClass(activeTutorialStep === "filters")} flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4`}>
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
             <div className="flex items-center gap-2">
               <Search className="w-4 h-4 text-gray-400" />
               <Input
@@ -563,11 +522,7 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
             </span>
           </div>
 
-          <div
-            className={tutorialSectionClass(
-              activeTutorialStep === "worklist" || activeTutorialStep === "decision"
-            )}
-          >
+          <div>
             {reviewable.length === 0 ? (
               <div className="text-center text-gray-500 py-20">
                 No QAPs pending final approval
@@ -1501,18 +1456,6 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
           </div>
         </div>
 
-        <div className="xl:sticky xl:top-24 xl:self-start">
-          <InteractiveTutorialCard
-            storageKey="level-5-approval-tutorial"
-            title="Approval Tutorial"
-            description="Filter the queue, inspect the full approval packet, and then approve or reject from the open QAP."
-            steps={tutorialSteps}
-            activeStepId={activeTutorialStep}
-            onSelectStep={setTutorialStepId}
-            enabled={tutorialMode}
-            onEnabledChange={setTutorialMode}
-          />
-        </div>
       </div>
     </div>
   );

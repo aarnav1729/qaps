@@ -23,10 +23,6 @@ import {
   matchesReviewerMatchFilter,
   ReviewerRowFilter,
 } from "@/lib/qapLevel1";
-import InteractiveTutorialCard, {
-  tutorialSectionClass,
-} from "@/components/tutorial/InteractiveTutorialCard";
-import { useTutorialMode } from "@/hooks/useTutorialMode";
 
 /* ───────────────────────────────────────────────────────────── */
 /* Local lightweight types + helpers for rendering Sales/BOM     */
@@ -182,12 +178,6 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
   /* ───────────────────────── state ───────────────────────── */
   const [searchTerm, setSearchTerm] = useState("");
   const [rowFilter, setRowFilter] = useState<ReviewerRowFilter>("all");
-  const [tutorialMode, setTutorialMode] = useTutorialMode(
-    "level-3-review-tutorial",
-    true
-  );
-  const [tutorialStepId, setTutorialStepId] = useState("overview");
-
   const [responses, setResponses] = useState<{
     [qapId: string]: Record<number, string>;
   }>({});
@@ -231,38 +221,6 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
       ...prev,
       [qapId]: { ...(prev[qapId] || {}), [sno]: text },
     }));
-  const tutorialSteps = [
-    {
-      id: "overview",
-      title: "Check the Level 3 queue",
-      description:
-        "Start with the Level 3 dashboard header to confirm the pending workload for your role and plant.",
-      complete: reviewable.length > 0,
-    },
-    {
-      id: "filters",
-      title: "Search and filter the specs",
-      description:
-        "Use search plus the row filter to focus on the exact QAP or mismatch state you want to work on.",
-      complete: searchTerm.trim().length > 0 || rowFilter !== "all",
-    },
-    {
-      id: "worklist",
-      title: "Review the expanded QAP",
-      description:
-        "Expand a QAP to inspect prior Level 2 comments, the latest spec values, BOM, and any edited rows.",
-      complete: Object.keys(expanded).some((key) => expanded[key]),
-    },
-    {
-      id: "submit",
-      title: "Submit your Level 3 response",
-      description:
-        "Write your comments in the expanded review table, then submit from the action area at the bottom of the QAP.",
-      complete: Object.keys(responses).length > 0,
-    },
-  ];
-  const activeTutorialStep = tutorialMode ? tutorialStepId : null;
-
   const getTimeRemaining = (submittedAt?: string) => {
     if (!submittedAt) return "Unknown";
     const elapsed = Date.now() - new Date(submittedAt).getTime();
@@ -511,9 +469,9 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
   /* ───────────────────────── render ───────────────────────── */
   return (
     <div className="container mx-auto px-4 py-6">
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div>
         <div className="min-w-0">
-          <div className={`${tutorialSectionClass(activeTutorialStep === "overview")} mb-4`}>
+          <div className="mb-4">
             <h1 className="text-3xl font-bold">
               Level 3 Review –{" "}
               {user?.role
@@ -523,7 +481,7 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
           </div>
 
           {/* top bar */}
-          <div className={`${tutorialSectionClass(activeTutorialStep === "filters")} flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4`}>
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">
             <div className="flex items-center gap-2">
               <Input
                 placeholder="Search QAPs…"
@@ -549,11 +507,7 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
             </span>
           </div>
 
-          <div
-            className={tutorialSectionClass(
-              activeTutorialStep === "worklist" || activeTutorialStep === "submit"
-            )}
-          >
+          <div>
             {reviewable.length === 0 ? (
               <div className="text-center text-gray-500 py-20">No QAPs to review</div>
             ) : (
@@ -1296,18 +1250,6 @@ const Level3ReviewPage: React.FC<Level3ReviewPageProps> = ({
           </div>
         </div>
 
-        <div className="xl:sticky xl:top-24 xl:self-start">
-          <InteractiveTutorialCard
-            storageKey="level-3-review-tutorial"
-            title="Level 3 Tutorial"
-            description="Search the queue, inspect prior comments, and then submit your Level 3 response from the open QAP."
-            steps={tutorialSteps}
-            activeStepId={activeTutorialStep}
-            onSelectStep={setTutorialStepId}
-            enabled={tutorialMode}
-            onEnabledChange={setTutorialMode}
-          />
-        </div>
       </div>
     </div>
   );
