@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { QAPFormData, QAPSpecification } from "@/types/qap";
 import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/components/ui/use-toast";
 import { isEdited } from "@/lib/edited";
 import {
   getLevel1OutcomeText,
@@ -204,6 +205,7 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
   onSubmitFinalComments,
 }) => {
   const { user } = useAuth();
+  const { toast } = useToast();
 
   /* ───────── state ───────── */
   const [searchTerm, setSearchTerm] = useState("");
@@ -459,7 +461,11 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
 
   const handleFileChange = (qapId: string, file: File | null) => {
     if (file && file.size > 10 * 1024 * 1024) {
-      alert("File size must be < 10 MB");
+      toast({
+        variant: "destructive",
+        title: "File too large",
+        description: "Attachments must be smaller than 10 MB.",
+      });
       return;
     }
     setAttachments((p) => ({ ...p, [qapId]: file }));
@@ -477,7 +483,11 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
     if (!qap) return;
     const unmatched = qap.allSpecs.filter((s) => s.match === "no");
     if (!readyToSubmit(qapId, unmatched)) {
-      alert("Please enter comments for every unmatched item.");
+      toast({
+        variant: "destructive",
+        title: "Comments required",
+        description: "Please enter comments for every unmatched item.",
+      });
       return;
     }
 
@@ -499,8 +509,16 @@ const FinalCommentsPage: React.FC<FinalCommentsPageProps> = ({
       setExpanded((p) => ({ ...p, [qapId]: false }));
       setComments((p) => ({ ...p, [qapId]: {} }));
       setAttachments((p) => ({ ...p, [qapId]: null }));
+      toast({
+        title: "Final comments submitted",
+        description: "Your responses have been saved.",
+      });
     } catch (e: any) {
-      alert(e?.message || "Failed to submit comments");
+      toast({
+        variant: "destructive",
+        title: "Submit failed",
+        description: e?.message || "Failed to submit comments.",
+      });
     } finally {
       setSubmitting((p) => ({ ...p, [qapId]: false }));
     }

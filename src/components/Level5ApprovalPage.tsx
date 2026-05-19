@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { QAPFormData, QAPSpecification } from "@/types/qap";
+import { useToast } from "@/components/ui/use-toast";
 
 import ExtraAdditions from "@/components/ExtraAdditions";
 import { isEdited } from "@/lib/edited";
@@ -402,6 +403,7 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
   onReject,
 }) => {
   const { user } = useAuth();
+  const { toast } = useToast();
 
   /* ───────── state ───────── */
   const [searchTerm, setSearchTerm] = useState("");
@@ -474,7 +476,11 @@ const Level5ApprovalPage: React.FC<Level5ApprovalPageProps> = ({
       onApprove(qap.id, note || undefined);
     } else {
       if (!note) {
-        alert("Please provide reason for rejection.");
+        toast({
+          variant: "destructive",
+          title: "Rejection reason required",
+          description: "Please provide a reason before rejecting this QAP.",
+        });
         return;
       }
       onReject(qap.id, note);

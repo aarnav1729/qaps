@@ -4,6 +4,7 @@ import {
   shouldCaptureAdditions,
   canEditAdditions,
 } from "@/utils/workflowUtils";
+import { useToast } from "@/components/ui/use-toast";
 
 type Props = {
   qap: QAPFormData;
@@ -13,9 +14,8 @@ type Props = {
 };
 
 export default function ExtraAdditions({ qap, level, user, onSaved }: Props) {
+  const { toast } = useToast();
   const visible = shouldCaptureAdditions(qap.plant, level);
-  if (!visible) return null;
-
   const lr = (qap.levelResponses as any)?.[level] || {};
   // flatten per-role entries to display
   const entries = Object.keys(lr).map((role) => ({
@@ -30,6 +30,8 @@ export default function ExtraAdditions({ qap, level, user, onSaved }: Props) {
   const myPrev = lr?.[myKey]?.comments?.extraAdditions ?? "";
   const [text, setText] = useState<string>(myPrev);
 
+  if (!visible) return null;
+
   const submit = async () => {
     const res = await fetch(`/api/qaps/${qap.id}/responses`, {
       method: "POST",
@@ -42,9 +44,17 @@ export default function ExtraAdditions({ qap, level, user, onSaved }: Props) {
     });
     if (!res.ok) {
       const msg = await res.text();
-      alert(`Save failed: ${msg}`);
+      toast({
+        variant: "destructive",
+        title: "Save failed",
+        description: msg,
+      });
       return;
     }
+    toast({
+      title: "Notes saved",
+      description: `Level ${level} additions were updated.`,
+    });
     onSaved?.();
   };
 

@@ -4773,20 +4773,90 @@ app.put(
   }
 );
 
-// DELETE /api/customers/:id  (does NOT delete SalesRequests)
+// DELETE /api/customers/:id
+// Also deletes SalesRequests matched by customer name and any QAPs linked to them.
 app.delete(
   "/api/customers/:id",
   [authenticateToken, vParam("id").isUUID(), handleValidation],
   async (req, res) => {
+    const tx = new sql.Transaction(mssqlPool);
     try {
       const { id } = req.params;
-      const r = await mssqlPool
-        .request()
+
+      await tx.begin();
+      const result = await new sql.Request(tx)
         .input("id", sql.UniqueIdentifier, id)
-        .query(`DELETE FROM Customers WHERE id=@id`);
-      // API from Customers.tsx expects 204 on success
-      return res.status(204).send("");
+        .query(`
+          DECLARE @customerName NVARCHAR(200);
+          SELECT @customerName = name FROM Customers WHERE id=@id;
+
+          IF @customerName IS NULL
+          BEGIN
+            SELECT
+              CAST(0 AS bit) AS found,
+              CAST(0 AS int) AS salesRequestsDeleted,
+              CAST(0 AS int) AS qapsDeleted;
+            RETURN;
+          END;
+
+          DECLARE @salesRequestsToDelete TABLE (id UNIQUEIDENTIFIER PRIMARY KEY);
+          DECLARE @qapsToDelete TABLE (id UNIQUEIDENTIFIER PRIMARY KEY);
+
+          INSERT INTO @salesRequestsToDelete (id)
+          SELECT id
+          FROM SalesRequests
+          WHERE LTRIM(RTRIM(LOWER(customerName))) =
+                LTRIM(RTRIM(LOWER(@customerName)));
+
+          INSERT INTO @qapsToDelete (id)
+          SELECT id
+          FROM QAPs
+          WHERE salesRequestId IN (SELECT id FROM @salesRequestsToDelete);
+
+          DELETE FROM MQPSpecs
+          WHERE qapId IN (SELECT id FROM @qapsToDelete);
+
+          DELETE FROM VisualSpecs
+          WHERE qapId IN (SELECT id FROM @qapsToDelete);
+
+          DELETE FROM LevelResponses
+          WHERE qapId IN (SELECT id FROM @qapsToDelete);
+
+          DELETE FROM TimelineEntries
+          WHERE qapId IN (SELECT id FROM @qapsToDelete);
+
+          DELETE FROM QAPs
+          WHERE id IN (SELECT id FROM @qapsToDelete);
+          DECLARE @qapsDeleted INT = @@ROWCOUNT;
+
+          DELETE FROM SalesRequests
+          WHERE id IN (SELECT id FROM @salesRequestsToDelete);
+          DECLARE @salesRequestsDeleted INT = @@ROWCOUNT;
+
+          DELETE FROM Customers WHERE id=@id;
+
+          SELECT
+            CAST(1 AS bit) AS found,
+            @salesRequestsDeleted AS salesRequestsDeleted,
+            @qapsDeleted AS qapsDeleted;
+        `);
+
+      const summary = result.recordset?.[0];
+      if (!summary?.found) {
+        await tx.rollback();
+        return res.status(404).json({ message: "Customer not found" });
+      }
+
+      await tx.commit();
+      return res.json({
+        message: "Customer deleted",
+        salesRequestsDeleted: Number(summary.salesRequestsDeleted || 0),
+        qapsDeleted: Number(summary.qapsDeleted || 0),
+      });
     } catch (e) {
+      try {
+        if (tx._aborted !== true) await tx.rollback();
+      } catch {}
       console.error("DELETE /api/customers/:id error:", e);
       res.status(500).send("Server error");
     }

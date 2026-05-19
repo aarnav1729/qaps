@@ -136,6 +136,8 @@ const SpecificationBuilder: React.FC<{ mode?: BuilderMode }> = ({
     typeOfCheck: "",
   };
   const [draftSpec, setDraftSpec] = useState<Specification>(emptySpec);
+  const [specDeleteTarget, setSpecDeleteTarget] =
+    useState<Specification | null>(null);
 
   // BOM state
   const [bom, setBom] = useState<BomComponent[]>([]);
@@ -152,6 +154,8 @@ const SpecificationBuilder: React.FC<{ mode?: BuilderMode }> = ({
     options: [{ model: "", subVendor: "", spec: "" }],
   };
   const [draftBom, setDraftBom] = useState<BomComponent>(emptyBom);
+  const [bomDeleteTarget, setBomDeleteTarget] =
+    useState<BomComponent | null>(null);
   const [bomSearch, setBomSearch] = useState("");
   const [bomSort, setBomSort] = useState<
     "name-asc" | "name-desc" | "opts-asc" | "opts-desc"
@@ -271,10 +275,10 @@ const SpecificationBuilder: React.FC<{ mode?: BuilderMode }> = ({
   };
 
   const deleteSpec = async (id: string) => {
-    if (!confirm("Delete this specification?")) return;
     try {
       await api(`/api/specs/${id}`, { method: "DELETE" });
       setSpecs((prev) => prev.filter((s) => s.id !== id));
+      setSpecDeleteTarget(null);
       toast({ title: "Deleted", description: "Specification removed." });
     } catch (e: any) {
       toast({
@@ -386,10 +390,10 @@ const SpecificationBuilder: React.FC<{ mode?: BuilderMode }> = ({
   };
 
   const deleteBom = async (id: string) => {
-    if (!confirm("Delete this BOM component?")) return;
     try {
       await api(`/api/bom-components/${id}`, { method: "DELETE" });
       setBom((prev) => prev.filter((b) => b.id !== id));
+      setBomDeleteTarget(null);
       toast({ title: "Deleted", description: "BOM component removed." });
     } catch (e: any) {
       toast({
@@ -709,7 +713,7 @@ const SpecificationBuilder: React.FC<{ mode?: BuilderMode }> = ({
                           <Button
                             variant="destructive"
                             size="icon"
-                            onClick={() => deleteSpec(s.id)}
+                            onClick={() => setSpecDeleteTarget(s)}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -837,7 +841,7 @@ const SpecificationBuilder: React.FC<{ mode?: BuilderMode }> = ({
                           <Button
                             variant="destructive"
                             size="icon"
-                            onClick={() => deleteBom(b.id)}
+                            onClick={() => setBomDeleteTarget(b)}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -1119,6 +1123,65 @@ const SpecificationBuilder: React.FC<{ mode?: BuilderMode }> = ({
             <Button onClick={saveBom}>
               <Save className="h-4 w-4 mr-2" />
               {editingBom ? "Save" : "Create"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!specDeleteTarget}
+        onOpenChange={(open) => !open && setSpecDeleteTarget(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Specification</DialogTitle>
+            <DialogDescription>
+              Delete "{specDeleteTarget?.subCriteria}" from the{" "}
+              {specDeleteTarget?.criteria} master list? This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-2">
+            <Button
+              variant="outline"
+              onClick={() => setSpecDeleteTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (specDeleteTarget) deleteSpec(specDeleteTarget.id);
+              }}
+            >
+              Delete Specification
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!bomDeleteTarget}
+        onOpenChange={(open) => !open && setBomDeleteTarget(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete BOM Component</DialogTitle>
+            <DialogDescription>
+              Delete "{bomDeleteTarget?.name}" and its saved options from the
+              BOM master? This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-2">
+            <Button variant="outline" onClick={() => setBomDeleteTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (bomDeleteTarget) deleteBom(bomDeleteTarget.id);
+              }}
+            >
+              Delete Component
             </Button>
           </DialogFooter>
         </DialogContent>

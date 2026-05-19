@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/components/ui/use-toast";
 import { QAPFormData, QAPSpecification } from "@/types/qap";
 import {
   ChevronDown,
@@ -48,6 +49,7 @@ const Level1ReviewPage: React.FC<Level1ReviewPageProps> = ({
   onSubmit,
 }) => {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [rowFilter, setRowFilter] = useState<
     Exclude<ReviewerRowFilter, "edited">
@@ -195,7 +197,12 @@ const Level1ReviewPage: React.FC<Level1ReviewPageProps> = ({
       (spec) => isAgreed(spec.match) && !String(spec.customerSpecification || "").trim()
     );
     if (invalidAgreed) {
-      alert("Enter the agreed measure for every yellow item before submitting.");
+      toast({
+        variant: "destructive",
+        title: "Agreed measure required",
+        description:
+          "Enter the agreed measure for every yellow item before submitting.",
+      });
       return;
     }
     onSubmit(qap.id, draft, comments[qap.id] || {});

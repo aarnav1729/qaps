@@ -33,6 +33,7 @@ import CustomersPage from "./pages/Customers";
 import SalesAnalyticsPage from "./pages/SalesAnalyticsPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import BrandedLoadingScreen from "./components/BrandedLoadingScreen";
+import { Toaster } from "./components/ui/toaster";
 import { QAPFormData } from "./types/qap";
 
 const API = window.location.origin;
@@ -555,6 +556,7 @@ export default function App() {
       <AuthProvider>
         <Router>
           <AppContent />
+          <Toaster />
         </Router>
       </AuthProvider>
     </QueryClientProvider>

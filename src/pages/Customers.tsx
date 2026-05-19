@@ -20,6 +20,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/components/ui/use-toast";
 import {
   Tooltip,
   TooltipContent,
@@ -63,9 +64,11 @@ type SortKey =
 const CustomersPage: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [openModal, setOpenModal] = useState<
     { mode: "create" } | { mode: "edit"; initial: Customer } | null
   >(null);
+  const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name-asc");
   const {
@@ -97,6 +100,17 @@ const CustomersPage: React.FC = () => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["customers"] });
       setOpenModal(null);
+      toast({
+        title: "Customer created",
+        description: "The customer record is ready to use.",
+      });
+    },
+    onError: (err: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Create failed",
+        description: err.message || "Could not create customer.",
+      });
     },
   });
 
@@ -114,6 +128,17 @@ const CustomersPage: React.FC = () => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["customers"] });
       setOpenModal(null);
+      toast({
+        title: "Customer updated",
+        description: "The customer name has been saved.",
+      });
+    },
+    onError: (err: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Update failed",
+        description: err.message || "Could not update customer.",
+      });
     },
   });
 
@@ -128,6 +153,18 @@ const CustomersPage: React.FC = () => {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["customers"] });
+      setDeleteTarget(null);
+      toast({
+        title: "Customer deleted",
+        description: "Related sales requests and QAPs were deleted as well.",
+      });
+    },
+    onError: (err: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Delete failed",
+        description: err.message || "Could not delete customer.",
+      });
     },
   });
 
@@ -407,15 +444,7 @@ const CustomersPage: React.FC = () => {
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               className="text-red-600 focus:text-red-600"
-                              onClick={() => {
-                                if (
-                                  window.confirm(
-                                    `Delete customer "${c.name}"? This will not delete existing sales requests.`
-                                  )
-                                ) {
-                                  deleteMutation.mutate(c.id);
-                                }
-                              }}
+                              onClick={() => setDeleteTarget(c)}
                             >
                               <Trash2 className="mr-2 h-4 w-4" />
                               Delete
@@ -483,15 +512,7 @@ const CustomersPage: React.FC = () => {
                           <Button
                             variant="destructive"
                             size="sm"
-                            onClick={() => {
-                              if (
-                                window.confirm(
-                                  `Delete customer "${c.name}"? This will not delete existing sales requests.`
-                                )
-                              ) {
-                                deleteMutation.mutate(c.id);
-                              }
-                            }}
+                            onClick={() => setDeleteTarget(c)}
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
                             Delete
@@ -527,6 +548,40 @@ const CustomersPage: React.FC = () => {
           }
         />
       )}
+
+      <Dialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Customer</DialogTitle>
+            <DialogDescription>
+              Delete "{deleteTarget?.name}" from the customer list? Related
+              sales requests, QAPs, attachments, and request history will also
+              be deleted.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-4">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteTarget(null)}
+              disabled={deleteMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteMutation.isPending}
+              onClick={() => {
+                if (deleteTarget) deleteMutation.mutate(deleteTarget.id);
+              }}
+            >
+              {deleteMutation.isPending ? "Deleting..." : "Delete Customer"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
